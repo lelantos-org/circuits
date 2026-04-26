@@ -1,0 +1,24 @@
+{
+  "name": "masp-circuits",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-Asset Shielded Pool circuits (Circom 2.2.3, BN254 / Baby-Jubjub).",
+  "scripts": {
+    "test": "mocha --reporter spec --timeout 600000 -r ts-node/register 'src/test/**/*.test.ts'"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.16",
+    "@types/mocha": "^10.0.7",
+    "@types/node": "^20.14.10",
+    "chai": "^4.4.1",
+    "circom_tester": "^0.0.20",
+    "circomlibjs": "^0.1.7",
+    "mocha": "^10.7.0",
+    "snarkjs": "^0.7.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5"
+  }
+}
