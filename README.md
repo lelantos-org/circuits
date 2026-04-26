@@ -11,10 +11,7 @@ src/
   2x2.circom            # top-level circuit (2-in / 2-out)
   lib/                  # primitives (notes, merkle, asset gen, value commit, balance, spent, output)
   test/                 # circom_tester + ts test suite
-scripts/
-  compile.sh            # circom -> r1cs + wasm + sym
-  setup.sh              # groth16 phase-2 (prototype, single contributor)
-  prove.sh              # witness + proof + verify
+justfile                # compile / setup / prove / test recipes
 ptau/                   # phase-1 powers-of-tau (downloaded on demand)
 build/                  # compiled artifacts (gitignored)
 ```
@@ -41,8 +38,10 @@ just clean
 
 ```bash
 npm install
-npm test
+just test           # or: npm test
 ```
+
+Tests use `circom_tester` (witness + constraint check only) — no ptau or trusted setup required. CI runs `just test`.
 
 ## Public inputs
 
