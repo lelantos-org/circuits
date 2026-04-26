@@ -15,7 +15,7 @@ compile:
     echo "==> Compiling {{ROOT}}/src/2x2.circom"
     circom "{{ROOT}}/src/2x2.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
     echo "==> Constraint info"
-    snarkjs r1cs info "{{BUILD}}/2x2.r1cs"
+    npx snarkjs r1cs info "{{BUILD}}/2x2.r1cs"
 
 # Phase-2 trusted setup (single-contributor; INSECURE — prototype only).
 setup:
@@ -25,13 +25,13 @@ setup:
         curl -L "{{PTAU_URL}}" -o "{{PTAU_DIR}}/{{PTAU_FILE}}"; \
     fi
     echo "==> Phase-2 setup"
-    snarkjs groth16 setup "{{BUILD}}/2x2.r1cs" "{{PTAU_DIR}}/{{PTAU_FILE}}" "{{BUILD}}/2x2_0.zkey"
+    npx snarkjs groth16 setup "{{BUILD}}/2x2.r1cs" "{{PTAU_DIR}}/{{PTAU_FILE}}" "{{BUILD}}/2x2_0.zkey"
     echo "==> Single contribution (PROTOTYPE ONLY)"
-    snarkjs zkey contribute "{{BUILD}}/2x2_0.zkey" "{{BUILD}}/2x2_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
+    npx snarkjs zkey contribute "{{BUILD}}/2x2_0.zkey" "{{BUILD}}/2x2_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
     echo "==> Export verification key"
-    snarkjs zkey export verificationkey "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json"
+    npx snarkjs zkey export verificationkey "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json"
     echo "==> Export Solidity verifier"
-    snarkjs zkey export solidityverifier "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/Verifier.sol"
+    npx snarkjs zkey export solidityverifier "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/Verifier.sol"
     echo "==> Done. Verifier at {{BUILD}}/Verifier.sol"
 
 # Prove + verify a single witness from input.json.
@@ -40,9 +40,9 @@ prove input="":
     echo "==> Compute witness from $INPUT"; \
     node "{{BUILD}}/2x2_js/generate_witness.js" "{{BUILD}}/2x2_js/2x2.wasm" "$INPUT" "{{BUILD}}/witness.wtns"; \
     echo "==> Prove (groth16)"; \
-    snarkjs groth16 prove "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/witness.wtns" "{{BUILD}}/proof.json" "{{BUILD}}/public.json"; \
+    npx snarkjs groth16 prove "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/witness.wtns" "{{BUILD}}/proof.json" "{{BUILD}}/public.json"; \
     echo "==> Verify"; \
-    snarkjs groth16 verify "{{BUILD}}/verification_key.json" "{{BUILD}}/public.json" "{{BUILD}}/proof.json"
+    npx snarkjs groth16 verify "{{BUILD}}/verification_key.json" "{{BUILD}}/public.json" "{{BUILD}}/proof.json"
 
 all: compile setup prove
 
