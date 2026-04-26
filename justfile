@@ -12,8 +12,8 @@ default:
 # Compile 2x2.circom -> r1cs + wasm + sym, print constraint count.
 compile:
     mkdir -p "{{BUILD}}"
-    echo "==> Compiling {{ROOT}}/circuits/2x2.circom"
-    circom "{{ROOT}}/circuits/2x2.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
+    echo "==> Compiling {{ROOT}}/src/2x2.circom"
+    circom "{{ROOT}}/src/2x2.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
     echo "==> Constraint info"
     snarkjs r1cs info "{{BUILD}}/2x2.r1cs"
 
