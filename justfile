@@ -50,5 +50,9 @@ all: compile setup prove
 test:
     npm test
 
+# Generate asset_registry.json (HashToAssetGen for ids 1..3). Override OUT to redirect.
+gen-asset-registry OUT=(ROOT / "../contracts/test/fixtures/asset_registry.json"):
+    ASSET_REGISTRY_OUT="{{OUT}}" npx ts-node "{{ROOT}}/src/scripts/gen_asset_registry.ts"
+
 clean:
     rm -rf "{{BUILD}}"
