@@ -2,3 +2,5 @@ ptau
 .claude
 node_modules
 build
+bench/results.json
+bench/public/input.json

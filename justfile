@@ -54,5 +54,19 @@ test:
 gen-asset-registry OUT=(ROOT / "../contracts/test/fixtures/asset_registry.json"):
     ASSET_REGISTRY_OUT="{{OUT}}" npx ts-node "{{ROOT}}/src/scripts/gen_asset_registry.ts"
 
+# Generate proof_deposit.json fixture (Groth16 deposit proof for MASP.t.sol).
+# Requires `compile` + `setup` to have produced build/2x2_js/2x2.wasm and
+# build/2x2_final.zkey. Override OUT to redirect.
+gen-proof-deposit OUT=(ROOT / "../contracts/test/fixtures/proof_deposit.json"):
+    PROOF_DEPOSIT_OUT="{{OUT}}" npx ts-node "{{ROOT}}/src/scripts/gen_proof_deposit.ts"
+
+# Build canonical witness for the LAN benchmark UI (bench/public/input.json).
+bench-prepare:
+    npx ts-node "{{ROOT}}/bench/prepare.ts"
+
+# Run LAN benchmark webserver on :8787 (override with PORT=).
+bench PORT="8787":
+    PORT={{PORT}} npx ts-node "{{ROOT}}/bench/server.ts"
+
 clean:
     rm -rf "{{BUILD}}"

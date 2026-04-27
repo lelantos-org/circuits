@@ -156,10 +156,11 @@ describe("quaternary merkle tree", function () {
         // Sanity: validates the zero-subtree precomputation in MerkleTree.
         let z: Field = 0n;
         const tree = new MerkleTree(P, DEPTH);
+        const zeros = (tree as unknown as { zeros: Field[] }).zeros;
         for (let i = 0; i < DEPTH; i++) {
-            expect(tree.zeros[i]).to.equal(z);
+            expect(zeros[i]).to.equal(z);
             z = P.hash([TAG_MERKLE, z, z, z, z]);
         }
-        expect(tree.zeros[DEPTH]).to.equal(z);
+        expect(zeros[DEPTH]).to.equal(z);
     });
 });

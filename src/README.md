@@ -31,9 +31,10 @@ in §10, enforces the following properties for every accepted transaction:
   inputs (shielded plus the transparent bucket) equals the sum of outputs.
   Cross-asset cancellation is infeasible without breaking the discrete
   log of the Pedersen-derived generators.
-- **Recipient binding.** `recipient_address` and `chain_id` are public
-  inputs cryptographically pinned by Groth16; a relayer cannot rewrite the
-  withdrawal target or replay the proof on a sibling chain.
+- **Recipient binding.** `recipient_address` and `chain_id` are bound
+  through the `PolyEval` Fiat-Shamir digest `(z, y)` checked by Groth16;
+  a relayer cannot rewrite the withdrawal target or replay the proof on
+  a sibling chain without producing a fresh proof.
 - **Indistinguishable padding.** Unused input slots produce real-looking
   Poseidon nullifiers; unused output slots are real `value=0` notes whose
   commitment is a real Poseidon hash. No `bytes32(0)` sentinel leaks the
@@ -47,7 +48,19 @@ public-bucket generator from a precomputed registry; see §10.
 
 ## 2. I/O surface
 
-Public inputs (20 field elements, in declared order):
+The verifier sees only **two** field elements — `z` (Fiat-Shamir
+challenge) and `y` (Horner evaluation). The 20 logical PIs below are
+demoted to private witnesses and bound into `(z, y)` by the
+[`PolyEval(20)`](lib/poly_eval.circom) gadget; see §2a.
+
+Verifier-visible public signals:
+
+| Signal | Kind | Purpose |
+|---|---|---|
+| `z` | public input | Fiat-Shamir challenge supplied by the contract. |
+| `y` | public output | `Σ_{k=0..19} coeffs[k] · z^k` — binds all logical PIs. |
+
+Logical "public" inputs (private witnesses, bound through `PolyEval`):
 
 | Signal | Width | Purpose |
 |---|---|---|
@@ -60,6 +73,43 @@ Public inputs (20 field elements, in declared order):
 | `in_cv[N_IN][2]`, `out_cv[N_OUT][2]` | 8 | Sapling value commitments. |
 | `recipient_address` | 1 | Withdrawal target (`uint160`). |
 | `chain_id` | 1 | Replay protection. |
+
+### 2a. SnarkCompression (PolyEval binding)
+
+The 20 logical PIs above are packed in a fixed slot order and fed into
+[`PolyEval(20)`](lib/poly_eval.circom) as Horner-form coefficients:
+
+```
+y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[19]·z^19
+```
+
+Slot layout (MUST match `contracts/src/MASP.sol::_flatten()`
+byte-for-byte; reordering is a soundness change for the contract):
+
+| Slot | Coeff | Slot | Coeff |
+|---|---|---|---|
+| 0 | `merkle_root`     | 10 | `in_cv[0][0]` |
+| 1 | `nullifier[0]`    | 11 | `in_cv[0][1]` |
+| 2 | `nullifier[1]`    | 12 | `in_cv[1][0]` |
+| 3 | `out_cm[0]`       | 13 | `in_cv[1][1]` |
+| 4 | `out_cm[1]`       | 14 | `out_cv[0][0]` |
+| 5 | `public_asset_id` | 15 | `out_cv[0][1]` |
+| 6 | `pub_asset_gen_x` | 16 | `out_cv[1][0]` |
+| 7 | `pub_asset_gen_y` | 17 | `out_cv[1][1]` |
+| 8 | `public_in`       | 18 | `recipient_address` |
+| 9 | `public_out`      | 19 | `chain_id` |
+
+Soundness: any tampering with `coeffs[k]` changes `y` for all but at
+most 19 values of `z` (Schwartz–Zippel over BN254 scalar field;
+collision probability `≤ 19 / r ≈ 2^-249` — negligible). The contract
+MUST derive `z` from a Fiat-Shamir transcript over the full 20-slot
+flattened vector after canonicalising every slot to `uint256`; sampling
+`z` independently of the slots breaks the binding.
+
+The Solidity verifier exported via `snarkjs zkey export
+solidityverifier` exposes only `IC0`, `IC1`, `IC2` and a
+`verifyProof(uint[2] _pA, uint[2][2] _pB, uint[2] _pC, uint[2] _pubSignals)`
+signature, where `_pubSignals = [z, y]`.
 
 Private inputs (per slot):
 
@@ -91,13 +141,17 @@ flowchart LR
         BAL["Per-asset point balance"]
         CM["Output commitments"]
     end
-    subgraph Pub["Public inputs"]
+    subgraph Logical["Logical PIs (private witnesses)"]
         ROOT["merkle_root"]
         NFS["nullifier[..]"]
         CMS["out_cm[..]"]
         PB["public_in / public_out / asset_id"]
         REC["recipient_address, chain_id"]
         CVS["in_cv[..], out_cv[..]"]
+    end
+    subgraph Pub["Verifier publics"]
+        Z["z (input)"]
+        Y["y (output)"]
     end
     IN --> K --> NF --> NFS
     IN --> MT --> ROOT
@@ -106,6 +160,13 @@ flowchart LR
     OUT --> CV
     CV --> BAL --> PB
     OUT --> CM --> CMS
+    ROOT --> PE["PolyEval(20)"]
+    NFS --> PE
+    CMS --> PE
+    PB --> PE
+    REC --> PE
+    CVS --> PE
+    Z --> PE --> Y
 ```
 
 [`2x2.circom`](2x2.circom) is a wiring layer: it instantiates `SpentNote`
@@ -310,6 +371,13 @@ Padding rules:
 
 The on-chain verifier wrapper MUST, before invoking the Groth16 verifier:
 
+0. **Fiat-Shamir.** Flatten the 20 logical PIs in the canonical slot
+   order (§2a), reduce each to `uint256` mod `r` (BN254 scalar prime),
+   derive `z = H(transcript) mod r` for a domain-separated hash `H`
+   over the flat vector, and compute `y = Σ coeffs[k]·z^k mod r`. Pass
+   `[z, y]` to `Verifier.verifyProof`. `z` MUST be a deterministic
+   function of every slot — sampling `z` before fixing the slots breaks
+   the PolyEval binding.
 1. `require(chainId == block.chainid)`.
 2. `require(public_in < 2**64 && public_out < 2**64)`.
 3. `require(public_asset_id < 2**64)` (or whatever the registry key range
@@ -349,10 +417,11 @@ sequenceDiagram
     participant C as Pool contract
     participant V as Groth16 Verifier
     U->>U: build witness, run prover
-    U->>R: proof + public inputs
-    R->>C: submitTx(proof, publics)
+    U->>R: proof + 20 logical PIs
+    R->>C: submitTx(proof, pubInputs)
     C->>C: chainId, ranges, registry V^pub, root, !spent[]
-    C->>V: verify(proof, publics)
+    C->>C: z = FS(flatten(pubInputs)); y = Σ coeffs·z^k
+    C->>V: verifyProof(proof, [z, y])
     V-->>C: ok
     C->>C: spent[nf] = true, insert out_cm[], pay public_out
     C-->>R: event
@@ -437,11 +506,12 @@ divergence between the multiplier and the range check.
 ## 13. Constraint budget (`Transact(10, 2, 2)`)
 
 ```
-non-linear constraints: 42,641
-linear constraints:     13,128
-total constraints:      55,769
-public inputs:          22
-private inputs:         94
+non-linear constraints: 44,003
+linear constraints:     15,205
+total constraints:      59,208
+public inputs:          1   (z)
+public outputs:         1   (y)
+private inputs:         128
 ```
 
 Approximate component breakdown:
@@ -453,10 +523,14 @@ Approximate component breakdown:
 | 2 × `ValueScalarMul` (public bucket) | ~4k |
 | `PerAssetPointBalance` point sums | ~70 |
 | Note commitments + Merkle + nullifiers | ~15k |
-| **Total** | **~56k** |
+| `PolyEval(20)` Horner chain | ~20 |
+| **Total** | **~59k** |
 
 Depth-10 figures already include the +1.1k overhead (~270 constraints per
 extra level × 2 levels × 2 input branches) over the depth-8 baseline.
+The PolyEval gadget adds 20 quadratic constraints — negligible compared
+to the savings on Solidity verifier calldata (2 vs 20 field elements)
+and IC-table size (3 vs 21 G1 points).
 
 ---
 
@@ -483,7 +557,8 @@ extra level × 2 levels × 2 input branches) over the depth-8 baseline.
 | [`lib/value_commit.circom`](lib/value_commit.circom) | `ValueScalarMul`, `MulH`, `ValueCommit`, `PointSum`, `H_BASE`. |
 | [`lib/balance.circom`](lib/balance.circom) | Range check, dummy bookkeeping, `PerAssetPointBalance`. |
 | [`lib/spent.circom`](lib/spent.circom) | `SpentNote` — per-slot key/Merkle/nullifier/range/cv binding. |
-| [`lib/output.circom`](lib/output.circom) | `OutputNote` (cm + dummy gate + range), `PinPublic`. |
+| [`lib/output.circom`](lib/output.circom) | `OutputNote` (cm + dummy gate + range), `PinPublic` (legacy; unused since SnarkCompression). |
+| [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)` — Horner-form evaluation gadget for SnarkCompression. |
 | [`test/helpers.ts`](test/helpers.ts) | Test witness builders, Pedersen hash-to-curve, value-commit helpers. |
 | [`test/transact.test.ts`](test/transact.test.ts) | Circuit test suite. |
 | [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library test suite. |

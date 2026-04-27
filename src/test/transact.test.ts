@@ -378,13 +378,14 @@ describe("transact_2x2", function () {
         const dA = dummyInputAt(P, DEPTH, 0n);
         const dB = dummyInputAt(P, DEPTH, 1n);
         const aliceNsk = 11n;
-        const outA: Note = { asset: ASSET, value: 1n << 64n, pk: derivePk(P, aliceNsk), rho: 9n, rcm: 10n, rcv: 11n };
+        const outA = note(0n, aliceNsk, 9n);
         const outB = note(0n, aliceNsk, 11n);
 
         const input = toCircomInput(P, J, {
-            publicAssetId: ASSET, publicIn: (1n << 64n), publicOut: 0n,
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
             inputs: [dA, dB], outputs: [outA, outB], merkleRoot: root,
         });
+        (input.out_value as string[])[0] = (1n << 64n).toString();
         let threw = false;
         try { await circuit.calculateWitness(input, true); } catch { threw = true; }
         expect(threw).to.equal(true);

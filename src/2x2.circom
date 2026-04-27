@@ -4,6 +4,7 @@ include "lib/spent.circom";
 include "lib/output.circom";
 include "lib/balance.circom";
 include "lib/value_commit.circom";
+include "lib/poly_eval.circom";
 
 // MASP Pool: N_IN-input × N_OUT-output transact circuit (v1, multi-asset).
 //
@@ -13,12 +14,6 @@ include "lib/value_commit.circom";
 //   N_OUT  — number of output-note slots. Padding outputs are real value=0
 //            notes addressed to self (no on-chain dummy sentinel).
 //
-// Public inputs (Solidity verifier sees these):
-//   merkle_root, nullifier[..], out_cm[..],
-//   public_asset_id, pub_asset_gen_x, pub_asset_gen_y,
-//   public_in, public_out,
-//   in_cv[..][2], out_cv[..][2],
-//   recipient_address, chain_id
 //
 // Multi-asset model (Sapling / Namada-faithful):
 //   - Each note carries a private asset_id. Circuit derives a Baby-Jubjub
@@ -31,6 +26,37 @@ include "lib/value_commit.circom";
 //     contract from a precomputed registry.
 //   - Distinct assets live in distinct V^t subgroups, so cross-asset balance
 //     leakage is impossible without breaking the discrete log of Pedersen.
+//
+// Public-input compression (SnarkCompression):
+//   The verifier sees only two public signals:
+//     - z : Fiat-Shamir challenge supplied by the caller (contract).
+//     - y : circuit-computed PolyEval evaluation, y = Σ_{k=0..19} c_k·z^k.
+//   The 20 logical "public" signals below (formerly the verifier's PI vector)
+//   are demoted to private witnesses; PolyEval binds all 20 to (z, y) so any
+//   contract-side tamper changes y for almost every z (Schwartz–Zippel).
+//
+//   Coefficient slot layout (MUST match contracts/src/MASP.sol::_flatten):
+//     [ 0] merkle_root
+//     [ 1] nullifier[0]
+//     [ 2] nullifier[1]
+//     [ 3] out_cm[0]
+//     [ 4] out_cm[1]
+//     [ 5] public_asset_id
+//     [ 6] pub_asset_gen_x
+//     [ 7] pub_asset_gen_y
+//     [ 8] public_in
+//     [ 9] public_out
+//     [10] in_cv[0][0]
+//     [11] in_cv[0][1]
+//     [12] in_cv[1][0]
+//     [13] in_cv[1][1]
+//     [14] out_cv[0][0]
+//     [15] out_cv[0][1]
+//     [16] out_cv[1][0]
+//     [17] out_cv[1][1]
+//     [18] recipient_address
+//     [19] chain_id
+//   Re-ordering this list is a soundness change for the contract.
 //
 // Per-slot logic is delegated to `SpentNote` (lib/spent.circom) and
 // `OutputNote` (lib/output.circom). This file is a wiring layer only.
@@ -45,7 +71,11 @@ include "lib/value_commit.circom";
 //   - out_cm[j] always inserted into cm tree (no sentinel)
 
 template Transact(DEPTH, N_IN, N_OUT) {
-    // ===== PUBLIC =====
+    // ===== PUBLIC (verifier-visible) =====
+    signal input  z;   // Fiat-Shamir challenge (contract-supplied).
+    signal output y;   // PolyEval(20)(coeffs, z); binds the 20 logical PIs.
+
+    // ===== LOGICAL PIs — now private witnesses, bound via PolyEval below =====
     signal input merkle_root;
     signal input nullifier[N_IN];
     signal input out_cm[N_OUT];
@@ -186,33 +216,41 @@ template Transact(DEPTH, N_IN, N_OUT) {
     bal.pub_out_pt[1] <== pub_out_mul.out[1];
 
     // -------------------------------------------------------------------------
-    // Pin orphan public signals
+    // SnarkCompression: bind the 20 logical PIs to (z, y) via Horner eval.
     //
-    // public_asset_id is bound by the contract registry but otherwise has no
-    // in-circuit constraint partner; recipient_address and chain_id are
-    // similarly unconstrained here. PinPublic prevents circom from pruning
-    // them from the public-signal layout.
+    // Coefficient ordering MUST match contracts/src/MASP.sol::_flatten().
+    // PolyEval consumes every coeff, so circom will not prune any of these
+    // signals from the witness — no need for the prior PinPublic gadget.
     // -------------------------------------------------------------------------
-    component pin = PinPublic(3);
-    pin.v[0] <== public_asset_id;
-    pin.v[1] <== recipient_address;
-    pin.v[2] <== chain_id;
+    component pe = PolyEval(20);
+    pe.coeffs[ 0] <== merkle_root;
+    pe.coeffs[ 1] <== nullifier[0];
+    pe.coeffs[ 2] <== nullifier[1];
+    pe.coeffs[ 3] <== out_cm[0];
+    pe.coeffs[ 4] <== out_cm[1];
+    pe.coeffs[ 5] <== public_asset_id;
+    pe.coeffs[ 6] <== pub_asset_gen_x;
+    pe.coeffs[ 7] <== pub_asset_gen_y;
+    pe.coeffs[ 8] <== public_in;
+    pe.coeffs[ 9] <== public_out;
+    pe.coeffs[10] <== in_cv[0][0];
+    pe.coeffs[11] <== in_cv[0][1];
+    pe.coeffs[12] <== in_cv[1][0];
+    pe.coeffs[13] <== in_cv[1][1];
+    pe.coeffs[14] <== out_cv[0][0];
+    pe.coeffs[15] <== out_cv[0][1];
+    pe.coeffs[16] <== out_cv[1][0];
+    pe.coeffs[17] <== out_cv[1][1];
+    pe.coeffs[18] <== recipient_address;
+    pe.coeffs[19] <== chain_id;
+    pe.z <== z;
+    y    <== pe.y;
 }
 
+// Public signals layout (verifier IC0..IC2):
+//   IC0 = constant term, IC1 binds z, IC2 binds y.
+// y is a `signal output` of Transact and therefore implicitly public.
 component main {
-    public [
-        merkle_root,
-        nullifier,
-        out_cm,
-        public_asset_id,
-        pub_asset_gen_x,
-        pub_asset_gen_y,
-        public_in,
-        public_out,
-        in_cv,
-        out_cv,
-        recipient_address,
-        chain_id
-    ]
+    public [ z ]
 // Quaternary tree: depth 10 → 4^10 = 1,048,576 leaves (binary-equivalent depth 20).
 } = Transact(10, 2, 2);
