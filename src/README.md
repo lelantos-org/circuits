@@ -450,7 +450,7 @@ sequenceDiagram
     U->>R: proof + 22 logical PIs
     R->>C: submitTx(proof, pubInputs)
     C->>C: chainId, ranges, registry V^pub, root, !spent[]
-    C->>C: z = FS(flatten(pubInputs)); y = Σ coeffs·z^k
+    C->>C: z = FS(flatten(pubInputs)), y = Σ coeffs·z^k
     C->>V: verifyProof(proof, [z, y])
     V-->>C: ok
     C->>C: spent[nf] = true, insert out_cm[], pay public_out

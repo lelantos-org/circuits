@@ -138,7 +138,7 @@ describe("quaternary merkle tree", function () {
         // → siblings array order is [slot0, slot2, slot3]. Swapping siblings[0]
         // and siblings[2] reorders slot0 ↔ slot3, must produce a different root.
         const { pathElements, pathIndices } = tree.proof(1);
-        const swapped: Field[][] = pathElements.map(lvl => lvl.slice());
+        const swapped: Field[][] = pathElements.map((lvl: Field[]) => lvl.slice());
         [swapped[0][0], swapped[0][2]] = [swapped[0][2], swapped[0][0]];
 
         const w = await circuit.calculateWitness(buildInput(tree.leaves[1], swapped, pathIndices), true);
