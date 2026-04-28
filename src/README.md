@@ -2,11 +2,17 @@
 
 Multi-Asset Shielded Pool circuits implemented in Circom 2.2.3 over the
 BN254 scalar field, with Baby-Jubjub used for the value-commitment subgroup.
-The package exports a single Groth16-friendly entry point,
-[`Transact(DEPTH, N_IN, N_OUT)`](2x2.circom), instantiated as
-`Transact(10, 2, 2)` for the on-chain pool: a quaternary Merkle tree of
-depth 10 (`4^10 = 1,048,576` leaves) consuming up to two shielded inputs
-and producing up to two shielded outputs per proof.
+The package exports two Groth16-friendly entry points:
+
+- [`Transact(DEPTH, N_IN, N_OUT)`](2x2.circom), instantiated as
+  `Transact(10, 2, 2)` — the on-chain pool transact circuit: a quaternary
+  Merkle tree of depth 10 (`4^10 = 1,048,576` leaves) consuming up to two
+  shielded inputs and producing up to two shielded outputs per proof.
+- [`TreeUpdate(DEPTH)`](tree_update.circom), instantiated as
+  `TreeUpdate(10)` — a relayer-side proof that the canonical commitment
+  tree advances `old_root → new_root` by inserting two leaves at
+  `[start_index, start_index + 1]` over a relayer-supplied frontier. See
+  §16.
 
 The design follows the Sapling/Namada multi-asset model: each note carries
 a private `asset_id`; a per-asset Baby-Jubjub generator `V^t` is derived
@@ -49,16 +55,16 @@ public-bucket generator from a precomputed registry; see §10.
 ## 2. I/O surface
 
 The verifier sees only **two** field elements — `z` (Fiat-Shamir
-challenge) and `y` (Horner evaluation). The 20 logical PIs below are
+challenge) and `y` (Horner evaluation). The 22 logical PIs below are
 demoted to private witnesses and bound into `(z, y)` by the
-[`PolyEval(20)`](lib/poly_eval.circom) gadget; see §2a.
+[`PolyEval(22)`](lib/poly_eval.circom) gadget; see §2a.
 
 Verifier-visible public signals:
 
 | Signal | Kind | Purpose |
 |---|---|---|
 | `z` | public input | Fiat-Shamir challenge supplied by the contract. |
-| `y` | public output | `Σ_{k=0..19} coeffs[k] · z^k` — binds all logical PIs. |
+| `y` | public output | `Σ_{k=0..21} coeffs[k] · z^k` — binds all logical PIs. |
 
 Logical "public" inputs (private witnesses, bound through `PolyEval`):
 
@@ -73,14 +79,16 @@ Logical "public" inputs (private witnesses, bound through `PolyEval`):
 | `in_cv[N_IN][2]`, `out_cv[N_OUT][2]` | 8 | Sapling value commitments. |
 | `recipient_address` | 1 | Withdrawal target (`uint160`). |
 | `chain_id` | 1 | Replay protection. |
+| `payer_address` | 1 | Transparent depositor (`uint160`); zero when no deposit. Bound so the contract can settle `public_in` against the right account. |
+| `relayer_address` | 1 | Relayer payout target (`uint160`); zero for self-submitted proofs. Bound to prevent relayer substitution after proof generation. |
 
 ### 2a. SnarkCompression (PolyEval binding)
 
-The 20 logical PIs above are packed in a fixed slot order and fed into
-[`PolyEval(20)`](lib/poly_eval.circom) as Horner-form coefficients:
+The 22 logical PIs above are packed in a fixed slot order and fed into
+[`PolyEval(22)`](lib/poly_eval.circom) as Horner-form coefficients:
 
 ```
-y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[19]·z^19
+y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[21]·z^21
 ```
 
 Slot layout (MUST match `contracts/src/MASP.sol::_flatten()`
@@ -88,21 +96,22 @@ byte-for-byte; reordering is a soundness change for the contract):
 
 | Slot | Coeff | Slot | Coeff |
 |---|---|---|---|
-| 0 | `merkle_root`     | 10 | `in_cv[0][0]` |
-| 1 | `nullifier[0]`    | 11 | `in_cv[0][1]` |
-| 2 | `nullifier[1]`    | 12 | `in_cv[1][0]` |
-| 3 | `out_cm[0]`       | 13 | `in_cv[1][1]` |
-| 4 | `out_cm[1]`       | 14 | `out_cv[0][0]` |
-| 5 | `public_asset_id` | 15 | `out_cv[0][1]` |
-| 6 | `pub_asset_gen_x` | 16 | `out_cv[1][0]` |
-| 7 | `pub_asset_gen_y` | 17 | `out_cv[1][1]` |
-| 8 | `public_in`       | 18 | `recipient_address` |
-| 9 | `public_out`      | 19 | `chain_id` |
+| 0 | `merkle_root`     | 11 | `in_cv[0][1]` |
+| 1 | `nullifier[0]`    | 12 | `in_cv[1][0]` |
+| 2 | `nullifier[1]`    | 13 | `in_cv[1][1]` |
+| 3 | `out_cm[0]`       | 14 | `out_cv[0][0]` |
+| 4 | `out_cm[1]`       | 15 | `out_cv[0][1]` |
+| 5 | `public_asset_id` | 16 | `out_cv[1][0]` |
+| 6 | `pub_asset_gen_x` | 17 | `out_cv[1][1]` |
+| 7 | `pub_asset_gen_y` | 18 | `recipient_address` |
+| 8 | `public_in`       | 19 | `chain_id` |
+| 9 | `public_out`      | 20 | `payer_address` |
+| 10 | `in_cv[0][0]`    | 21 | `relayer_address` |
 
 Soundness: any tampering with `coeffs[k]` changes `y` for all but at
-most 19 values of `z` (Schwartz–Zippel over BN254 scalar field;
-collision probability `≤ 19 / r ≈ 2^-249` — negligible). The contract
-MUST derive `z` from a Fiat-Shamir transcript over the full 20-slot
+most 21 values of `z` (Schwartz–Zippel over BN254 scalar field;
+collision probability `≤ 21 / r ≈ 2^-249` — negligible). The contract
+MUST derive `z` from a Fiat-Shamir transcript over the full 22-slot
 flattened vector after canonicalising every slot to `uint256`; sampling
 `z` independently of the slots breaks the binding.
 
@@ -147,6 +156,7 @@ flowchart LR
         CMS["out_cm[..]"]
         PB["public_in / public_out / asset_id"]
         REC["recipient_address, chain_id"]
+        ADDR["payer_address, relayer_address"]
         CVS["in_cv[..], out_cv[..]"]
     end
     subgraph Pub["Verifier publics"]
@@ -160,11 +170,12 @@ flowchart LR
     OUT --> CV
     CV --> BAL --> PB
     OUT --> CM --> CMS
-    ROOT --> PE["PolyEval(20)"]
+    ROOT --> PE["PolyEval(22)"]
     NFS --> PE
     CMS --> PE
     PB --> PE
     REC --> PE
+    ADDR --> PE
     CVS --> PE
     Z --> PE --> Y
 ```
@@ -385,7 +396,7 @@ Padding rules:
 
 The on-chain verifier wrapper MUST, before invoking the Groth16 verifier:
 
-0. **Fiat-Shamir.** Flatten the 20 logical PIs in the canonical slot
+0. **Fiat-Shamir.** Flatten the 22 logical PIs in the canonical slot
    order (§2a), reduce each to `uint256` mod `r` (BN254 scalar prime),
    derive `z = H(transcript) mod r` for a domain-separated hash `H`
    over the flat vector, and compute `y = Σ coeffs[k]·z^k mod r`. Pass
@@ -405,16 +416,21 @@ The on-chain verifier wrapper MUST, before invoking the Groth16 verifier:
    computed once off-chain. A small-order point in the registry breaks
    per-asset balance.
 6. `require(nullifier[0] != nullifier[1])` (no `!= 0` exception).
-7. Type `recipient_address` as `address`; pass `uint256(uint160(addr))`.
+7. Type `recipient_address`, `payer_address`, `relayer_address` as
+   `address`; pass `uint256(uint160(addr))`. Use `address(0)` for unused
+   slots (e.g. `payer_address` on a pure withdraw, `relayer_address` on
+   a self-submitted proof).
 8. `require(merkleRoots[merkle_root])`.
 9. For each input slot: `require(!spent[nullifier[i]]); spent[nullifier[i]] = true;`.
    No sentinel skip.
 10. For each output slot: insert `out_cm[j]` into the on-chain commitment
     tree and emit the leaf event.
 11. (Optional) emit `in_cv[]` / `out_cv[]` for off-chain auditors.
-12. Move `public_in` in (deposit) and pay the full `public_out` to
-    `recipient_address` (withdraw). Relayer compensation, if any, is a
-    shielded note inside `out_cm[]` — there is no transparent fee field.
+12. Move `public_in` in (deposit) — pulled from `payer_address` — and
+    pay the full `public_out` to `recipient_address` (withdraw). Relayer
+    compensation, if any, is a shielded note inside `out_cm[]`; the bound
+    `relayer_address` is for off-chain accounting / event indexing, not
+    for on-chain transparent fee transfer.
 
 `rcv` per note is implicitly bounded to 253 bits by the in-circuit
 `Num2Bits(253)` inside `MulH`. Wallets should sample `rcv` uniformly over
@@ -431,7 +447,7 @@ sequenceDiagram
     participant C as Pool contract
     participant V as Groth16 Verifier
     U->>U: build witness, run prover
-    U->>R: proof + 20 logical PIs
+    U->>R: proof + 22 logical PIs
     R->>C: submitTx(proof, pubInputs)
     C->>C: chainId, ranges, registry V^pub, root, !spent[]
     C->>C: z = FS(flatten(pubInputs)); y = Σ coeffs·z^k
@@ -518,15 +534,16 @@ divergence between the multiplier and the range check.
 
 ---
 
-## 13. Constraint budget (`Transact(10, 2, 2)`)
+## 13. Constraint budget
+
+### `Transact(10, 2, 2)`
 
 ```
-non-linear constraints: 44,003
-linear constraints:     15,205
-total constraints:      59,208
-public inputs:          1   (z)
-public outputs:         1   (y)
-private inputs:         128
+total constraints:  59,358
+wires:              59,425
+public inputs:      1   (z)
+public outputs:     1   (y)
+private inputs:     130
 ```
 
 Approximate component breakdown:
@@ -538,14 +555,28 @@ Approximate component breakdown:
 | 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4k |
 | `PerAssetPointBalance` point sums | ~70 |
 | Note commitments + Merkle + nullifiers | ~15k |
-| `PolyEval(20)` Horner chain | ~20 |
+| `PolyEval(22)` Horner chain | ~22 |
 | **Total** | **~59k** |
 
 Depth-10 figures already include the +1.1k overhead (~270 constraints per
 extra level × 2 levels × 2 input branches) over the depth-8 baseline.
-The PolyEval gadget adds 20 quadratic constraints — negligible compared
-to the savings on Solidity verifier calldata (2 vs 20 field elements)
-and IC-table size (3 vs 21 G1 points).
+The PolyEval gadget adds 22 quadratic constraints — negligible compared
+to the savings on Solidity verifier calldata (2 vs 22 field elements)
+and IC-table size (3 vs 23 G1 points).
+
+### `TreeUpdate(10)`
+
+```
+total constraints:  34,068
+wires:              34,082
+public inputs:      1   (z)
+public outputs:     1   (y)
+private inputs:     35  (5 logical PIs + 30 frontier signals = 10 levels × 3)
+```
+
+Dominated by the 20 × `Poseidon(5)` calls (10 zero-subtree precomputes +
+10 level hashes, run twice for two inserts ≈ 30k constraints). The slot
+selectors / frontier writes add ~3k. `PolyEval(5)` is negligible.
 
 ---
 
@@ -565,6 +596,7 @@ and IC-table size (3 vs 21 G1 points).
 | File | Role |
 |---|---|
 | [`2x2.circom`](2x2.circom) | Main 2-in × 2-out transact circuit. |
+| [`tree_update.circom`](tree_update.circom) | Relayer tree-advance circuit (lazy-root model). See §16. |
 | [`lib/tags.circom`](lib/tags.circom) | Domain-separation tag constants and `2^64`. |
 | [`lib/note.circom`](lib/note.circom) | Note commitment, key derivation, nullifier. |
 | [`lib/merkle.circom`](lib/merkle.circom) | Quaternary Merkle level (Poseidon(5)), root, dummy-aware proof. |
@@ -573,7 +605,67 @@ and IC-table size (3 vs 21 G1 points).
 | [`lib/balance.circom`](lib/balance.circom) | Range check, dummy bookkeeping, `PerAssetPointBalance`. |
 | [`lib/spent.circom`](lib/spent.circom) | `SpentNote` — per-slot key/Merkle/nullifier/range/cv binding. |
 | [`lib/output.circom`](lib/output.circom) | `OutputNote` (cm + dummy gate + range), `PinPublic` (legacy; unused since SnarkCompression). |
+| [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO; used twice by `TreeUpdate`. |
 | [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)` — Horner-form evaluation gadget for SnarkCompression. |
 | [`test/helpers.ts`](test/helpers.ts) | Test witness builders, Pedersen hash-to-curve, value-commit helpers. |
-| [`test/transact.test.ts`](test/transact.test.ts) | Circuit test suite. |
+| [`test/transact.test.ts`](test/transact.test.ts) | Transact circuit test suite. |
 | [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library test suite. |
+| [`test/tree_update.test.ts`](test/tree_update.test.ts) | TreeUpdate circuit test suite. |
+| [`test/fixtures/`](test/fixtures/) | Frozen witness vectors used by the test suites. |
+
+---
+
+## 16. `TreeUpdate(DEPTH)` — relayer tree-advance proof
+
+File: [`tree_update.circom`](tree_update.circom). Uses [`lib/insert.circom`](lib/insert.circom).
+
+**Purpose.** Lets the contract commit a fresh `newRoot` after two leaves
+are inserted, *without* recomputing the tree on-chain. Pairs with each
+`MASP.transact` call: the contract carries `(transact_2x2 proof,
+tree_update proof)`, checks `oldRoot == currentRoot()` and
+`startIndex == committedCount`, then advances the on-chain root ring.
+
+**Inputs.**
+
+| Logical PI | Purpose |
+|---|---|
+| `old_root` | Anchor — contract validates against `currentRoot()`. |
+| `new_root` | Output — bound to `QuaternaryInsert(cm1).root`. |
+| `cm0`, `cm1` | The two leaves to insert (must equal `out_cm[0..1]` from the paired transact proof). |
+| `start_index` | First insertion slot. Contract validates against `committedCount`. |
+
+Private witness: `frontier_in[DEPTH][3]` — relayer-supplied per-level
+sibling triples for the current frontier.
+
+**Range bound.** `Num2Bits(2*DEPTH)` on `start_index + 1` enforces
+`start_index ≤ 4^DEPTH − 2`, leaving room for the second insert at
+`start_index + 1 ≤ 4^DEPTH − 1`. At `DEPTH = 10`, capacity = `2^20`
+leaves.
+
+**Soundness model (lazy root).** `old_root` is *not* recomputed
+in-circuit from the frontier — the chain check (`oldRoot ==
+currentRoot()`) is the anchor. A relayer feeding an inconsistent
+`(frontier_in, old_root)` still produces *some* `new_root` that the
+contract would commit, but no honest reconstruction would reproduce it
+— a useless ring entry. The relayer harms only itself; no soundness
+break for shielded transactions verifying against valid roots.
+
+**SnarkCompression.** 5 logical PIs folded into `(z, y)` via `PolyEval(5)`.
+Slot order MUST match `_compressTreeUpdatePI` in the contract:
+
+| Slot | Coeff |
+|---|---|
+| 0 | `old_root` |
+| 1 | `new_root` |
+| 2 | `cm0` |
+| 3 | `cm1` |
+| 4 | `start_index` |
+
+**`QuaternaryInsert(DEPTH)`** in [`lib/insert.circom`](lib/insert.circom)
+mirrors the on-chain `CommitmentTree._insert` semantics: per level it
+computes the four child slots from `(cur, frontier_in[level], zeros[level])`
+under a 4-way one-hot selector `(s0, s1, s2, s3)` derived from the 2-bit
+quaternary digit, hashes via `Poseidon(TAG_MERKLE, c0, c1, c2, c3)`, and
+emits `frontier_out` (slots 0..2; slot 3 needs no write because the
+parent advances). Precomputed empty-subtree roots `zeros[0..DEPTH]` are
+generated in-circuit.
