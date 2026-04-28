@@ -5,6 +5,8 @@ BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
 PTAU_FILE := "powersOfTau28_hez_final_17.ptau"
 PTAU_URL := "https://storage.googleapis.com/zkevm/ptau/" + PTAU_FILE
+CONTRACTS_VERIFIER := ROOT / ".." / "contracts" / "src" / "Verifier.sol"
+CONTRACTS_TREE_VERIFIER := ROOT / ".." / "contracts" / "src" / "TreeUpdateVerifier.sol"
 
 default:
     @just --list
@@ -46,27 +48,77 @@ prove input="":
 
 all: compile setup prove
 
+# Compile tree_update.circom -> r1cs + wasm + sym, print constraint count.
+compile-tree:
+    mkdir -p "{{BUILD}}"
+    echo "==> Compiling {{ROOT}}/src/tree_update.circom"
+    circom "{{ROOT}}/src/tree_update.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
+    echo "==> Constraint info"
+    npx snarkjs r1cs info "{{BUILD}}/tree_update.r1cs"
+
+# Phase-2 trusted setup for tree_update (single-contributor; INSECURE).
+setup-tree:
+    mkdir -p "{{PTAU_DIR}}"
+    if [ ! -f "{{PTAU_DIR}}/{{PTAU_FILE}}" ]; then \
+        echo "==> Downloading {{PTAU_FILE}}"; \
+        curl -L "{{PTAU_URL}}" -o "{{PTAU_DIR}}/{{PTAU_FILE}}"; \
+    fi
+    echo "==> Phase-2 setup (tree_update)"
+    npx snarkjs groth16 setup "{{BUILD}}/tree_update.r1cs" "{{PTAU_DIR}}/{{PTAU_FILE}}" "{{BUILD}}/tree_update_0.zkey"
+    echo "==> Single contribution (PROTOTYPE ONLY)"
+    npx snarkjs zkey contribute "{{BUILD}}/tree_update_0.zkey" "{{BUILD}}/tree_update_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
+    echo "==> Export verification key"
+    npx snarkjs zkey export verificationkey "{{BUILD}}/tree_update_final.zkey" "{{BUILD}}/tree_update_verification_key.json"
+    echo "==> Export Solidity verifier"
+    npx snarkjs zkey export solidityverifier "{{BUILD}}/tree_update_final.zkey" "{{BUILD}}/TreeUpdateVerifier.sol"
+    echo "==> Done. Verifier at {{BUILD}}/TreeUpdateVerifier.sol"
+
+# Prove + verify a tree_update witness.
+prove-tree input="":
+    INPUT="{{ if input == "" { ROOT / "circuits/test/tree_update_input.json" } else { input } }}"; \
+    echo "==> Compute witness from $INPUT"; \
+    node "{{BUILD}}/tree_update_js/generate_witness.js" "{{BUILD}}/tree_update_js/tree_update.wasm" "$INPUT" "{{BUILD}}/tree_update_witness.wtns"; \
+    echo "==> Prove (groth16)"; \
+    npx snarkjs groth16 prove "{{BUILD}}/tree_update_final.zkey" "{{BUILD}}/tree_update_witness.wtns" "{{BUILD}}/tree_update_proof.json" "{{BUILD}}/tree_update_public.json"; \
+    echo "==> Verify"; \
+    npx snarkjs groth16 verify "{{BUILD}}/tree_update_verification_key.json" "{{BUILD}}/tree_update_public.json" "{{BUILD}}/tree_update_proof.json"
+
+# Full rebuild for tree_update circuit + sync TreeUpdateVerifier.sol into contracts/src.
+rebuild-tree: compile-tree setup-tree
+    @echo "==> Patching contract name (Groth16Verifier -> TreeUpdateGroth16Verifier)"
+    @sed 's/contract Groth16Verifier/contract TreeUpdateGroth16Verifier/' "{{BUILD}}/TreeUpdateVerifier.sol" > "{{BUILD}}/TreeUpdateVerifier.patched.sol"
+    @echo "==> Syncing TreeUpdateVerifier.sol -> {{CONTRACTS_TREE_VERIFIER}}"
+    cp "{{BUILD}}/TreeUpdateVerifier.patched.sol" "{{CONTRACTS_TREE_VERIFIER}}"
+    @echo "==> rebuild-tree complete"
+    @echo "    r1cs:        {{BUILD}}/tree_update.r1cs"
+    @echo "    wasm:        {{BUILD}}/tree_update_js/tree_update.wasm"
+    @echo "    zkey:        {{BUILD}}/tree_update_final.zkey"
+    @echo "    vk:          {{BUILD}}/tree_update_verification_key.json"
+    @echo "    verifier:    {{CONTRACTS_TREE_VERIFIER}}"
+
+# Build everything: 2x2 + tree_update.
+all-tree: compile compile-tree setup setup-tree
+
+# Full rebuild after circuit edits: recompile -> trusted setup -> sync Verifier.sol
+# into contracts/src. Use after changes to 2x2.circom or any lib/*.circom; this
+# regenerates 2x2.r1cs, 2x2.wasm, 2x2_final.zkey, verification_key.json, and
+# Verifier.sol, then copies the verifier into contracts/.
+#
+# WARNING: re-runs the prototype single-contributor ceremony (INSECURE — see
+# `setup` recipe). Existing proofs become invalid after this command.
+rebuild: compile setup
+    @echo "==> Syncing Verifier.sol -> {{CONTRACTS_VERIFIER}}"
+    cp "{{BUILD}}/Verifier.sol" "{{CONTRACTS_VERIFIER}}"
+    @echo "==> rebuild complete"
+    @echo "    r1cs:        {{BUILD}}/2x2.r1cs"
+    @echo "    wasm:        {{BUILD}}/2x2_js/2x2.wasm"
+    @echo "    zkey:        {{BUILD}}/2x2_final.zkey"
+    @echo "    vk:          {{BUILD}}/verification_key.json"
+    @echo "    verifier:    {{CONTRACTS_VERIFIER}}"
+
 # Run the TypeScript test suite (mocha + circom_tester).
 test:
     npm test
-
-# Generate asset_registry.json (HashToAssetGen for ids 1..3). Override OUT to redirect.
-gen-asset-registry OUT=(ROOT / "../contracts/test/fixtures/asset_registry.json"):
-    ASSET_REGISTRY_OUT="{{OUT}}" npx ts-node "{{ROOT}}/src/scripts/gen_asset_registry.ts"
-
-# Generate proof_deposit.json fixture (Groth16 deposit proof for MASP.t.sol).
-# Requires `compile` + `setup` to have produced build/2x2_js/2x2.wasm and
-# build/2x2_final.zkey. Override OUT to redirect.
-gen-proof-deposit OUT=(ROOT / "../contracts/test/fixtures/proof_deposit.json"):
-    PROOF_DEPOSIT_OUT="{{OUT}}" npx ts-node "{{ROOT}}/src/scripts/gen_proof_deposit.ts"
-
-# Build canonical witness for the LAN benchmark UI (bench/public/input.json).
-bench-prepare:
-    npx ts-node "{{ROOT}}/bench/prepare.ts"
-
-# Run LAN benchmark webserver on :8787 (override with PORT=).
-bench PORT="8787":
-    PORT={{PORT}} npx ts-node "{{ROOT}}/bench/server.ts"
 
 clean:
     rm -rf "{{BUILD}}"

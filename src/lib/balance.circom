@@ -8,10 +8,19 @@ include "value_commit.circom";
 
 // 64-bit range check on a private value. Without this on private signals the
 // prover could balance via field-overflow tricks the verifier cannot see.
+//
+// Exposes the 64 bits LSB-first so callers can thread them straight into
+// `ValueScalarMul` / `ValueCommit` and avoid a redundant Num2Bits(64) per
+// note. Net: 2 × Num2Bits(64) collapsed to 1 per spent / output / public-
+// bucket scalar mul.
 template RangeCheck64() {
     signal input v;
+    signal output bits[64];
     component n2b = Num2Bits(64);
     n2b.in <== v;
+    for (var i = 0; i < 64; i++) {
+        bits[i] <== n2b.out[i];
+    }
 }
 
 // Dummy bookkeeping. Single chokepoint that enforces:

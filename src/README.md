@@ -196,18 +196,32 @@ hiding randomness.
 
 ---
 
-## 5. Asset generator (Pedersen hash-to-curve)
+## 5. Asset generator (domain-separated Pedersen hash-to-curve)
 
 File: [`lib/asset_gen.circom`](lib/asset_gen.circom).
 
 ```
-V^t = HashToAssetGen(asset_id) = Pedersen(Num2Bits_strict(asset_id))
+V^t = HashToAssetGen(asset_id)
+    = Pedersen( TAG_ASSET || Num2Bits_strict(asset_id) || 0² )
+```
+
+Bit layout fed to circomlib `Pedersen(264)` (LSB-first per window):
+
+```
+bits[  0.. 7]  = TAG_ASSET (= 7), one byte LSB-first
+bits[  8..261] = asset_id (254 bits; Num2Bits_strict rejects field aliases)
+bits[262..263] = 0  (zero-pad to byte boundary)
 ```
 
 `Num2Bits_strict` enforces `asset_id < p` and yields 254 LSB-first bits.
-`Pedersen` is circomlib's two-segment Edwards-curve hash on Baby-Jubjub
-(`BASE[0]` and `BASE[1]`); the `H` base used by `ValueCommit` is `BASE[2]`,
+`TAG_ASSET` (one byte) gives the hash a domain string distinct from any
+other Pedersen call sharing Baby-Jubjub. 264 bits → 2 Pedersen segments
+(`BASE[0]`, `BASE[1]`); the `H` base used by `ValueCommit` is `BASE[2]`,
 preserving generator independence.
+
+The SDK mirror in [`sdk/src/crypto/jubjub.ts`](../../sdk/src/crypto/jubjub.ts)
+passes the 33-byte buffer `[TAG_ASSET, ...asset_id_LE_32]` to
+`circomlibjs.pedersen.hash`, producing the same point byte-for-byte.
 
 Soundness rests on the fact that `V^t` is a witnessed deterministic
 function of `asset_id`; combined with `PerAssetPointBalance` this enforces
@@ -216,7 +230,7 @@ per-asset conservation without trusting any off-chain table.
 Defense in depth: real notes reject `asset_id == 0` via
 `(1 - is_dummy) · IsZero(asset_id) === 0`. The current Pedersen encoding
 does not map `0` to identity, but the explicit reject future-proofs
-against any hash-to-curve replacement that might. Cost ≈ 3.8k constraints
+against any hash-to-curve replacement that might. Cost ≈ 4.2k constraints
 per call.
 
 ---
@@ -480,15 +494,16 @@ arity 4; without an explicit tag a malicious prover could pick an
 internal-node value colliding with a leaf commitment, breaking soundness.
 Bumps Merkle hash to arity 5.
 
-### No tag for `HashToAssetGen`
+### `TAG_ASSET` for `HashToAssetGen`
 
-The multi-asset value-commitment scheme uses circomlib's `Pedersen()` to
-derive `V^t = HashToAssetGen(asset_id)`. Pedersen has its own internal
-generator separation (`BASE[0..9]`) and is used here on a 254-bit
-single-field-element input — distinct from every Poseidon site, so no
-`TAG_ASSET_GEN` is required. `H` (the value-commitment blinding base) is
-`BASE[2]`, outside the image of `HashToAssetGen` which only consumes
-`BASE[0]` and `BASE[1]` for a 254-bit input.
+`HashToAssetGen` prepends one `TAG_ASSET` byte (= 7) to the 254-bit
+`asset_id` decomposition before feeding `Pedersen(264)`. Pedersen's
+internal generator separation (`BASE[0..9]`) already isolates this hash
+from every Poseidon site, but a tag byte is cheap defense-in-depth: any
+future Pedersen call that hashes a 254-bit field element on Baby-Jubjub
+in another protocol cannot collide with an asset generator. `H` (the
+value-commitment blinding base) is `BASE[2]`, outside the image of the
+264-bit `HashToAssetGen` which consumes `BASE[0]` and `BASE[1]`.
 
 ### `POW_2_64()` → 18446744073709551616
 
@@ -518,9 +533,9 @@ Approximate component breakdown:
 
 | Component | Cost |
 |---|---|
-| 4 × `HashToAssetGen` | ~16k |
-| 4 × `ValueCommit` | ~20k |
-| 2 × `ValueScalarMul` (public bucket) | ~4k |
+| 4 × `HashToAssetGen` (Pedersen 264) | ~17k |
+| 4 × `ValueCommit` (no redundant Num2Bits) | ~20k |
+| 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4k |
 | `PerAssetPointBalance` point sums | ~70 |
 | Note commitments + Merkle + nullifiers | ~15k |
 | `PolyEval(20)` Horner chain | ~20 |

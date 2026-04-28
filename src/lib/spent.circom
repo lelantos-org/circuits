@@ -85,7 +85,8 @@ template SpentNote(DEPTH) {
     nf_h.rho <== rho;
     nf_h.nf === nullifier;
 
-    // 5. Range check on private value.
+    // 5. Range check on private value. Bits exposed and threaded into
+    //    ValueCommit below so the value scalar mul does not redo Num2Bits(64).
     component rng = RangeCheck64();
     rng.v <== value;
 
@@ -102,7 +103,9 @@ template SpentNote(DEPTH) {
     gen.asset_id <== asset_id;
 
     component vc = ValueCommit();
-    vc.value  <== value;
+    for (var i = 0; i < 64; i++) {
+        vc.bits[i] <== rng.bits[i];
+    }
     vc.gen[0] <== gen.gen[0];
     vc.gen[1] <== gen.gen[1];
     vc.rcv    <== rcv;

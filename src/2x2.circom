@@ -56,6 +56,8 @@ include "lib/poly_eval.circom";
 //     [17] out_cv[1][1]
 //     [18] recipient_address
 //     [19] chain_id
+//     [20] payer_address
+//     [21] relayer_address
 //   Re-ordering this list is a soundness change for the contract.
 //
 // Per-slot logic is delegated to `SpentNote` (lib/spent.circom) and
@@ -88,6 +90,8 @@ template Transact(DEPTH, N_IN, N_OUT) {
     signal input out_cv[N_OUT][2];
     signal input recipient_address;
     signal input chain_id;
+    signal input payer_address;
+    signal input relayer_address;
 
     // ===== PRIVATE: spent notes =====
     signal input in_asset[N_IN];
@@ -170,20 +174,31 @@ template Transact(DEPTH, N_IN, N_OUT) {
     // Prime-order subgroup membership (cofactor 8) is enforced off-chain by
     // the contract; see CIRCUITS.md "Smart-contract obligations".
     //
-    // ValueScalarMul also range-checks public_in / public_out to 64 bits via
-    // its inner Num2Bits(64) — belt-and-suspenders to the on-chain `< 2^64`.
+    // ValueScalarMul now consumes pre-decomposed bits, so an explicit
+    // RangeCheck64 is wired here for public_in / public_out — belt-and-
+    // suspenders to the on-chain `< 2^64` check.
     // -------------------------------------------------------------------------
     component pub_gen_safe = SafePoint();
     pub_gen_safe.p[0] <== pub_asset_gen_x;
     pub_gen_safe.p[1] <== pub_asset_gen_y;
 
+    component pub_in_rng = RangeCheck64();
+    pub_in_rng.v <== public_in;
+
     component pub_in_mul = ValueScalarMul();
-    pub_in_mul.value  <== public_in;
+    for (var i = 0; i < 64; i++) {
+        pub_in_mul.bits[i] <== pub_in_rng.bits[i];
+    }
     pub_in_mul.gen[0] <== pub_asset_gen_x;
     pub_in_mul.gen[1] <== pub_asset_gen_y;
 
+    component pub_out_rng = RangeCheck64();
+    pub_out_rng.v <== public_out;
+
     component pub_out_mul = ValueScalarMul();
-    pub_out_mul.value  <== public_out;
+    for (var i = 0; i < 64; i++) {
+        pub_out_mul.bits[i] <== pub_out_rng.bits[i];
+    }
     pub_out_mul.gen[0] <== pub_asset_gen_x;
     pub_out_mul.gen[1] <== pub_asset_gen_y;
 
@@ -222,7 +237,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
     // PolyEval consumes every coeff, so circom will not prune any of these
     // signals from the witness — no need for the prior PinPublic gadget.
     // -------------------------------------------------------------------------
-    component pe = PolyEval(20);
+    component pe = PolyEval(22);
     pe.coeffs[ 0] <== merkle_root;
     pe.coeffs[ 1] <== nullifier[0];
     pe.coeffs[ 2] <== nullifier[1];
@@ -243,6 +258,8 @@ template Transact(DEPTH, N_IN, N_OUT) {
     pe.coeffs[17] <== out_cv[1][1];
     pe.coeffs[18] <== recipient_address;
     pe.coeffs[19] <== chain_id;
+    pe.coeffs[20] <== payer_address;
+    pe.coeffs[21] <== relayer_address;
     pe.z <== z;
     y    <== pe.y;
 }

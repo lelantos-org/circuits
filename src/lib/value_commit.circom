@@ -16,9 +16,10 @@ include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 //   rcv (253-bit blinding scalar)
 //
 // H is a fixed Baby-Jubjub generator independent of any AssetGen output.
-// HashToAssetGen runs circomlib Pedersen on 254 bits, which compiles into
-// 2 segments and consumes Pedersen BASE[0] and BASE[1]. We pick H = BASE[2]:
-// outside the image of HashToAssetGen and therefore independent.
+// HashToAssetGen runs circomlib Pedersen on 264 bits (TAG_ASSET || asset_id
+// || zero-pad), which compiles into 2 segments and consumes Pedersen
+// BASE[0] and BASE[1]. We pick H = BASE[2]: outside the image of
+// HashToAssetGen and therefore independent.
 
 function H_BASE_X() {
     return 5802099305472655231388284418920769829666717045250560929368476121199858275951;
@@ -28,8 +29,11 @@ function H_BASE_Y() {
 }
 
 // Variable-base scalar multiplication value · gen.
-// Scalar bounded to 64 bits; caller is responsible for the range check
-// (RangeCheck64) so this template stays single-purpose.
+// Scalar consumed as pre-decomposed 64 bits LSB-first; the caller MUST run
+// `RangeCheck64` on the originating value and pipe its `bits` output here.
+// Threading the bits avoids a redundant Num2Bits(64) per scalar mul (~64
+// constraints saved per call × 6 call sites in Transact(_,2,2) ≈ ~380
+// constraints).
 //
 // EscalarMulAny handles scalar=0 → identity (0,1) and gracefully accepts the
 // identity as a base. Dummy notes (value=0) therefore contribute identity to
@@ -37,16 +41,13 @@ function H_BASE_Y() {
 //
 // Cost ≈ 2k constraints (one segment, 64 bits).
 template ValueScalarMul() {
-    signal input value;
+    signal input bits[64];
     signal input gen[2];
     signal output out[2];
 
-    component bits = Num2Bits(64);
-    bits.in <== value;
-
     component mul = EscalarMulAny(64);
     for (var i = 0; i < 64; i++) {
-        mul.e[i] <== bits.out[i];
+        mul.e[i] <== bits[i];
     }
     mul.p[0] <== gen[0];
     mul.p[1] <== gen[1];
@@ -86,14 +87,16 @@ template MulH() {
 // scalar-sum-can-be-negative trap of working with `Σrcv_in − Σrcv_out` in
 // field arithmetic).
 template ValueCommit() {
-    signal input value;
+    signal input bits[64];
     signal input gen[2];
     signal input rcv;
     signal output cv[2];
     signal output rH[2];
 
     component vt = ValueScalarMul();
-    vt.value <== value;
+    for (var i = 0; i < 64; i++) {
+        vt.bits[i] <== bits[i];
+    }
     vt.gen[0] <== gen[0];
     vt.gen[1] <== gen[1];
 

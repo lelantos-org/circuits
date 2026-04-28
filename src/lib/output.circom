@@ -42,7 +42,7 @@ template OutputNote() {
     cm_h.rcm      <== rcm;
     cm_h.cm === cm;
 
-    // 2. Range check on private value.
+    // 2. Range check on private value. Bits threaded into ValueCommit below.
     component rng = RangeCheck64();
     rng.v <== value;
 
@@ -56,7 +56,9 @@ template OutputNote() {
     gen.asset_id <== asset_id;
 
     component vc = ValueCommit();
-    vc.value  <== value;
+    for (var i = 0; i < 64; i++) {
+        vc.bits[i] <== rng.bits[i];
+    }
     vc.gen[0] <== gen.gen[0];
     vc.gen[1] <== gen.gen[1];
     vc.rcv    <== rcv;
