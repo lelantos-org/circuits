@@ -1,6 +1,6 @@
 // Helpers for building MASP test inputs that match circuits/2x2.circom.
 //
-// Crypto primitives + witness builder live in `@lelantos/sdk` so circuit
+// Crypto primitives + witness builder live in `@lelantos-org/sdk` so circuit
 // tests, the wallet, and Foundry fixture generators all see the same
 // shapes byte-for-byte. Do NOT re-implement here — that would silently
 // divert SDK from circuit and is exactly the bug this layout prevents.
@@ -17,7 +17,7 @@ import {
     MerkleTree,
     type Field,
     type Point,
-} from "../../../sdk/src/crypto/index";
+} from "@lelantos-org/sdk/crypto";
 
 export { Poseidon, Jubjub, H_BASE, deriveIvk, derivePk, derivePkFromIvk, MerkleTree };
 export type { Field, Point };
@@ -27,8 +27,9 @@ export {
     dummyOutput,
     dummyInputAt,
     type BuildOpts,
-} from "../../../sdk/src/witness";
-export type { Note, SpentNote } from "../../../sdk/src/notes";
+    type Note,
+    type SpentNote,
+} from "@lelantos-org/sdk";
 
 // Legacy names — circuit tests historically used `commit` / `nullifier`.
 // Keep them as aliases over the SDK so existing tests stay green without

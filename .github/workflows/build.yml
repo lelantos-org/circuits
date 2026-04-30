@@ -13,6 +13,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
     env:
       CIRCOM_VERSION: v2.2.3
     steps:
@@ -50,6 +53,8 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci || npm install
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compile circuit
         run: just compile

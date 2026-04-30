@@ -234,8 +234,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
     // SnarkCompression: bind the 20 logical PIs to (z, y) via Horner eval.
     //
     // Coefficient ordering MUST match contracts/src/MASP.sol::_flatten().
-    // PolyEval consumes every coeff, so circom will not prune any of these
-    // signals from the witness — no need for the prior PinPublic gadget.
     // -------------------------------------------------------------------------
     component pe = PolyEval(22);
     pe.coeffs[ 0] <== merkle_root;

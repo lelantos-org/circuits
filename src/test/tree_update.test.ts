@@ -4,7 +4,7 @@ import * as path from "path";
 import { wasm as wasmTester } from "circom_tester";
 
 import { Poseidon, MerkleTree, type Field } from "./helpers";
-import { fiatShamirZ, hornerEval } from "../../../sdk/src/snark-compression";
+import { fiatShamirZ, hornerEval } from "@lelantos-org/sdk";
 
 const DEPTH = 10;
 const ARITY = 4;

@@ -604,7 +604,7 @@ selectors / frontier writes add ~3k. `PolyEval(5)` is negligible.
 | [`lib/value_commit.circom`](lib/value_commit.circom) | `ValueScalarMul`, `MulH`, `ValueCommit`, `PointSum`, `H_BASE`. |
 | [`lib/balance.circom`](lib/balance.circom) | Range check, dummy bookkeeping, `PerAssetPointBalance`. |
 | [`lib/spent.circom`](lib/spent.circom) | `SpentNote` — per-slot key/Merkle/nullifier/range/cv binding. |
-| [`lib/output.circom`](lib/output.circom) | `OutputNote` (cm + dummy gate + range), `PinPublic` (legacy; unused since SnarkCompression). |
+| [`lib/output.circom`](lib/output.circom) | `OutputNote` (cm + dummy gate + range). |
 | [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO; used twice by `TreeUpdate`. |
 | [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)` — Horner-form evaluation gadget for SnarkCompression. |
 | [`test/helpers.ts`](test/helpers.ts) | Test witness builders, Pedersen hash-to-curve, value-commit helpers. |

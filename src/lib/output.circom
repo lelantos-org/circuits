@@ -69,15 +69,3 @@ template OutputNote() {
     rH[0] <== vc.rH[0];
     rH[1] <== vc.rH[1];
 }
-
-// Pin N public-input signals into the R1CS witness via quadratic self-square.
-// Public inputs are already pinned cryptographically by the Groth16 verifier;
-// this exists solely so circom does not prune signals that no other constraint
-// references — keeps the public-signal layout stable across compilations.
-template PinPublic(N) {
-    signal input v[N];
-    signal sq[N];
-    for (var i = 0; i < N; i++) {
-        sq[i] <== v[i] * v[i];
-    }
-}
