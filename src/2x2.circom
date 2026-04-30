@@ -30,9 +30,9 @@ include "lib/poly_eval.circom";
 // Public-input compression (SnarkCompression):
 //   The verifier sees only two public signals:
 //     - z : Fiat-Shamir challenge supplied by the caller (contract).
-//     - y : circuit-computed PolyEval evaluation, y = Σ_{k=0..19} c_k·z^k.
-//   The 20 logical "public" signals below (formerly the verifier's PI vector)
-//   are demoted to private witnesses; PolyEval binds all 20 to (z, y) so any
+//     - y : circuit-computed PolyEval evaluation, y = Σ_{k=0..21} c_k·z^k.
+//   The 22 logical "public" signals below (formerly the verifier's PI vector)
+//   are demoted to private witnesses; PolyEval binds all 22 to (z, y) so any
 //   contract-side tamper changes y for almost every z (Schwartz–Zippel).
 //
 //   Coefficient slot layout (MUST match contracts/src/MASP.sol::_flatten):
@@ -75,7 +75,7 @@ include "lib/poly_eval.circom";
 template Transact(DEPTH, N_IN, N_OUT) {
     // ===== PUBLIC (verifier-visible) =====
     signal input  z;   // Fiat-Shamir challenge (contract-supplied).
-    signal output y;   // PolyEval(20)(coeffs, z); binds the 20 logical PIs.
+    signal output y;   // PolyEval(22)(coeffs, z); binds the 22 logical PIs.
 
     // ===== LOGICAL PIs — now private witnesses, bound via PolyEval below =====
     signal input merkle_root;
