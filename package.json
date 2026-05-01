@@ -4,7 +4,8 @@
   "private": true,
   "description": "Multi-Asset Shielded Pool circuits (Circom 2.2.3, BN254 / Baby-Jubjub).",
   "scripts": {
-    "test": "mocha --reporter spec --timeout 600000 -r ts-node/register 'src/test/**/*.test.ts'"
+    "test": "FUZZ=medium mocha --reporter spec --timeout 600000 -r ts-node/register 'src/test/**/*.test.ts'",
+    "test:fuzz": "FUZZ=heavy mocha --reporter spec --timeout 1800000 -r ts-node/register 'src/test/fuzz/**/*.test.ts'"
   },
   "devDependencies": {
     "@types/chai": "^4.3.16",
@@ -13,6 +14,7 @@
     "chai": "^4.4.1",
     "circom_tester": "^0.0.20",
     "circomlibjs": "^0.1.7",
+    "fast-check": "^3.23.2",
     "mocha": "^10.7.0",
     "snarkjs": "^0.7.4",
     "ts-node": "^10.9.2",

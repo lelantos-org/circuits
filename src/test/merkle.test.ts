@@ -1,14 +1,14 @@
 import { expect } from "chai";
-import * as path from "path";
-// @ts-ignore
-import { wasm as wasmTester } from "circom_tester";
 
 import { Poseidon, MerkleTree, Field } from "./helpers";
+import { fixturePath, loadCircuit } from "./lib/circuit";
+import { merkleInputJson } from "./lib/inputs";
+import { expectWitnessFails, witnessMatchesRoot } from "./lib/expect";
 
 const TAG_MERKLE: Field = 5n;
 const ARITY = 4;
 const DEPTH = 2; // 16 leaves
-const WRAPPER = path.join(__dirname, "fixtures", "test_merkle_d2.circom");
+const WRAPPER = fixturePath("test_merkle_d2.circom");
 
 describe("quaternary merkle tree", function () {
     this.timeout(180000);
@@ -18,18 +18,8 @@ describe("quaternary merkle tree", function () {
 
     before(async () => {
         P = await Poseidon.build();
-        circuit = await wasmTester(WRAPPER, {
-            include: [path.join(__dirname, "..", "..", "node_modules")],
-        });
+        circuit = await loadCircuit(WRAPPER);
     });
-
-    function buildInput(leaf: Field, pathElements: Field[][], pathIndices: number[]) {
-        return {
-            leaf: leaf.toString(),
-            path_elements: pathElements.map(lvl => lvl.map(s => s.toString())),
-            path_indices: pathIndices.map(p => p.toString()),
-        };
-    }
 
     it("empty tree root matches manual zero-subtree fold", async () => {
         const tree = new MerkleTree(P, DEPTH);
@@ -63,11 +53,10 @@ describe("quaternary merkle tree", function () {
 
         for (let i = 0; i < 16; i++) {
             const { pathElements, pathIndices } = tree.proof(i);
-            // Sanity: pathIndices encode (i % 4, (i/4) % 4)
             expect(pathIndices[0]).to.equal(i % ARITY);
             expect(pathIndices[1]).to.equal(Math.floor(i / ARITY) % ARITY);
 
-            const w = await circuit.calculateWitness(buildInput(leaves[i], pathElements, pathIndices), true);
+            const w = await circuit.calculateWitness(merkleInputJson(leaves[i], pathElements, pathIndices), true);
             await circuit.checkConstraints(w);
             await circuit.assertOut(w, { root: expectedRoot.toString() });
         }
@@ -79,12 +68,10 @@ describe("quaternary merkle tree", function () {
         // detect any off-by-one in the slot-routing logic.
         const leaf = 42n;
         const sibs0: Field[] = [111n, 222n, 333n];
-        // Level 1 fully arbitrary — just need a deterministic value.
         const lvl1Sibs: Field[] = [1n, 2n, 3n];
         const lvl1Idx = 2;
 
         for (let pos = 0; pos < ARITY; pos++) {
-            // Reconstruct expected level-0 grouping based on `pos`.
             const group: Field[] = [];
             let s = 0;
             for (let k = 0; k < ARITY; k++) {
@@ -92,7 +79,6 @@ describe("quaternary merkle tree", function () {
                 else group.push(sibs0[s++]);
             }
             const lvl0Out = P.hash([TAG_MERKLE, group[0], group[1], group[2], group[3]]);
-            // Level 1 places lvl0Out at slot lvl1Idx
             const grp1: Field[] = [];
             let t = 0;
             for (let k = 0; k < ARITY; k++) {
@@ -102,7 +88,7 @@ describe("quaternary merkle tree", function () {
             const expectedRoot = P.hash([TAG_MERKLE, grp1[0], grp1[1], grp1[2], grp1[3]]);
 
             const w = await circuit.calculateWitness(
-                buildInput(leaf, [sibs0, lvl1Sibs], [pos, lvl1Idx]),
+                merkleInputJson(leaf, [sibs0, lvl1Sibs], [pos, lvl1Idx]),
                 true,
             );
             await circuit.assertOut(w, { root: expectedRoot.toString() });
@@ -113,10 +99,8 @@ describe("quaternary merkle tree", function () {
         const tree = new MerkleTree(P, DEPTH);
         tree.insert(7n);
         const { pathElements, pathIndices } = tree.proof(0);
-        pathIndices[0] = 4; // out of {0,1,2,3}
-        let threw = false;
-        try { await circuit.calculateWitness(buildInput(7n, pathElements, pathIndices), true); } catch { threw = true; }
-        expect(threw).to.equal(true);
+        pathIndices[0] = 4;
+        await expectWitnessFails(circuit, merkleInputJson(7n, pathElements, pathIndices));
     });
 
     it("FAILS when path_index is large garbage (e.g. 2^32)", async () => {
@@ -124,9 +108,7 @@ describe("quaternary merkle tree", function () {
         tree.insert(7n);
         const { pathElements, pathIndices } = tree.proof(0);
         pathIndices[1] = 1 << 30;
-        let threw = false;
-        try { await circuit.calculateWitness(buildInput(7n, pathElements, pathIndices), true); } catch { threw = true; }
-        expect(threw).to.equal(true);
+        await expectWitnessFails(circuit, merkleInputJson(7n, pathElements, pathIndices));
     });
 
     it("permuting siblings within a level changes the root (order matters)", async () => {
@@ -141,19 +123,11 @@ describe("quaternary merkle tree", function () {
         const swapped: Field[][] = pathElements.map((lvl: Field[]) => lvl.slice());
         [swapped[0][0], swapped[0][2]] = [swapped[0][2], swapped[0][0]];
 
-        const w = await circuit.calculateWitness(buildInput(tree.leaves[1], swapped, pathIndices), true);
-        const out: any = {};
-        try {
-            await circuit.assertOut(w, { root: expected.toString() });
-            out.equal = true;
-        } catch {
-            out.equal = false;
-        }
-        expect(out.equal).to.equal(false);
+        const w = await circuit.calculateWitness(merkleInputJson(tree.leaves[1], swapped, pathIndices), true);
+        expect(await witnessMatchesRoot(circuit, w, expected)).to.equal(false);
     });
 
     it("dummy zeros[i] cache equals iterated Poseidon(5, z,z,z,z)", async () => {
-        // Sanity: validates the zero-subtree precomputation in MerkleTree.
         let z: Field = 0n;
         const tree = new MerkleTree(P, DEPTH);
         const zeros = (tree as unknown as { zeros: Field[] }).zeros;
