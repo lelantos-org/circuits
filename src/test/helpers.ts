@@ -12,14 +12,16 @@ import {
     deriveIvk,
     derivePk,
     derivePkFromIvk,
+    deriveNk,
     buildNoteCommitment,
     buildNullifier,
+    buildNullifierFromNsk,
     MerkleTree,
     type Field,
     type Point,
 } from "@lelantos-org/sdk/crypto";
 
-export { Poseidon, Jubjub, H_BASE, deriveIvk, derivePk, derivePkFromIvk, MerkleTree };
+export { Poseidon, Jubjub, H_BASE, deriveIvk, derivePk, derivePkFromIvk, deriveNk, buildNullifier, MerkleTree };
 export type { Field, Point };
 
 export {
@@ -29,6 +31,15 @@ export {
     type BuildOpts,
     type Note,
     type SpentNote,
+    type OutputClueWitness,
+} from "@lelantos-org/sdk";
+
+export {
+    FMD_DEFAULT_GAMMA,
+    fmdGenDetectionKey,
+    fmdFlagKeyFromDetection,
+    fmdFlag,
+    BABYJUB_SUBGROUP_ORDER,
 } from "@lelantos-org/sdk";
 
 // Legacy names — circuit tests historically used `commit` / `nullifier`.
@@ -38,6 +49,6 @@ export function commit(P: Poseidon, n: { asset: Field; value: Field; pk: Field; 
     return buildNoteCommitment(P, n);
 }
 export function nullifier(P: Poseidon, nsk: Field, rho: Field): Field {
-    return buildNullifier(P, nsk, rho);
+    return buildNullifierFromNsk(P, nsk, rho);
 }
 

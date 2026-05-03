@@ -11,8 +11,14 @@ import {
     commit,
     nullifier,
     toCircomInput,
+    FMD_DEFAULT_GAMMA,
+    fmdFlag,
+    fmdFlagKeyFromDetection,
+    fmdGenDetectionKey,
+    BABYJUB_SUBGROUP_ORDER,
     type Field,
     type Note,
+    type OutputClueWitness,
     type SpentNote,
 } from "../helpers";
 
@@ -27,10 +33,37 @@ export interface TxBuildArgs {
     outputs: Note[];
     merkleRoot: Field;
     publicAssetGen?: [Field, Field];
+    /// Per-output FMD clue witnesses. When omitted, deterministic Poseidon-v2
+    /// clues are synthesized so ClueCheck constraints are satisfied.
+    outputClues?: OutputClueWitness[];
+}
+
+// Deterministic clue synth: tests don't care about clue contents, only that
+// the witness satisfies ClueCheck. Build (dk, fk) once per builder, derive
+// per-output r from a counter, and run `fmdFlag` so clue_bits[i] = 1 - bit_i
+// holds by construction.
+function makeClueGen(P: Poseidon, J: Jubjub) {
+    const dk = fmdGenDetectionKey(() => 1n, FMD_DEFAULT_GAMMA);
+    const fk = fmdFlagKeyFromDetection(J, dk);
+    let counter = 0n;
+    return (): OutputClueWitness => {
+        counter += 1n;
+        const r = (counter * 1234567n + 89n) % BABYJUB_SUBGROUP_ORDER;
+        const clue = fmdFlag(J, P, fk, r === 0n ? 1n : r);
+        // gamma=5 ⇒ clue.bits is 1 byte; pack to single Field (LSB-first).
+        let packed = 0n;
+        for (let i = 0; i < clue.bits.length; i++) {
+            packed |= BigInt(clue.bits[i]) << BigInt(8 * i);
+        }
+        return { r, fk: fk.X, clueBits: packed };
+    };
 }
 
 export class TxBuilder {
-    constructor(public readonly P: Poseidon, public readonly J: Jubjub, public readonly depth: number) {}
+    private readonly nextClue: () => OutputClueWitness;
+    constructor(public readonly P: Poseidon, public readonly J: Jubjub, public readonly depth: number) {
+        this.nextClue = makeClueGen(P, J);
+    }
 
     note(value: bigint, ownerNsk: Field, rho: Field, asset: Field = DEFAULT_ASSET): Note {
         return { asset, value, pk: derivePk(this.P, ownerNsk), rho, rcm: rho + 1n, rcv: rho + 2n };
@@ -57,7 +90,9 @@ export class TxBuilder {
     // Build the JSON object that the circuit consumes. `publicAssetGen` is
     // optional — when omitted, toCircomInput derives it from publicAssetId.
     build(args: TxBuildArgs): any {
-        return toCircomInput(this.P, this.J, args);
+        const outputClues =
+            args.outputClues ?? args.outputs.map(() => this.nextClue());
+        return toCircomInput(this.P, this.J, { ...args, outputClues });
     }
 
     newTree(): MerkleTree {

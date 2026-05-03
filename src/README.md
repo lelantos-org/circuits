@@ -31,7 +31,7 @@ in §10, enforces the following properties for every accepted transaction:
   hierarchy `nsk → ivk → pk` whose `pk` is bound inside the note
   commitment.
 - **No double spend.** Every spent slot — real or padding — emits a
-  Poseidon nullifier `nf = Poseidon(TAG_NF, nsk, rho)`. The contract
+  Poseidon nullifier `nf = Poseidon(TAG_NF, nk, rho)` with `nk = Poseidon(TAG_NK, nsk)`. The contract
   rejects collisions with the global `spent` set.
 - **Per-asset value conservation.** For every asset class, the sum of
   inputs (shielded plus the transparent bucket) equals the sum of outputs.
@@ -304,27 +304,32 @@ has `x == 0`, which a malicious prover could exploit to pass arbitrary
 
 ```
 nsk  (spend authority)
- └─ ivk = Poseidon(TAG_IVK, nsk)        (incoming view key)
-     └─ pk  = Poseidon(TAG_PK, ivk)      (bound in note cm)
+ ├─ ivk = Poseidon(TAG_IVK, nsk)        (incoming view key)
+ │    └─ pk  = Poseidon(TAG_PK, ivk)      (bound in note cm)
+ └─ nk  = Poseidon(TAG_NK, nsk)         (nullifier-deriving key; FVK)
 
-nf  = Poseidon(TAG_NF, nsk, rho)
+nf  = Poseidon(TAG_NF, nk, rho)
 dk  = Poseidon(TAG_DK, ivk)              (off-circuit; FMD)
 ```
 
 ```mermaid
 flowchart TD
     NSK["nsk"] -->|"Poseidon(TAG_IVK, nsk)"| IVK["ivk"]
+    NSK -->|"Poseidon(TAG_NK, nsk)"| NK["nk"]
     IVK -->|"Poseidon(TAG_PK, ivk)"| PK["pk"]
-    NSK -.->|"Poseidon(TAG_NF, nsk, rho)"| NF["nullifier"]
+    NK -.->|"Poseidon(TAG_NF, nk, rho)"| NF["nullifier"]
     IVK -.->|"Poseidon(TAG_DK, ivk)"| DK["dk (off-circuit)"]
 ```
 
-`ivk` confers detection/decryption rights without spend authority; `nsk`
-is required to produce a valid nullifier and therefore to spend.
+`ivk` confers detection/decryption rights; `nk` adds spent-note visibility
+(Full Viewing Key). Neither lets the holder spend — `nsk` is required to
+satisfy the in-circuit `pk_check` derived via `ivk`, and Poseidon is
+one-way so neither `ivk` nor `nk` reveals `nsk`.
 
 Every spent slot — real or dummy — constrains
-`nullifier[i] === Poseidon(TAG_NF, nsk[i], rho[i])`. Dummies use
-prover-chosen private `(nsk, rho)` so their public nullifier is
+`nullifier[i] === Poseidon(TAG_NF, nk[i], rho[i])` where `nk` is derived
+in-circuit from the prover-supplied `nsk`. Dummies use prover-chosen
+private `(nsk, rho)` so their public nullifier is
 indistinguishable from a real spend, and the contract inserts every
 nullifier unconditionally (no sentinel skip). On-chain checks reject
 collisions and intra-tx duplicates.
@@ -470,11 +475,12 @@ prior proofs and with test helpers. Update in lockstep.
 | Function | Value | Use | Arity |
 |---|---|---|---|
 | `TAG_CM()` | 1 | Reserved. `NoteCommitment` uses (asset,value)-packing + arity 4 instead. | — |
-| `TAG_NF()` | 2 | `nf = Poseidon(TAG_NF, nsk, rho)` | 3 |
+| `TAG_NF()` | 2 | `nf = Poseidon(TAG_NF, nk, rho)` | 3 |
 | `TAG_PK()` | 3 | `pk = Poseidon(TAG_PK, ivk)` | 2 |
 | `TAG_IVK()` | 4 | `ivk = Poseidon(TAG_IVK, nsk)` | 2 |
 | `TAG_MERKLE()` | 5 | `node = Poseidon(TAG_MERKLE, c0..c3)` | 5 |
 | `TAG_DK` | 6 | `dk = Poseidon(TAG_DK, ivk)` (off-circuit; FMD). | 2 |
+| `TAG_NK()` | 9 | `nk = Poseidon(TAG_NK, nsk)` (Full Viewing Key). | 2 |
 
 Combined arity + tag prevents Poseidon collisions across hash sites.
 
@@ -487,9 +493,9 @@ redesign that adds a tag input has a known constant ready.
 
 ### `TAG_NF` → 2
 
-Prefix for nullifier hash. Arity 3: `Poseidon(2, nsk, rho)`. Prevents
-collision with any other arity-3 site (none today, but tag is cheap
-insurance).
+Prefix for nullifier hash. Arity 3: `Poseidon(2, nk, rho)` where
+`nk = Poseidon(TAG_NK, nsk)`. Prevents collision with any other arity-3
+site (none today, but tag is cheap insurance).
 
 ### `TAG_PK` → 3
 

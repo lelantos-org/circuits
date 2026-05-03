@@ -211,7 +211,7 @@ describe("transact_2x2", function () {
         await expectWitnessFails(circuit, input);
     });
 
-    it("FAILS when nullifier doesn't match Poseidon(TAG_NF, nsk, rho) for dummy slot", async () => {
+    it("FAILS when nullifier doesn't match Poseidon(TAG_NF, nk, rho) for dummy slot", async () => {
         const tree = tx.newTree();
         const root = tree.root();
         const dA = dummyInputAt(tx.P, DEPTH, 0n);

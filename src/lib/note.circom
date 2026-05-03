@@ -3,15 +3,18 @@ pragma circom 2.2.3;
 include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "tags.circom";
 
-// Note primitives: key derivation (nsk → ivk → pk), commitment, nullifier.
+// Note primitives: key derivation (nsk → ivk → pk, nsk → nk), commitment, nullifier.
 // Domain-separation tag values come from tags.circom — single source of truth
 // shared with merkle.circom and test/helpers.ts.
 //
 // Key hierarchy:
 //   nsk  (spend authority, never leaves owner)
-//    └─ ivk = Poseidon(TAG_IVK, nsk)   (incoming view key; can decrypt notes)
-//         └─ pk  = Poseidon(TAG_PK, ivk)   (owner_pk bound in note commitment)
-// nf still derived from nsk so spend power stays gated by nsk.
+//    ├─ ivk = Poseidon(TAG_IVK, nsk)   (incoming view key; can decrypt notes)
+//    │    └─ pk  = Poseidon(TAG_PK, ivk)   (owner_pk bound in note commitment)
+//    └─ nk  = Poseidon(TAG_NK, nsk)    (nullifier-deriving key; FVK component)
+// nf = Poseidon(TAG_NF, nk, rho). Auditor with nk can recompute nf for any
+// known rho ⇒ detect spends. Cannot derive nsk from nk (Poseidon one-way),
+// so spend authority remains gated by nsk via pk_check in spent.circom.
 // FMD detection key dk is derived off-circuit from ivk (or independently)
 // and lives entirely off-chain — no circuit constraints needed for clues.
 
@@ -24,6 +27,17 @@ template DeriveIvk() {
     h.inputs[0] <== TAG_IVK();
     h.inputs[1] <== nsk;
     ivk <== h.out;
+}
+
+// nk = Poseidon(TAG_NK, nsk)
+template DeriveNk() {
+    signal input nsk;
+    signal output nk;
+
+    component h = Poseidon(2);
+    h.inputs[0] <== TAG_NK();
+    h.inputs[1] <== nsk;
+    nk <== h.out;
 }
 
 // owner_pk = Poseidon(TAG_PK, ivk)
@@ -62,15 +76,15 @@ template NoteCommitment() {
     cm <== h.out;
 }
 
-// nf = Poseidon(TAG_NF, nsk, rho)
+// nf = Poseidon(TAG_NF, nk, rho)
 template Nullifier() {
-    signal input nsk;
+    signal input nk;
     signal input rho;
     signal output nf;
 
     component h = Poseidon(3);
     h.inputs[0] <== TAG_NF();
-    h.inputs[1] <== nsk;
+    h.inputs[1] <== nk;
     h.inputs[2] <== rho;
     nf <== h.out;
 }

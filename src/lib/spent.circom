@@ -21,7 +21,7 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 //     contributes the additive identity to the per-asset balance.
 //
 // Always:
-//   - nullifier === Poseidon(TAG_NF, nsk, rho).
+//   - nullifier === Poseidon(TAG_NF, nk, rho)  where nk = Poseidon(TAG_NK, nsk).
 //   - value < 2^64.
 //   - cv === ValueCommit(value, HashToAssetGen(asset_id), rcv).
 //
@@ -77,11 +77,17 @@ template SpentNote(DEPTH) {
         mp.path_indices[d]     <== path_indices[d];
     }
 
-    // 4. Nullifier always real: nf = Poseidon(TAG_NF, nsk, rho).
+    // 4. Nullifier always real: nf = Poseidon(TAG_NF, nk, rho) with
+    //    nk = Poseidon(TAG_NK, nsk). nk is derived in-circuit so the prover
+    //    cannot smuggle a different nk than the one consistent with nsk.
+    //    FVK auditor holds nk only and can recompute nf for any known rho.
     //    Dummy slots use prover-chosen random (nsk, rho) so nf is
     //    indistinguishable from a real spend on chain.
+    component nk_d = DeriveNk();
+    nk_d.nsk <== nsk;
+
     component nf_h = Nullifier();
-    nf_h.nsk <== nsk;
+    nf_h.nk  <== nk_d.nk;
     nf_h.rho <== rho;
     nf_h.nf === nullifier;
 

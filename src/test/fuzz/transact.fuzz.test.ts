@@ -1,6 +1,6 @@
 import * as fc from "fast-check";
 
-import { MerkleTree, SpentNote, Note, Field } from "../helpers";
+import { MerkleTree, SpentNote, Note, Field, commit } from "../helpers";
 import { loadCircuit, srcPath } from "../lib/circuit";
 import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { expectWitnessFails } from "../lib/expect";
@@ -81,6 +81,7 @@ describe("transact_2x2 [fuzz]", function () {
             arbBalancedSplit(),
             arbField(1n << 60n),
             async ({ v1, v2, o1, o2 }, badAssetSeed) => {
+                if (o1 === 0n) return;
                 const badAsset = ASSET + 1n + badAssetSeed;
                 const aliceNsk = 11n, bobNsk = 22n;
                 const tree = tx.newTree();
@@ -98,6 +99,22 @@ describe("transact_2x2 [fuzz]", function () {
                     inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
                 });
                 await expectWitnessFails(circuit, input, "expected ghost-note tx to fail");
+            },
+        ), fcParams);
+    });
+
+    it("note commitment binds asset even at value=0", async () => {
+        await fc.assert(fc.asyncProperty(
+            arbField(1n << 60n), arbField(1n << 60n),
+            arbField(1n << 200n), arbField(1n << 200n), arbField(1n << 200n),
+            async (assetSeedA, assetSeedB, pk, rho, rcm) => {
+                const assetA = 1n + assetSeedA;
+                const assetB = 1n + assetSeedB;
+                if (assetA === assetB) return;
+                const base = { value: 0n, pk, rho, rcm } as const;
+                const cmA = commit(tx.P, { ...base, asset: assetA });
+                const cmB = commit(tx.P, { ...base, asset: assetB });
+                if (cmA === cmB) throw new Error("commitment collision across assets at value=0");
             },
         ), fcParams);
     });

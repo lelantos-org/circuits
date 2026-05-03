@@ -5,6 +5,7 @@ include "lib/output.circom";
 include "lib/balance.circom";
 include "lib/value_commit.circom";
 include "lib/poly_eval.circom";
+include "lib/clue.circom";
 
 // MASP Pool: N_IN-input × N_OUT-output transact circuit (v1, multi-asset).
 //
@@ -72,7 +73,7 @@ include "lib/poly_eval.circom";
 //   - nullifier[i] always inserted (no sentinel); revert on already-spent
 //   - out_cm[j] always inserted into cm tree (no sentinel)
 
-template Transact(DEPTH, N_IN, N_OUT) {
+template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     // ===== PUBLIC (verifier-visible) =====
     signal input  z;   // Fiat-Shamir challenge (contract-supplied).
     signal output y;   // PolyEval(22)(coeffs, z); binds the 22 logical PIs.
@@ -113,6 +114,23 @@ template Transact(DEPTH, N_IN, N_OUT) {
     signal input out_rcm[N_OUT];
     signal input out_rcv[N_OUT];
 
+    // ===== PRIVATE: FMD clue witnesses (per output) =====
+    // `out_r`  : FMD blinding scalar, fresh per output (≤ 254 bits).
+    // `out_fk` : recipient flag-key array (γ Baby-Jubjub points).
+    // Sender MUST set every slot to a real (r, fk) — pad/dummy outputs
+    // also produce a clue; cheapest is sender's own fk + random r so
+    // the resulting clue lands on sender's own subscription harmlessly.
+    signal input out_r[N_OUT];
+    signal input out_fk[N_OUT][GAMMA][2];
+
+    // ===== LOGICAL PIs (private witnesses, bound via PolyEval): clue =====
+    // 14-bit packed clueBits per output; first GAMMA bits constrained
+    // honest, rest unconstrained but contract masks upper-2 bits zero.
+    signal input out_clue_bits[N_OUT];
+    // Output-only signals exposed by ClueCheck so PolyEval can pin them.
+    signal out_clue_Rx[N_OUT];
+    signal out_clue_Ry[N_OUT];
+
     // -------------------------------------------------------------------------
     // Spent-note slots
     // -------------------------------------------------------------------------
@@ -149,6 +167,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
     // Output-note slots
     // -------------------------------------------------------------------------
     component out_note[N_OUT];
+    component clue[N_OUT];
 
     for (var j = 0; j < N_OUT; j++) {
         out_note[j] = OutputNote();
@@ -161,6 +180,18 @@ template Transact(DEPTH, N_IN, N_OUT) {
         out_note[j].cm       <== out_cm[j];
         out_note[j].cv[0]    <== out_cv[j][0];
         out_note[j].cv[1]    <== out_cv[j][1];
+
+        // FMD clue: prove R = r·G_8 and clue_bits[i] = 1 - lsb1(Poseidon(...)).
+        // Output Rx, Ry exposed for PolyEval binding.
+        clue[j] = ClueCheck(GAMMA);
+        clue[j].r <== out_r[j];
+        for (var gi = 0; gi < GAMMA; gi++) {
+            clue[j].fk[gi][0] <== out_fk[j][gi][0];
+            clue[j].fk[gi][1] <== out_fk[j][gi][1];
+        }
+        clue[j].clue_bits <== out_clue_bits[j];
+        out_clue_Rx[j] <== clue[j].Rx;
+        out_clue_Ry[j] <== clue[j].Ry;
     }
 
     // -------------------------------------------------------------------------
@@ -235,7 +266,10 @@ template Transact(DEPTH, N_IN, N_OUT) {
     //
     // Coefficient ordering MUST match contracts/src/MASP.sol::_flatten().
     // -------------------------------------------------------------------------
-    component pe = PolyEval(22);
+    // 22 base PIs + 3 per output (clue Rx, Ry, bits).
+    var PI_BASE = 22;
+    var PI_PER_OUT = 3;
+    component pe = PolyEval(PI_BASE + PI_PER_OUT * N_OUT);
     pe.coeffs[ 0] <== merkle_root;
     pe.coeffs[ 1] <== nullifier[0];
     pe.coeffs[ 2] <== nullifier[1];
@@ -258,6 +292,11 @@ template Transact(DEPTH, N_IN, N_OUT) {
     pe.coeffs[19] <== chain_id;
     pe.coeffs[20] <== payer_address;
     pe.coeffs[21] <== relayer_address;
+    for (var j = 0; j < N_OUT; j++) {
+        pe.coeffs[PI_BASE + PI_PER_OUT * j + 0] <== out_clue_Rx[j];
+        pe.coeffs[PI_BASE + PI_PER_OUT * j + 1] <== out_clue_Ry[j];
+        pe.coeffs[PI_BASE + PI_PER_OUT * j + 2] <== out_clue_bits[j];
+    }
     pe.z <== z;
     y    <== pe.y;
 }
@@ -268,4 +307,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
 component main {
     public [ z ]
 // Quaternary tree: depth 10 → 4^10 = 1,048,576 leaves (binary-equivalent depth 20).
-} = Transact(10, 2, 2);
+// GAMMA = 5 matches FMD_DEFAULT_GAMMA in sdk/src/fmd.ts. Bumping requires
+// new trusted setup + regenerated Verifier.sol.
+} = Transact(10, 2, 2, 5);
