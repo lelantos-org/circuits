@@ -16,7 +16,7 @@ pragma circom 2.2.3;
 // | TAG_IVK     | 4     | ivk = Poseidon(TAG_IVK, nsk)            arity 2    |
 // | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)     arity 5    |
 // | TAG_DK      | 6     | dk  = Poseidon(TAG_DK, ivk)  (off-circuit, FMD)    |
-// | TAG_ASSET   | 7     | V^t = Pedersen(TAG_ASSET || asset_id_bits)  arity Pedersen(264)
+// | TAG_ASSET   | 7     | V^t = Pedersen(TAG_ASSET || asset_id_bits)  arity Pedersen(72)
 // | TAG_FMD_BIT | 8     | FMD bit derivation, arity-6 Poseidon              |
 // | TAG_NK      | 9     | nk  = Poseidon(TAG_NK, nsk)             arity 2    |
 //
@@ -25,9 +25,9 @@ pragma circom 2.2.3;
 // so the SDK and any future audit can pin a single canonical value and avoid
 // collision with the in-circuit tags.
 //
-// TAG_ASSET is prepended (LSB-first byte) to the 254-bit asset_id input of
+// TAG_ASSET is prepended (LSB-first byte) to the 64-bit asset_id input of
 // `HashToAssetGen` to domain-separate the asset-generator hash from any other
-// 254-bit Pedersen call that might one day share Baby-Jubjub `BASE[0..1]`.
+// Pedersen call that might one day share Baby-Jubjub `BASE[0]`.
 //
 // POW_2_64 = 2^64; used both as the asset/value packing multiplier in
 // NoteCommitment and as the bound enforced by RangeCheck64 on private values.

@@ -13,25 +13,26 @@ include "tags.circom";
 // per-asset value conservation.
 //
 // Implementation: 64-bit decomposition via Num2Bits(64), prepended with a
-// TAG_ASSET byte and zero-padded to 264 bits (33 bytes) so the circomlibjs
-// `pedersen.hash(buf)` mirror in the SDK can pass
-// `[TAG_ASSET, ...assetId_LE_32]` byte-for-byte. Bits 64..255 of the SDK
-// 32-byte buffer are zero in practice (registry keys < 2^64), so this
-// matches byte-for-byte for any asset_id < 2^64.
+// TAG_ASSET byte → 72-bit (9-byte) Pedersen input. The SDK mirror passes
+// `[TAG_ASSET, ...assetId_LE_8]` to circomlibjs `pedersen.hash(buf)` for
+// byte-for-byte parity.
+//
+// Note: a 264-bit zero-padded input would yield the identical point because
+// zero bits contribute the identity in additive Pedersen, but uses 2 segments
+// instead of 1.
 //
 // Soundness bonus: Num2Bits(64) also enforces asset_id < 2^64 in-circuit on
 // every private in_asset / out_asset (previously enforced only on
 // public_asset_id by the contract).
 //
 // Bit layout (LSB-first per Pedersen window):
-//   bits[  0.. 7] = TAG_ASSET (8 bits, LSB-first)
-//   bits[  8.. 71] = asset_id (64 bits, LSB-first)
-//   bits[ 72..263] = 0 (zero padding to byte boundary)
+//   bits[ 0.. 7] = TAG_ASSET (8 bits, LSB-first)
+//   bits[ 8..71] = asset_id  (64 bits, LSB-first)
 //
-// 264 bits → 2 Pedersen segments (BASE[0], BASE[1]); the H base used by
-// ValueCommit is BASE[2], outside the image of HashToAssetGen.
+// 72 bits → 1 Pedersen segment (BASE[0]); the H base used by ValueCommit is
+// BASE[2], outside the image of HashToAssetGen.
 //
-// Constraint cost ≈ 64 (bits) + ~3.9k (Pedersen 264-bit) ≈ 4.0k per call
+// Constraint cost ≈ 64 (bits) + ~2.0k (Pedersen 72-bit) ≈ 2.1k per call
 template HashToAssetGen() {
     signal input asset_id;
     signal output gen[2];
@@ -41,15 +42,12 @@ template HashToAssetGen() {
 
     var TAG = TAG_ASSET();
 
-    component p = Pedersen(264);
+    component p = Pedersen(72);
     for (var i = 0; i < 8; i++) {
         p.in[i] <== (TAG >> i) & 1;
     }
     for (var i = 0; i < 64; i++) {
         p.in[8 + i] <== bits.out[i];
-    }
-    for (var i = 72; i < 264; i++) {
-        p.in[i] <== 0;
     }
 
     gen[0] <== p.out[0];

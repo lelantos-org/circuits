@@ -16,10 +16,9 @@ include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 //   rcv (253-bit blinding scalar)
 //
 // H is a fixed Baby-Jubjub generator independent of any AssetGen output.
-// HashToAssetGen runs circomlib Pedersen on 264 bits (TAG_ASSET || asset_id
-// || zero-pad), which compiles into 2 segments and consumes Pedersen
-// BASE[0] and BASE[1]. We pick H = BASE[2]: outside the image of
-// HashToAssetGen and therefore independent.
+// HashToAssetGen runs circomlib Pedersen on 72 bits (TAG_ASSET || asset_id),
+// which compiles into 1 segment and consumes Pedersen BASE[0]. We pick
+// H = BASE[2]: outside the image of HashToAssetGen and therefore independent.
 
 function H_BASE_X() {
     return 5802099305472655231388284418920769829666717045250560929368476121199858275951;
