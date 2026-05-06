@@ -114,31 +114,6 @@ template ValueCommit() {
     rH[1] <== rHmul.out[1];
 }
 
-// Validate an Edwards point as a safe value-commitment generator:
-//   1. on Baby-Jubjub curve (a·x² + y² == 1 + d·x²·y²)
-//   2. x != 0  — rules out the only two x=0 points: (0, 1) (identity) and
-//      (0, -1) (the order-2 element). EscalarMulAny silently substitutes G8
-//      whenever p[0]==0 (see escalarmulany.circom near `zeropoint`), so a
-//      witnessed (0, ±1) base would yield wrong arithmetic and let a prover
-//      forge the point-balance check.
-//
-// Prime-order subgroup membership is NOT enforced here — small-order
-// non-trivial points (4-torsion / 8-torsion) cannot be cheaply rejected
-// in-circuit. Caller (Solidity) must perform cofactor-clearing on registry
-// entries before passing them in. See CIRCUITS.md "Smart-contract
-// obligations".
-template SafePoint() {
-    signal input p[2];
-
-    component oncurve = BabyCheck();
-    oncurve.x <== p[0];
-    oncurve.y <== p[1];
-
-    component x_is_zero = IsZero();
-    x_is_zero.in <== p[0];
-    x_is_zero.out === 0;
-}
-
 // Chained Edwards point sum over N points. PointSum(0).out is the identity
 // (0,1). BabyAdd is complete on the prime-order subgroup our points live in.
 template PointSum(N) {

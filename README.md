@@ -5,7 +5,7 @@ MASP (Multi-Asset Shielded Pool) circuits in Circom.
 - `2x2.circom` — 2-in / 2-out shielded transact: ownership, no double-spend, per-asset balance, without revealing sender / receiver / asset / amount.
 - `tree_update.circom` — relayer-side proof that the on-chain commitment tree advances `oldRoot → newRoot` by inserting two leaves (`cm0`, `cm1`) at `[startIndex, startIndex+1]` over a relayer-supplied frontier. Lazy-root model.
 
-Both circuits use SnarkCompression: 22 logical PIs (transact) / 5 logical PIs (tree_update) are folded into `(z, y)` via `PolyEval`, so the Solidity verifier sees only two field elements per proof.
+Both circuits use SnarkCompression: 20 logical PIs (transact) / 5 logical PIs (tree_update) are folded into `(z, y)` via `PolyEval`, so the Solidity verifier sees only two field elements per proof.
 
 See [src/README.md](src/README.md) for full design notes.
 
@@ -72,7 +72,7 @@ Tests use `circom_tester` (witness + constraint check only) — no ptau or trust
 
 Both circuits expose only `[z, y]`. The logical PIs below are private witnesses bound through `PolyEval` (Schwartz–Zippel binding over the BN254 scalar field).
 
-- **2x2 transact** — 22 logical PIs: `merkle_root`, `nullifier[2]`, `out_cm[2]`, `public_asset_id`, `pub_asset_gen_x`, `pub_asset_gen_y`, `public_in`, `public_out`, `in_cv[2]`, `out_cv[2]`, `recipient_address`, `chain_id`, `payer_address`, `relayer_address`. Slot order MUST match `contracts/src/MASP.sol::_flatten()`.
+- **2x2 transact** — 20 logical PIs: `merkle_root`, `nullifier[2]`, `out_cm[2]`, `public_asset_id`, `public_in`, `public_out`, `in_cv[2]`, `out_cv[2]`, `recipient_address`, `chain_id`, `payer_address`, `relayer_address`. The public-bucket asset generator `V^pub` is derived in-circuit from `public_asset_id` via `HashToAssetGen`, so it is not exposed as a PI. Slot order MUST match `contracts/src/MASP.sol::_flatten()`.
 - **tree_update** — 5 logical PIs: `old_root`, `new_root`, `cm0`, `cm1`, `start_index`. Slot order MUST match `_compressTreeUpdatePI` in the contract.
 
 Full design in [src/README.md](src/README.md).
@@ -105,7 +105,7 @@ Per output slot `j` (`OutputNote`, [src/lib/output.circom](src/lib/output.circom
 - FMD clue (`ClueCheck`, [src/lib/clue.circom](src/lib/clue.circom)): `R = r · G_8`; for each of `GAMMA=5` flag-keys, `clue_bits[j]` low bits = `1 - lsb1(Poseidon(...))`. `out_clue_Rx`, `out_clue_Ry` exposed for PolyEval binding.
 
 Public-bucket / balance:
-- `SafePoint(pub_asset_gen)`: on Baby-Jubjub curve and `x ≠ 0` (rules out identity + 2-torsion). Cofactor-8 subgroup membership is contract-side.
+- `V^pub = HashToAssetGen(public_asset_id)` derived in-circuit. Pedersen image is on-curve and in the prime-order subgroup by construction, so no `SafePoint` is needed.
 - `RangeCheck64` on `public_in`, `public_out` (belt-and-suspenders to contract `< 2^64`).
 - `pub_in_pt = public_in · V^pub`, `pub_out_pt = public_out · V^pub` via `ValueScalarMul` over the 64 range bits.
 - `PerAssetPointBalance`: Edwards-point equality
@@ -113,7 +113,7 @@ Public-bucket / balance:
   `rcv·H` cancels ⇒ per-asset value conservation; distinct assets sit in distinct `V^t` subgroups so cross-asset cancel needs Pedersen DL break.
 
 PI compression:
-- `PolyEval(22 + 3·N_OUT)` Horner-evals `[merkle_root, nullifier[2], out_cm[2], public_asset_id, pub_asset_gen_x/y, public_in/out, in_cv[2][2], out_cv[2][2], recipient_address, chain_id, payer_address, relayer_address, (out_clue_Rx, out_clue_Ry, out_clue_bits)·N_OUT]` at `z`. Output `y` is the only verifier-visible signal beside `z`. Slot order MUST match `MASP.sol::_flatten()`.
+- `PolyEval(20 + 3·N_OUT)` Horner-evals `[merkle_root, nullifier[2], out_cm[2], public_asset_id, public_in/out, in_cv[2][2], out_cv[2][2], recipient_address, chain_id, payer_address, relayer_address, (out_clue_Rx, out_clue_Ry, out_clue_bits)·N_OUT]` at `z`. Output `y` is the only verifier-visible signal beside `z`. Slot order MUST match `MASP.sol::_flatten()`.
 
 ### `tree_update.circom` — TreeUpdate (DEPTH=10)
 

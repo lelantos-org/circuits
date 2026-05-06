@@ -4,7 +4,7 @@ import { BN254_FR } from "@lelantos-org/sdk/crypto";
 import { fixturePath, loadCircuit } from "./lib/circuit";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
-const N = 28;
+const N = 26;
 
 function mod(a: bigint, p: bigint): bigint {
     const r = a % p;

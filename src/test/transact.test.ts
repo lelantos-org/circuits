@@ -448,30 +448,6 @@ describe("transact_2x2", function () {
         await expectWitnessFails(circuit, input);
     });
 
-    it("FAILS when pub_asset_gen is wrong for given public_asset_id (deposit)", async () => {
-        const tree = tx.newTree();
-        const root = tree.root();
-        const dA = dummyInputAt(tx.P, DEPTH, 0n);
-        const dB = dummyInputAt(tx.P, DEPTH, 1n);
-        const aliceNsk = 11n;
-        const outA = tx.note(1000n, aliceNsk, 9n);
-        const outB = tx.note(0n, aliceNsk, 11n);
-
-        // Pass a public-asset generator that does NOT match HashToAssetGen(ASSET):
-        // use the gen for ASSET_B instead. Off-chain registry would catch this in
-        // Solidity, but the circuit independently rejects via balance failure
-        // (deposit credits the wrong asset bucket).
-        const wrongGen = tx.J.hashToAssetGen(ASSET_B);
-
-        const input = tx.build({
-            publicAssetId: ASSET,
-            publicAssetGen: wrongGen,
-            publicIn: 1000n, publicOut: 0n,
-            inputs: [dA, dB], outputs: [outA, outB], merkleRoot: root,
-        });
-        await expectWitnessFails(circuit, input);
-    });
-
     it("dummy with arbitrary asset_id and rcv accepted (value=0 ⇒ no balance contribution)", async () => {
         const aliceNsk = 11n;
         const tree = tx.newTree();
@@ -495,37 +471,6 @@ describe("transact_2x2", function () {
         const w = await circuit.calculateWitness(input, true);
         await circuit.checkConstraints(w);
     });
-
-    // SafePoint(pub_asset_gen) must reject identity (0,1), 2-torsion (0,-1),
-    // and off-curve points. Without this, an all-dummy tx could withdraw
-    // arbitrary public_out from the pool. p (BN254 scalar field) - 1:
-    const NEG_ONE = 21888242871839275222246405745257275088548364400416034343698204186575808495616n;
-    const BAD_GENS: ReadonlyArray<{ name: string; gen: [Field, Field] }> = [
-        { name: "identity (0,1)",        gen: [0n, 1n] },
-        { name: "2-torsion (0,-1)",      gen: [0n, NEG_ONE] },
-        { name: "off-curve (3,5)",       gen: [3n, 5n] },
-    ];
-    for (const { name, gen } of BAD_GENS) {
-        it(`FAILS when pub_asset_gen is ${name}`, async () => {
-            const tree = tx.newTree();
-            const root = tree.root();
-            const dA = dummyInputAt(tx.P, DEPTH, 0n);
-            const dB = dummyInputAt(tx.P, DEPTH, 1n);
-            const aliceNsk = 11n;
-            // Identity case targets withdrawal path; the rest target deposit.
-            const usesWithdraw = name.startsWith("identity");
-            const outA = usesWithdraw ? dummyOutput() : tx.note(1000n, aliceNsk, 9n);
-            const outB = usesWithdraw ? dummyOutput() : tx.note(0n, aliceNsk, 11n);
-            const input = tx.build({
-                publicAssetId: usesWithdraw ? 7n : ASSET,
-                publicAssetGen: gen,
-                publicIn:  usesWithdraw ? 0n    : 1000n,
-                publicOut: usesWithdraw ? 1000n : 0n,
-                inputs: [dA, dB], outputs: [outA, outB], merkleRoot: root,
-            });
-            await expectWitnessFails(circuit, input);
-        });
-    }
 
     it("FAILS when non-dummy input has asset_id == 0", async () => {
         const nsk = 11n;

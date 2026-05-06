@@ -32,7 +32,6 @@ export interface TxBuildArgs {
     inputs: SpentNote[];
     outputs: Note[];
     merkleRoot: Field;
-    publicAssetGen?: [Field, Field];
     /// Per-output FMD clue witnesses. When omitted, deterministic Poseidon-v2
     /// clues are synthesized so ClueCheck constraints are satisfied.
     outputClues?: OutputClueWitness[];
@@ -87,8 +86,8 @@ export class TxBuilder {
         return { ...sn, pathElements, pathIndices };
     }
 
-    // Build the JSON object that the circuit consumes. `publicAssetGen` is
-    // optional — when omitted, toCircomInput derives it from publicAssetId.
+    // Build the JSON object that the circuit consumes. The public asset
+    // generator is derived in-circuit from publicAssetId.
     build(args: TxBuildArgs): any {
         const outputClues =
             args.outputClues ?? args.outputs.map(() => this.nextClue());

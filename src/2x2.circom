@@ -19,21 +19,21 @@ include "lib/clue.circom";
 // Multi-asset model (Sapling / Namada-faithful):
 //   - Each note carries a private asset_id. Circuit derives a Baby-Jubjub
 //     generator V^t = HashToAssetGen(asset_id) per note.
+//   - Public bucket also derives V^pub = HashToAssetGen(public_asset_id)
+//     in-circuit; no externally witnessed point.
 //   - Per-note value commitment cv = value · V^t + rcv · H (Sapling).
 //   - Balance check via Edwards point equality:
 //        Σ in_cv + public_in · V^pub + Σ out_rH
 //          == Σ out_cv + public_out · V^pub + Σ in_rH
-//     where V^pub is the public asset generator passed as (x,y) by the
-//     contract from a precomputed registry.
 //   - Distinct assets live in distinct V^t subgroups, so cross-asset balance
 //     leakage is impossible without breaking the discrete log of Pedersen.
 //
 // Public-input compression (SnarkCompression):
 //   The verifier sees only two public signals:
 //     - z : Fiat-Shamir challenge supplied by the caller (contract).
-//     - y : circuit-computed PolyEval evaluation, y = Σ_{k=0..21} c_k·z^k.
-//   The 22 logical "public" signals below (formerly the verifier's PI vector)
-//   are demoted to private witnesses; PolyEval binds all 22 to (z, y) so any
+//     - y : circuit-computed PolyEval evaluation, y = Σ_{k=0..19} c_k·z^k.
+//   The 20 logical "public" signals below (formerly the verifier's PI vector)
+//   are demoted to private witnesses; PolyEval binds all 20 to (z, y) so any
 //   contract-side tamper changes y for almost every z (Schwartz–Zippel).
 //
 //   Coefficient slot layout (MUST match contracts/src/MASP.sol::_flatten):
@@ -43,22 +43,20 @@ include "lib/clue.circom";
 //     [ 3] out_cm[0]
 //     [ 4] out_cm[1]
 //     [ 5] public_asset_id
-//     [ 6] pub_asset_gen_x
-//     [ 7] pub_asset_gen_y
-//     [ 8] public_in
-//     [ 9] public_out
-//     [10] in_cv[0][0]
-//     [11] in_cv[0][1]
-//     [12] in_cv[1][0]
-//     [13] in_cv[1][1]
-//     [14] out_cv[0][0]
-//     [15] out_cv[0][1]
-//     [16] out_cv[1][0]
-//     [17] out_cv[1][1]
-//     [18] recipient_address
-//     [19] chain_id
-//     [20] payer_address
-//     [21] relayer_address
+//     [ 6] public_in
+//     [ 7] public_out
+//     [ 8] in_cv[0][0]
+//     [ 9] in_cv[0][1]
+//     [10] in_cv[1][0]
+//     [11] in_cv[1][1]
+//     [12] out_cv[0][0]
+//     [13] out_cv[0][1]
+//     [14] out_cv[1][0]
+//     [15] out_cv[1][1]
+//     [16] recipient_address
+//     [17] chain_id
+//     [18] payer_address
+//     [19] relayer_address
 //   Re-ordering this list is a soundness change for the contract.
 //
 // Per-slot logic is delegated to `SpentNote` (lib/spent.circom) and
@@ -68,7 +66,6 @@ include "lib/clue.circom";
 //   - chain_id == block.chainid
 //   - public_in, public_out  < 2^64
 //   - public_asset_id < 2^64 (or whatever registry key range applies)
-//   - registry[public_asset_id] == (pub_asset_gen_x, pub_asset_gen_y)
 //   - recipient_address typed as address (< 2^160)
 //   - nullifier[i] always inserted (no sentinel); revert on already-spent
 //   - out_cm[j] always inserted into cm tree (no sentinel)
@@ -79,15 +76,13 @@ include "lib/clue.circom";
 template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     // ===== PUBLIC (verifier-visible) =====
     signal input  z;   // Fiat-Shamir challenge (contract-supplied).
-    signal output y;   // PolyEval(22)(coeffs, z); binds the 22 logical PIs.
+    signal output y;   // PolyEval(20)(coeffs, z); binds the 20 logical PIs.
 
     // ===== LOGICAL PIs — now private witnesses, bound via PolyEval below =====
     signal input merkle_root;
     signal input nullifier[N_IN];
     signal input out_cm[N_OUT];
     signal input public_asset_id;
-    signal input pub_asset_gen_x;
-    signal input pub_asset_gen_y;
     signal input public_in;
     signal input public_out;
     signal input in_cv[N_IN][2];
@@ -207,21 +202,17 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     // -------------------------------------------------------------------------
     // Public-bucket scalar mults
     //
-    // Caller (contract) supplies (pub_asset_gen_x, pub_asset_gen_y) from a
-    // precomputed registry keyed by public_asset_id. Validate the supplied
-    // point in-circuit:
-    //   - on Baby-Jubjub curve
-    //   - x != 0 (rules out identity (0,1) and 2-torsion (0,-1))
-    // Prime-order subgroup membership (cofactor 8) is enforced off-chain by
-    // the contract; see CIRCUITS.md "Smart-contract obligations".
+    // V^pub = HashToAssetGen(public_asset_id) — derived in-circuit. Output is
+    // a canonical Pedersen image (on Baby-Jubjub, prime-order subgroup), so
+    // no SafePoint validation is needed: identity / 2-torsion are not in the
+    // image of the Pedersen hash for any 64-bit asset_id.
     //
-    // ValueScalarMul now consumes pre-decomposed bits, so an explicit
+    // ValueScalarMul consumes pre-decomposed bits, so an explicit
     // RangeCheck64 is wired here for public_in / public_out — belt-and-
     // suspenders to the on-chain `< 2^64` check.
     // -------------------------------------------------------------------------
-    component pub_gen_safe = SafePoint();
-    pub_gen_safe.p[0] <== pub_asset_gen_x;
-    pub_gen_safe.p[1] <== pub_asset_gen_y;
+    component pub_gen = HashToAssetGen();
+    pub_gen.asset_id <== public_asset_id;
 
     component pub_in_rng = RangeCheck64();
     pub_in_rng.v <== public_in;
@@ -230,8 +221,8 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     for (var i = 0; i < 64; i++) {
         pub_in_mul.bits[i] <== pub_in_rng.bits[i];
     }
-    pub_in_mul.gen[0] <== pub_asset_gen_x;
-    pub_in_mul.gen[1] <== pub_asset_gen_y;
+    pub_in_mul.gen[0] <== pub_gen.gen[0];
+    pub_in_mul.gen[1] <== pub_gen.gen[1];
 
     component pub_out_rng = RangeCheck64();
     pub_out_rng.v <== public_out;
@@ -240,8 +231,8 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     for (var i = 0; i < 64; i++) {
         pub_out_mul.bits[i] <== pub_out_rng.bits[i];
     }
-    pub_out_mul.gen[0] <== pub_asset_gen_x;
-    pub_out_mul.gen[1] <== pub_asset_gen_y;
+    pub_out_mul.gen[0] <== pub_gen.gen[0];
+    pub_out_mul.gen[1] <== pub_gen.gen[1];
 
     // -------------------------------------------------------------------------
     // Per-asset point balance
@@ -276,8 +267,8 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     //
     // Coefficient ordering MUST match contracts/src/MASP.sol::_flatten().
     // -------------------------------------------------------------------------
-    // 22 base PIs + 3 per output (clue Rx, Ry, bits).
-    var PI_BASE = 22;
+    // 20 base PIs + 3 per output (clue Rx, Ry, bits).
+    var PI_BASE = 20;
     var PI_PER_OUT = 3;
     component pe = PolyEval(PI_BASE + PI_PER_OUT * N_OUT);
     pe.coeffs[ 0] <== merkle_root;
@@ -286,22 +277,20 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     pe.coeffs[ 3] <== out_cm[0];
     pe.coeffs[ 4] <== out_cm[1];
     pe.coeffs[ 5] <== public_asset_id;
-    pe.coeffs[ 6] <== pub_asset_gen_x;
-    pe.coeffs[ 7] <== pub_asset_gen_y;
-    pe.coeffs[ 8] <== public_in;
-    pe.coeffs[ 9] <== public_out;
-    pe.coeffs[10] <== in_cv[0][0];
-    pe.coeffs[11] <== in_cv[0][1];
-    pe.coeffs[12] <== in_cv[1][0];
-    pe.coeffs[13] <== in_cv[1][1];
-    pe.coeffs[14] <== out_cv[0][0];
-    pe.coeffs[15] <== out_cv[0][1];
-    pe.coeffs[16] <== out_cv[1][0];
-    pe.coeffs[17] <== out_cv[1][1];
-    pe.coeffs[18] <== recipient_address;
-    pe.coeffs[19] <== chain_id;
-    pe.coeffs[20] <== payer_address;
-    pe.coeffs[21] <== relayer_address;
+    pe.coeffs[ 6] <== public_in;
+    pe.coeffs[ 7] <== public_out;
+    pe.coeffs[ 8] <== in_cv[0][0];
+    pe.coeffs[ 9] <== in_cv[0][1];
+    pe.coeffs[10] <== in_cv[1][0];
+    pe.coeffs[11] <== in_cv[1][1];
+    pe.coeffs[12] <== out_cv[0][0];
+    pe.coeffs[13] <== out_cv[0][1];
+    pe.coeffs[14] <== out_cv[1][0];
+    pe.coeffs[15] <== out_cv[1][1];
+    pe.coeffs[16] <== recipient_address;
+    pe.coeffs[17] <== chain_id;
+    pe.coeffs[18] <== payer_address;
+    pe.coeffs[19] <== relayer_address;
     for (var j = 0; j < N_OUT; j++) {
         pe.coeffs[PI_BASE + PI_PER_OUT * j + 0] <== out_clue_Rx[j];
         pe.coeffs[PI_BASE + PI_PER_OUT * j + 1] <== out_clue_Ry[j];

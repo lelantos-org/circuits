@@ -47,24 +47,24 @@ in §10, enforces the following properties for every accepted transaction:
   transaction shape.
 
 Out of scope: EdDSA spend authorization, encrypted memo layout, FMD
-detection, and Solidity-side hash-to-curve. The contract supplies the
-public-bucket generator from a precomputed registry; see §10.
+detection, and Solidity-side hash-to-curve. The public-bucket generator
+is derived in-circuit from `public_asset_id` via `HashToAssetGen`; see §10.
 
 ---
 
 ## 2. I/O surface
 
 The verifier sees only **two** field elements — `z` (Fiat-Shamir
-challenge) and `y` (Horner evaluation). The 22 logical PIs below are
+challenge) and `y` (Horner evaluation). The 20 logical PIs below are
 demoted to private witnesses and bound into `(z, y)` by the
-[`PolyEval(22)`](lib/poly_eval.circom) gadget; see §2a.
+[`PolyEval(20)`](lib/poly_eval.circom) gadget; see §2a.
 
 Verifier-visible public signals:
 
 | Signal | Kind | Purpose |
 |---|---|---|
 | `z` | public input | Fiat-Shamir challenge supplied by the contract. |
-| `y` | public output | `Σ_{k=0..21} coeffs[k] · z^k` — binds all logical PIs. |
+| `y` | public output | `Σ_{k=0..19} coeffs[k] · z^k` — binds all logical PIs. |
 
 Logical "public" inputs (private witnesses, bound through `PolyEval`):
 
@@ -73,8 +73,7 @@ Logical "public" inputs (private witnesses, bound through `PolyEval`):
 | `merkle_root` | 1 | Root of the on-chain commitment tree. |
 | `nullifier[N_IN]` | 2 | One per spent slot. |
 | `out_cm[N_OUT]` | 2 | One per output slot. |
-| `public_asset_id` | 1 | Asset id of the transparent bucket. |
-| `pub_asset_gen_x`, `pub_asset_gen_y` | 2 | `V^pub` from registry. |
+| `public_asset_id` | 1 | Asset id of the transparent bucket. `V^pub = HashToAssetGen(public_asset_id)` is derived in-circuit, not passed as PI. |
 | `public_in`, `public_out` | 2 | Transparent deposit / withdrawal. |
 | `in_cv[N_IN][2]`, `out_cv[N_OUT][2]` | 8 | Sapling value commitments. |
 | `recipient_address` | 1 | Withdrawal target (`uint160`). |
@@ -84,11 +83,11 @@ Logical "public" inputs (private witnesses, bound through `PolyEval`):
 
 ### 2a. SnarkCompression (PolyEval binding)
 
-The 22 logical PIs above are packed in a fixed slot order and fed into
-[`PolyEval(22)`](lib/poly_eval.circom) as Horner-form coefficients:
+The 20 logical PIs above are packed in a fixed slot order and fed into
+[`PolyEval(20)`](lib/poly_eval.circom) as Horner-form coefficients:
 
 ```
-y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[21]·z^21
+y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[19]·z^19
 ```
 
 Slot layout (MUST match `contracts/src/MASP.sol::_flatten()`
@@ -96,22 +95,21 @@ byte-for-byte; reordering is a soundness change for the contract):
 
 | Slot | Coeff | Slot | Coeff |
 |---|---|---|---|
-| 0 | `merkle_root`     | 11 | `in_cv[0][1]` |
-| 1 | `nullifier[0]`    | 12 | `in_cv[1][0]` |
-| 2 | `nullifier[1]`    | 13 | `in_cv[1][1]` |
-| 3 | `out_cm[0]`       | 14 | `out_cv[0][0]` |
-| 4 | `out_cm[1]`       | 15 | `out_cv[0][1]` |
-| 5 | `public_asset_id` | 16 | `out_cv[1][0]` |
-| 6 | `pub_asset_gen_x` | 17 | `out_cv[1][1]` |
-| 7 | `pub_asset_gen_y` | 18 | `recipient_address` |
-| 8 | `public_in`       | 19 | `chain_id` |
-| 9 | `public_out`      | 20 | `payer_address` |
-| 10 | `in_cv[0][0]`    | 21 | `relayer_address` |
+| 0 | `merkle_root`     | 10 | `in_cv[1][0]` |
+| 1 | `nullifier[0]`    | 11 | `in_cv[1][1]` |
+| 2 | `nullifier[1]`    | 12 | `out_cv[0][0]` |
+| 3 | `out_cm[0]`       | 13 | `out_cv[0][1]` |
+| 4 | `out_cm[1]`       | 14 | `out_cv[1][0]` |
+| 5 | `public_asset_id` | 15 | `out_cv[1][1]` |
+| 6 | `public_in`       | 16 | `recipient_address` |
+| 7 | `public_out`      | 17 | `chain_id` |
+| 8 | `in_cv[0][0]`     | 18 | `payer_address` |
+| 9 | `in_cv[0][1]`     | 19 | `relayer_address` |
 
 Soundness: any tampering with `coeffs[k]` changes `y` for all but at
-most 21 values of `z` (Schwartz–Zippel over BN254 scalar field;
-collision probability `≤ 21 / r ≈ 2^-249` — negligible). The contract
-MUST derive `z` from a Fiat-Shamir transcript over the full 22-slot
+most 19 values of `z` (Schwartz–Zippel over BN254 scalar field;
+collision probability `≤ 19 / r ≈ 2^-249` — negligible). The contract
+MUST derive `z` from a Fiat-Shamir transcript over the full 20-slot
 flattened vector after canonicalising every slot to `uint256`; sampling
 `z` independently of the slots breaks the binding.
 
@@ -170,7 +168,7 @@ flowchart LR
     OUT --> CV
     CV --> BAL --> PB
     OUT --> CM --> CMS
-    ROOT --> PE["PolyEval(22)"]
+    ROOT --> PE["PolyEval(20)"]
     NFS --> PE
     CMS --> PE
     PB --> PE
@@ -289,14 +287,12 @@ flowchart LR
     RHS --> EQ
 ```
 
-`V^pub` is supplied as `(pub_asset_gen_x, pub_asset_gen_y)` — the contract
-looks it up in a precomputed registry — and validated in-circuit by
-`SafePoint` (`BabyCheck` + `x != 0`), which rejects off-curve points, the
-identity `(0, 1)`, and the 2-torsion element `(0, -1)`. Without
-`SafePoint`, `EscalarMulAny` silently substitutes `G8` whenever the base
-has `x == 0`, which a malicious prover could exploit to pass arbitrary
-`public_out` against an all-dummy spend bundle. Subgroup membership
-(cofactor 8) is enforced off-chain by registry construction; see §10.5.
+`V^pub` is derived in-circuit as `HashToAssetGen(public_asset_id)`. The
+Pedersen image is on-curve and lies in the prime-order subgroup by
+construction, so identity / 2-torsion / off-curve / small-order attacks
+are all infeasible without breaking Pedersen. No `SafePoint` or
+contract-side gen check is needed — the proof itself binds the public
+bucket's generator to its asset id.
 
 ---
 
@@ -401,7 +397,7 @@ Padding rules:
 
 The on-chain verifier wrapper MUST, before invoking the Groth16 verifier:
 
-0. **Fiat-Shamir.** Flatten the 22 logical PIs in the canonical slot
+0. **Fiat-Shamir.** Flatten the 20 logical PIs in the canonical slot
    order (§2a), reduce each to `uint256` mod `r` (BN254 scalar prime),
    derive `z = H(transcript) mod r` for a domain-separated hash `H`
    over the flat vector, and compute `y = Σ coeffs[k]·z^k mod r`. Pass
@@ -412,15 +408,11 @@ The on-chain verifier wrapper MUST, before invoking the Groth16 verifier:
 2. `require(public_in < 2**64 && public_out < 2**64)`.
 3. `require(public_asset_id < 2**64)` (or whatever the registry key range
    demands).
-4. `require(registry[public_asset_id] == (pub_asset_gen_x, pub_asset_gen_y))`
-   — critical for soundness of the public bucket.
-5. **Prime-order subgroup membership** for `pub_asset_gen`. The circuit
-   rejects off-curve points and `x == 0`, but cannot cheaply reject
-   4-torsion or 8-torsion. The registry maintainer must therefore store
-   only cofactor-cleared points — e.g. `gen = 8 · Pedersen(asset_id)`
-   computed once off-chain. A small-order point in the registry breaks
-   per-asset balance.
-6. `require(nullifier[0] != nullifier[1])` (no `!= 0` exception).
+4. `require(registry[public_asset_id].token != address(0))` — asset must
+   be registered. The asset generator is derived in-circuit from
+   `public_asset_id` (`HashToAssetGen`), so no on-chain gen check is
+   needed; the proof binds gen to id.
+5. `require(nullifier[0] != nullifier[1])` (no `!= 0` exception).
 7. Type `recipient_address`, `payer_address`, `relayer_address` as
    `address`; pass `uint256(uint160(addr))`. Use `address(0)` for unused
    slots (e.g. `payer_address` on a pure withdraw, `relayer_address` on
@@ -452,9 +444,9 @@ sequenceDiagram
     participant C as Pool contract
     participant V as Groth16 Verifier
     U->>U: build witness, run prover
-    U->>R: proof + 22 logical PIs
+    U->>R: proof + 20 logical PIs
     R->>C: submitTx(proof, pubInputs)
-    C->>C: chainId, ranges, registry V^pub, root, !spent[]
+    C->>C: chainId, ranges, registry lookup, root, !spent[]
     C->>C: z = FS(flatten(pubInputs)), y = Σ coeffs·z^k
     C->>V: verifyProof(proof, [z, y])
     V-->>C: ok
@@ -561,14 +553,14 @@ Approximate component breakdown:
 | 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4k |
 | `PerAssetPointBalance` point sums | ~70 |
 | Note commitments + Merkle + nullifiers | ~15k |
-| `PolyEval(22)` Horner chain | ~22 |
+| `PolyEval(20)` Horner chain | ~20 |
 | **Total** | **~59k** |
 
 Depth-10 figures already include the +1.1k overhead (~270 constraints per
 extra level × 2 levels × 2 input branches) over the depth-8 baseline.
-The PolyEval gadget adds 22 quadratic constraints — negligible compared
-to the savings on Solidity verifier calldata (2 vs 22 field elements)
-and IC-table size (3 vs 23 G1 points).
+The PolyEval gadget adds 20 quadratic constraints — negligible compared
+to the savings on Solidity verifier calldata (2 vs 20 field elements)
+and IC-table size (3 vs 21 G1 points).
 
 ### `TreeUpdate(10)`
 
