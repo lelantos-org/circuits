@@ -562,6 +562,54 @@ describe("transact_2x2", function () {
         await expectWitnessFails(circuit, input);
     });
 
+    // ===== FMD clue / Legendre negative coverage =====
+    //
+    // The honest path is exercised everywhere above (clues are auto-synthesized
+    // by TxBuilder). These cases tamper the prover's clue/Legendre witnesses
+    // post-hoc to confirm ClueCheck + HashToBit reject inside the full circuit.
+
+    it("FAILS when out_clue_bits is flipped (ClueCheck mismatch)", async () => {
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const outA = tx.note(75n, nsk, 9n);
+        const outB = tx.note(75n, nsk, 11n);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
+        });
+        const orig = BigInt((input.out_clue_bits as string[])[0]);
+        (input.out_clue_bits as string[])[0] = (orig ^ 1n).toString();
+        await expectWitnessFails(circuit, input);
+    });
+
+    it("FAILS when out_legendre_bit is flipped (HashToBit reject)", async () => {
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const outA = tx.note(75n, nsk, 9n);
+        const outB = tx.note(75n, nsk, 11n);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
+        });
+        const orig = (input.out_legendre_bit as string[][])[0][0];
+        (input.out_legendre_bit as string[][])[0][0] = orig === "1" ? "0" : "1";
+        await expectWitnessFails(circuit, input);
+    });
+
+    it("FAILS when out_legendre_y is wrong (no valid sqrt)", async () => {
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const outA = tx.note(75n, nsk, 9n);
+        const outB = tx.note(75n, nsk, 11n);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
+        });
+        const orig = BigInt((input.out_legendre_y as string[][])[0][0]);
+        (input.out_legendre_y as string[][])[0][0] = (orig + 1n).toString();
+        await expectWitnessFails(circuit, input);
+    });
+
     it("multi-asset: per-asset imbalance fails even if scalar totals match", async () => {
         // in: A=80, B=120 (totals=200). out: A=120, B=80 (totals=200). Per-asset
         // mismatched. Old single-asset value-balance would accept; point-balance

@@ -4,6 +4,7 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 include "../../node_modules/circomlib/circuits/escalarmulany.circom";
 include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 include "../../node_modules/circomlib/circuits/poseidon.circom";
+include "hash_to_bit.circom";
 include "tags.circom";
 
 // FMD2 (lelantos.fmd.v2 / Poseidon scheme) bit-derivation, in-circuit.
@@ -13,21 +14,22 @@ include "tags.circom";
 //
 //   R    = r · G_8                          (Baby-Jubjub fixed base, circomlib G8)
 //   S_i  = r · fk_i                          for i ∈ [γ]
-//   bit_i = lsb1(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
+//   bit_i = legendre_bit(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
+//   where legendre_bit(h) = 1 iff h is a quadratic residue in 𝔽_r.
 //
 // Sender flips: clue_bits[i] === 1 - bit_i. Receiver tests:
 //   bit_i ⊕ c_bits[i] === 1
 // Honest sender ⇒ all γ checks pass. Constraining `clue_bits[i] === 1 - bit_i`
 // here forces the sender to derive bits honestly: a malicious sender cannot
 // set `clue_bits = all-ones` without also producing a valid `r, fk` whose
-// Poseidon outputs all have LSB=0.
+// Poseidon outputs all are non-residues.
 //
 // Cost (γ=5):
 //   1× EscalarMulFix(254)         R = r·G_8         ~3 k
 //   γ× EscalarMulAny(254)         S_i = r·fk_i      ~γ × 4 k
 //   γ× Poseidon(6)                bit_i             ~γ × 200
-//   γ× Num2Bits(254)              LSB extract       ~γ × 254
-// γ=5 total ≈ 25 k. γ=14 total ≈ 65 k.
+//   γ× HashToBit()                Legendre extract  ~γ × 4
+// γ=5 total ≈ 24 k. γ=14 total ≈ 62 k.
 //
 // `r` is the FMD blinding scalar (private witness). `fk[i]` is the
 // recipient flag-key point (private witness). `clue_bits` is a public
@@ -42,11 +44,15 @@ template ClueCheck(GAMMA) {
     signal input r;                  // private, Fr (≤ 254 bits)
     signal input fk[GAMMA][2];       // private, recipient flag-key points
     signal input clue_bits;          // public (via PolyEval), packed γ bits LSB-first
+    signal input legendre_bit[GAMMA];// private, prover-supplied bit per γ
+    signal input legendre_y[GAMMA];  // private, prover-supplied sqrt witness
     signal output Rx;                // public output, R = r·G_8
     signal output Ry;
 
     // 1. Decompose r into bits once; reused by R = r·G8 and γ × S_i = r·fk_i.
-    component rbits = Num2Bits(254);
+    //    _strict variant rejects r ≥ p (BN254 scalar prime ~2^253.6), preventing
+    //    field aliasing on the top bits.
+    component rbits = Num2Bits_strict();
     rbits.in <== r;
 
     // 2. R = r · G_8 (circomlib base point, see fmd-crypto/clue.rs:79-89).
@@ -65,10 +71,10 @@ template ClueCheck(GAMMA) {
     component cbits = Num2Bits(GAMMA);
     cbits.in <== clue_bits;
 
-    // 4. Per-component shared secret + Poseidon bit + constraint.
+    // 4. Per-component shared secret + Poseidon hash + Legendre bit.
     component s[GAMMA];
     component h[GAMMA];
-    component lsb[GAMMA];
+    component hb[GAMMA];
 
     for (var i = 0; i < GAMMA; i++) {
         s[i] = EscalarMulAny(254);
@@ -78,7 +84,7 @@ template ClueCheck(GAMMA) {
         s[i].p[0] <== fk[i][0];
         s[i].p[1] <== fk[i][1];
 
-        // bit_i = lsb1(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
+        // bit_i = legendre_bit(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
         h[i] = Poseidon(6);
         h[i].inputs[0] <== TAG_FMD_BIT();
         h[i].inputs[1] <== Rx;
@@ -87,10 +93,12 @@ template ClueCheck(GAMMA) {
         h[i].inputs[4] <== s[i].out[0];
         h[i].inputs[5] <== s[i].out[1];
 
-        lsb[i] = Num2Bits(254);
-        lsb[i].in <== h[i].out;
+        hb[i] = HashToBit();
+        hb[i].hash <== h[i].out;
+        hb[i].bit <== legendre_bit[i];
+        hb[i].y <== legendre_y[i];
 
-        // Sender format: c_bits[i] === 1 - lsb1(Poseidon(...))
-        cbits.out[i] === 1 - lsb[i].out[0];
+        // Sender format: c_bits[i] === 1 - legendre_bit(Poseidon(...))
+        cbits.out[i] === 1 - legendre_bit[i];
     }
 }

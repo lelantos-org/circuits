@@ -72,6 +72,9 @@ include "lib/clue.circom";
 //   - recipient_address typed as address (< 2^160)
 //   - nullifier[i] always inserted (no sentinel); revert on already-spent
 //   - out_cm[j] always inserted into cm tree (no sentinel)
+//
+// Properties now also enforced in-circuit (defense-in-depth on contract):
+//   - in_asset[i], out_asset[j] < 2^64 (via Num2Bits(64) inside HashToAssetGen)
 
 template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     // ===== PUBLIC (verifier-visible) =====
@@ -127,6 +130,11 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     // 14-bit packed clueBits per output; first GAMMA bits constrained
     // honest, rest unconstrained but contract masks upper-2 bits zero.
     signal input out_clue_bits[N_OUT];
+    // Legendre-symbol witness pair per (output, γ-slot). Computed by
+    // `fmdLegendreWitness` in sdk/src/crypto/sqrt.ts. See HashToBit gadget
+    // in circuits/src/lib/hash_to_bit.circom for the constraint shape.
+    signal input out_legendre_bit[N_OUT][GAMMA];
+    signal input out_legendre_y[N_OUT][GAMMA];
     // Output-only signals exposed by ClueCheck so PolyEval can pin them.
     signal out_clue_Rx[N_OUT];
     signal out_clue_Ry[N_OUT];
@@ -181,13 +189,15 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
         out_note[j].cv[0]    <== out_cv[j][0];
         out_note[j].cv[1]    <== out_cv[j][1];
 
-        // FMD clue: prove R = r·G_8 and clue_bits[i] = 1 - lsb1(Poseidon(...)).
+        // FMD clue: prove R = r·G_8 and clue_bits[i] = 1 - legendre_bit(Poseidon(...)).
         // Output Rx, Ry exposed for PolyEval binding.
         clue[j] = ClueCheck(GAMMA);
         clue[j].r <== out_r[j];
         for (var gi = 0; gi < GAMMA; gi++) {
             clue[j].fk[gi][0] <== out_fk[j][gi][0];
             clue[j].fk[gi][1] <== out_fk[j][gi][1];
+            clue[j].legendre_bit[gi] <== out_legendre_bit[j][gi];
+            clue[j].legendre_y[gi]   <== out_legendre_y[j][gi];
         }
         clue[j].clue_bits <== out_clue_bits[j];
         out_clue_Rx[j] <== clue[j].Rx;

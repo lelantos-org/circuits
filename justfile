@@ -120,5 +120,10 @@ rebuild: compile setup
 test:
     npm test
 
+# Static analysis via Trail of Bits circomspect. Install: cargo install circomspect
+lint:
+    @command -v circomspect >/dev/null || { echo "circomspect not found. Install: cargo install circomspect"; exit 1; }
+    circomspect "{{ROOT}}/src" -L "{{ROOT}}/node_modules"
+
 clean:
     rm -rf "{{BUILD}}"
