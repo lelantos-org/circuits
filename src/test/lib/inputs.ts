@@ -31,3 +31,41 @@ export function treeUpdateInputJson(a: TreeUpdateArgs) {
         frontier_in: a.frontier.map(lvl => lvl.map(s => s.toString())),
     };
 }
+
+export interface TreeUpdateBatchArgs {
+    oldRoot: Field;
+    newRoot: Field;
+    startIndex: number | bigint;
+    actualCount: number | bigint;
+    cms: Field[];
+    frontier: Field[][];
+    z: Field;
+}
+
+export function treeUpdateBatchInputJson(a: TreeUpdateBatchArgs) {
+    return {
+        z: a.z.toString(),
+        old_root: a.oldRoot.toString(),
+        new_root: a.newRoot.toString(),
+        start_index: a.startIndex.toString(),
+        actual_count: a.actualCount.toString(),
+        cms: a.cms.map(c => c.toString()),
+        frontier_in: a.frontier.map(lvl => lvl.map(s => s.toString())),
+    };
+}
+
+// Coefficient layout MUST match TreeUpdateBatch circuit:
+//   [old_root, new_root, start_index, actual_count, cms[0..2*MAX_N-1]]
+export function flattenTreeUpdateBatch(a: {
+    oldRoot: Field; newRoot: Field;
+    startIndex: number | bigint; actualCount: number | bigint;
+    cms: Field[];
+}): Field[] {
+    return [
+        a.oldRoot,
+        a.newRoot,
+        BigInt(a.startIndex),
+        BigInt(a.actualCount),
+        ...a.cms,
+    ];
+}

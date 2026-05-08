@@ -4,10 +4,13 @@ Multi-Asset Shielded Pool circuits implemented in Circom 2.2.3 over the
 BN254 scalar field, with Baby-Jubjub used for the value-commitment subgroup.
 The package exports two Groth16-friendly entry points:
 
-- [`Transact(DEPTH, N_IN, N_OUT)`](2x2.circom), instantiated as
-  `Transact(10, 2, 2)` — the on-chain pool transact circuit: a quaternary
+- [`Transact(DEPTH, N_IN, N_OUT, GAMMA)`](2x2.circom), instantiated as
+  `Transact(10, 2, 2, 5)` — the on-chain pool transact circuit: a quaternary
   Merkle tree of depth 10 (`4^10 = 1,048,576` leaves) consuming up to two
   shielded inputs and producing up to two shielded outputs per proof.
+  `GAMMA` is the FMD2 clue width (default 5 bits, matches
+  `FMD_DEFAULT_GAMMA` in `sdk/src/fmd.ts`); each output carries an
+  in-circuit FMD clue derivation (§7a).
 - [`TreeUpdate(DEPTH)`](tree_update.circom), instantiated as
   `TreeUpdate(10)` — a relayer-side proof that the canonical commitment
   tree advances `old_root → new_root` by inserting two leaves at
@@ -46,18 +49,25 @@ in §10, enforces the following properties for every accepted transaction:
   commitment is a real Poseidon hash. No `bytes32(0)` sentinel leaks the
   transaction shape.
 
-Out of scope: EdDSA spend authorization, encrypted memo layout, FMD
-detection, and Solidity-side hash-to-curve. The public-bucket generator
-is derived in-circuit from `public_asset_id` via `HashToAssetGen`; see §10.
+- **FMD clue honesty.** Each output proves a fresh FMD2 clue
+  `(R, clue_bits)` was derived honestly from the recipient's flag-key
+  (§7a). A malicious sender cannot inflate the false-positive rate by
+  flipping bits — `clue_bits[i] === 1 - legendre_bit(Poseidon(...))` is
+  enforced inside the proof.
+
+Out of scope: EdDSA spend authorization, encrypted memo layout, and
+Solidity-side hash-to-curve. The public-bucket generator is derived
+in-circuit from `public_asset_id` via `HashToAssetGen`; see §10.
 
 ---
 
 ## 2. I/O surface
 
 The verifier sees only **two** field elements — `z` (Fiat-Shamir
-challenge) and `y` (Horner evaluation). The 20 logical PIs below are
-demoted to private witnesses and bound into `(z, y)` by the
-[`PolyEval(20)`](lib/poly_eval.circom) gadget; see §2a.
+challenge) and `y` (Horner evaluation). The `20 + 3·N_OUT` logical PIs
+below are demoted to private witnesses and bound into `(z, y)` by the
+[`PolyEval(20 + 3·N_OUT)`](lib/poly_eval.circom) gadget; see §2a. At
+`N_OUT = 2`, that is 26 logical PIs (20 base + 6 clue).
 
 Verifier-visible public signals:
 
@@ -80,35 +90,45 @@ Logical "public" inputs (private witnesses, bound through `PolyEval`):
 | `chain_id` | 1 | Replay protection. |
 | `payer_address` | 1 | Transparent depositor (`uint160`); zero when no deposit. Bound so the contract can settle `public_in` against the right account. |
 | `relayer_address` | 1 | Relayer payout target (`uint160`); zero for self-submitted proofs. Bound to prevent relayer substitution after proof generation. |
+| `out_clue_Rx[N_OUT]`, `out_clue_Ry[N_OUT]` | 4 | FMD clue point `R = r·G_8` per output (Baby-Jubjub coords). Bound so contract / wallets index the same `R` the prover used. |
+| `out_clue_bits[N_OUT]` | 2 | Packed FMD clue bits per output (γ bits LSB-first, padded to 14; contract enforces upper-2-bits zero via `CLUE_BITS_MASK = 0x3FFF`). |
 
 ### 2a. SnarkCompression (PolyEval binding)
 
-The 20 logical PIs above are packed in a fixed slot order and fed into
-[`PolyEval(20)`](lib/poly_eval.circom) as Horner-form coefficients:
+The `20 + 3·N_OUT` logical PIs above are packed in a fixed slot order
+and fed into [`PolyEval(20 + 3·N_OUT)`](lib/poly_eval.circom) as
+Horner-form coefficients:
 
 ```
-y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[19]·z^19
+y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[N-1]·z^(N-1)
 ```
 
-Slot layout (MUST match `contracts/src/MASP.sol::_flatten()`
-byte-for-byte; reordering is a soundness change for the contract):
+Slot layout for `N_OUT = 2` (MUST match
+`contracts/src/MASP.sol::_flatten()` byte-for-byte; reordering is a
+soundness change for the contract):
 
 | Slot | Coeff | Slot | Coeff |
 |---|---|---|---|
-| 0 | `merkle_root`     | 10 | `in_cv[1][0]` |
-| 1 | `nullifier[0]`    | 11 | `in_cv[1][1]` |
-| 2 | `nullifier[1]`    | 12 | `out_cv[0][0]` |
-| 3 | `out_cm[0]`       | 13 | `out_cv[0][1]` |
-| 4 | `out_cm[1]`       | 14 | `out_cv[1][0]` |
-| 5 | `public_asset_id` | 15 | `out_cv[1][1]` |
-| 6 | `public_in`       | 16 | `recipient_address` |
-| 7 | `public_out`      | 17 | `chain_id` |
-| 8 | `in_cv[0][0]`     | 18 | `payer_address` |
-| 9 | `in_cv[0][1]`     | 19 | `relayer_address` |
+| 0 | `merkle_root`     | 13 | `out_cv[0][1]` |
+| 1 | `nullifier[0]`    | 14 | `out_cv[1][0]` |
+| 2 | `nullifier[1]`    | 15 | `out_cv[1][1]` |
+| 3 | `out_cm[0]`       | 16 | `recipient_address` |
+| 4 | `out_cm[1]`       | 17 | `chain_id` |
+| 5 | `public_asset_id` | 18 | `payer_address` |
+| 6 | `public_in`       | 19 | `relayer_address` |
+| 7 | `public_out`      | 20 | `out_clue_Rx[0]` |
+| 8 | `in_cv[0][0]`     | 21 | `out_clue_Ry[0]` |
+| 9 | `in_cv[0][1]`     | 22 | `out_clue_bits[0]` |
+| 10 | `in_cv[1][0]`    | 23 | `out_clue_Rx[1]` |
+| 11 | `in_cv[1][1]`    | 24 | `out_clue_Ry[1]` |
+| 12 | `out_cv[0][0]`   | 25 | `out_clue_bits[1]` |
+
+Clue slots are appended in output order: `[Rx_j, Ry_j, bits_j]` for
+`j = 0..N_OUT-1`, starting at slot `20`.
 
 Soundness: any tampering with `coeffs[k]` changes `y` for all but at
-most 19 values of `z` (Schwartz–Zippel over BN254 scalar field;
-collision probability `≤ 19 / r ≈ 2^-249` — negligible). The contract
+most `N-1` values of `z` (Schwartz–Zippel over BN254 scalar field;
+collision probability `≤ (N-1) / r ≈ 2^-249` — negligible). The contract
 MUST derive `z` from a Fiat-Shamir transcript over the full 20-slot
 flattened vector after canonicalising every slot to `uint256`; sampling
 `z` independently of the slots breaks the binding.
@@ -124,6 +144,11 @@ Private inputs (per slot):
   path_elements[DEPTH][3], path_indices[DEPTH], is_dummy`.
 - Output: `asset, value, pk, rho, rcm, rcv`. No `is_dummy` — padding
   outputs are real `value = 0` notes.
+- FMD clue (per output): `r` (254-bit blinding scalar),
+  `fk[GAMMA][2]` (recipient flag-key points), `legendre_bit[GAMMA]`,
+  `legendre_y[GAMMA]` (Legendre witness pair, see §7a). Padding outputs
+  also produce a clue — sender's own `fk` + random `r` lands the clue
+  on sender's own subscription harmlessly.
 
 Relayer compensation is **not** a public input. Fees are paid as a
 shielded output addressed to the relayer's zk-pk (Railgun-style); see
@@ -139,14 +164,16 @@ flowchart LR
         IN["Input notes<br/>(asset, value, pk, rho, rcm, nsk)"]
         OUT["Output notes<br/>(asset, value, pk, rho, rcm)"]
         MP["Quaternary Merkle paths"]
+        FMD["FMD witnesses<br/>(r, fk[γ], legendre_bit, legendre_y)"]
     end
-    subgraph Circuit["Transact(10, 2, 2)"]
+    subgraph Circuit["Transact(10, 2, 2, 5)"]
         K["Key hierarchy<br/>nsk → ivk → pk"]
         NF["Nullifiers"]
         MT["Merkle membership"]
         CV["Value commitments<br/>cv = v · V^t + rcv · H"]
         BAL["Per-asset point balance"]
         CM["Output commitments"]
+        CL["ClueCheck(γ)<br/>R = r·G_8, bits = legendre(...)"]
     end
     subgraph Logical["Logical PIs (private witnesses)"]
         ROOT["merkle_root"]
@@ -156,6 +183,7 @@ flowchart LR
         REC["recipient_address, chain_id"]
         ADDR["payer_address, relayer_address"]
         CVS["in_cv[..], out_cv[..]"]
+        CLS["out_clue_Rx/Ry/bits[..]"]
     end
     subgraph Pub["Verifier publics"]
         Z["z (input)"]
@@ -168,13 +196,16 @@ flowchart LR
     OUT --> CV
     CV --> BAL --> PB
     OUT --> CM --> CMS
-    ROOT --> PE["PolyEval(20)"]
+    OUT --> CL
+    FMD --> CL --> CLS
+    ROOT --> PE["PolyEval(20 + 3·N_OUT)"]
     NFS --> PE
     CMS --> PE
     PB --> PE
     REC --> PE
     ADDR --> PE
     CVS --> PE
+    CLS --> PE
     Z --> PE --> Y
 ```
 
@@ -332,6 +363,46 @@ collisions and intra-tx duplicates.
 
 ---
 
+## 7a. FMD2 clue derivation (in-circuit)
+
+Files: [`lib/clue.circom`](lib/clue.circom),
+[`lib/hash_to_bit.circom`](lib/hash_to_bit.circom).
+
+Each output proves a fresh Fuzzy Message Detection clue
+`(R, clue_bits)` was derived honestly from the recipient's flag-key
+`fk` (γ Baby-Jubjub points). Mirrors `shared_bit` in
+`backend/crates/fmd-crypto/src/clue.rs` and `sdk/src/fmd.ts` byte-for-byte.
+
+```
+R       = r · G_8                              (Baby-Jubjub fixed base, circomlib G8)
+S_i     = r · fk_i                             for i ∈ [γ]
+bit_i   = legendre_bit(Poseidon(TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y))
+clue_bits[i] === 1 - bit_i                     (sender flips so receiver test ⊕ == 1)
+```
+
+`legendre_bit(h)` is `1` iff `h` is a quadratic residue in 𝔽_r.
+[`HashToBit()`](lib/hash_to_bit.circom) verifies this in **4 multiplicative
+constraints** by witnessing `(bit, y)` such that `hash = y² · m` where
+`m = 1` (QR branch) or `m = Z` (QNR branch, `Z = 5` is a fixed QNR).
+Witnesses `(bit, y)` come from `fmdLegendreWitness` in
+`sdk/src/crypto/sqrt.ts`; `Z` MUST stay in sync with `FMD_LEGENDRE_QNR`
+in `sdk/src/crypto/tags.ts`.
+
+Honesty constraint: `clue_bits[i] === 1 - legendre_bit[i]` forces the
+sender to derive bits from a real `(r, fk)` — they cannot inflate
+false-positive rate by setting `clue_bits = all-ones` without producing
+a valid `(r, fk)` whose Poseidon outputs are all non-residues.
+
+`R = r·G_8` and `clue_bits` are exposed as logical PIs so the contract
+and wallets index the same `R` the prover used. `clue_bits` is packed
+into a 14-bit field; the first `GAMMA` bits are constrained, higher
+bits are masked off-chain via `CLUE_BITS_MASK = 0x3FFF`.
+
+Cost (γ=5): ≈24k constraints per output (1× `EscalarMulFix(254)` + γ×
+`EscalarMulAny(254)` + γ× `Poseidon(6)` + γ× `HashToBit`). γ=14 ≈62k.
+
+---
+
 ## 8. Quaternary Merkle membership
 
 File: [`lib/merkle.circom`](lib/merkle.circom).
@@ -472,6 +543,8 @@ prior proofs and with test helpers. Update in lockstep.
 | `TAG_IVK()` | 4 | `ivk = Poseidon(TAG_IVK, nsk)` | 2 |
 | `TAG_MERKLE()` | 5 | `node = Poseidon(TAG_MERKLE, c0..c3)` | 5 |
 | `TAG_DK` | 6 | `dk = Poseidon(TAG_DK, ivk)` (off-circuit; FMD). | 2 |
+| `TAG_ASSET` | 7 | `V^t = Pedersen(TAG_ASSET ‖ asset_id_bits)` | Pedersen(72) |
+| `TAG_FMD_BIT()` | 8 | `bit_i = legendre_bit(Poseidon(TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y))` (FMD2 clue, §7a) | 6 |
 | `TAG_NK()` | 9 | `nk = Poseidon(TAG_NK, nsk)` (Full Viewing Key). | 2 |
 
 Combined arity + tag prevents Poseidon collisions across hash sites.
@@ -508,6 +581,13 @@ arity 4; without an explicit tag a malicious prover could pick an
 internal-node value colliding with a leaf commitment, breaking soundness.
 Bumps Merkle hash to arity 5.
 
+### `TAG_FMD_BIT` → 8
+
+Prefix for FMD2 per-component bit hash. Arity 6:
+`Poseidon(TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y)`. Tag isolates the
+FMD bit hash from any other arity-6 Poseidon call (none today). Used
+exclusively in [`lib/clue.circom`](lib/clue.circom); see §7a.
+
 ### `TAG_ASSET` for `HashToAssetGen`
 
 `HashToAssetGen` prepends one `TAG_ASSET` byte (= 7) to the 64-bit
@@ -534,15 +614,7 @@ divergence between the multiplier and the range check.
 
 ## 13. Constraint budget
 
-### `Transact(10, 2, 2)`
-
-```
-total constraints:  59,358
-wires:              59,425
-public inputs:      1   (z)
-public outputs:     1   (y)
-private inputs:     130
-```
+### `Transact(10, 2, 2, 5)`
 
 Approximate component breakdown:
 
@@ -553,14 +625,16 @@ Approximate component breakdown:
 | 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4k |
 | `PerAssetPointBalance` point sums | ~70 |
 | Note commitments + Merkle + nullifiers | ~15k |
-| `PolyEval(20)` Horner chain | ~20 |
-| **Total** | **~59k** |
+| 2 × `ClueCheck(5)` (FMD2, §7a) | ~48k |
+| `PolyEval(26)` Horner chain | ~26 |
+| **Total** | **~107k** |
 
 Depth-10 figures already include the +1.1k overhead (~270 constraints per
 extra level × 2 levels × 2 input branches) over the depth-8 baseline.
-The PolyEval gadget adds 20 quadratic constraints — negligible compared
-to the savings on Solidity verifier calldata (2 vs 20 field elements)
-and IC-table size (3 vs 21 G1 points).
+PolyEval adds N quadratic constraints — negligible compared to the
+savings on Solidity verifier calldata (2 vs 26 field elements) and
+IC-table size (3 vs 27 G1 points). FMD clue verification dominates the
+new cost; halving γ from 5 to a smaller value linearly reduces it.
 
 ### `TreeUpdate(10)`
 
@@ -582,7 +656,6 @@ selectors / frontier writes add ~3k. `PolyEval(5)` is negligible.
 
 - EdDSA spend authorization (only key derivation is in-circuit).
 - Encrypted memo ciphertext layout.
-- FMD clue verification.
 - Solidity-side hash-to-curve (registry approach sidesteps it).
 - Sapling-style binding signature on `bvk` — balance is enforced
   in-circuit, so a separate `bvk` signature is redundant.
@@ -605,6 +678,8 @@ selectors / frontier writes add ~3k. `PolyEval(5)` is negligible.
 | [`lib/output.circom`](lib/output.circom) | `OutputNote` (cm + dummy gate + range). |
 | [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO; used twice by `TreeUpdate`. |
 | [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)` — Horner-form evaluation gadget for SnarkCompression. |
+| [`lib/clue.circom`](lib/clue.circom) | `ClueCheck(GAMMA)` — in-circuit FMD2 clue derivation (R = r·G_8, γ Legendre bits). See §7a. |
+| [`lib/hash_to_bit.circom`](lib/hash_to_bit.circom) | `HashToBit()` — 4-constraint Legendre-symbol bit extractor used by `ClueCheck`. |
 | [`test/helpers.ts`](test/helpers.ts) | Test witness builders, Pedersen hash-to-curve, value-commit helpers. |
 | [`test/transact.test.ts`](test/transact.test.ts) | Transact circuit test suite. |
 | [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library test suite. |

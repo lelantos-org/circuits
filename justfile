@@ -6,7 +6,7 @@ PTAU_DIR := ROOT / "ptau"
 PTAU_FILE := "powersOfTau28_hez_final_17.ptau"
 PTAU_URL := "https://storage.googleapis.com/zkevm/ptau/" + PTAU_FILE
 CONTRACTS_VERIFIER := ROOT / ".." / "contracts" / "src" / "Verifier.sol"
-CONTRACTS_TREE_VERIFIER := ROOT / ".." / "contracts" / "src" / "TreeUpdateVerifier.sol"
+CONTRACTS_TREE_BATCH_VERIFIER := ROOT / ".." / "contracts" / "src" / "TreeUpdateBatchVerifier.sol"
 
 default:
     @just --list
@@ -48,56 +48,57 @@ prove input="":
 
 all: compile setup prove
 
-# Compile tree_update.circom -> r1cs + wasm + sym, print constraint count.
-compile-tree:
+# Compile tree_update_batch.circom -> r1cs + wasm + sym, print constraint count.
+compile-batch:
     mkdir -p "{{BUILD}}"
-    echo "==> Compiling {{ROOT}}/src/tree_update.circom"
-    circom "{{ROOT}}/src/tree_update.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
+    echo "==> Compiling {{ROOT}}/src/tree_update_batch.circom"
+    circom "{{ROOT}}/src/tree_update_batch.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
     echo "==> Constraint info"
-    npx snarkjs r1cs info "{{BUILD}}/tree_update.r1cs"
+    npx snarkjs r1cs info "{{BUILD}}/tree_update_batch.r1cs"
 
-# Phase-2 trusted setup for tree_update (single-contributor; INSECURE).
-setup-tree:
+# Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
+# tree_update_batch (MAX_N=16) has ~547k constraints, requires ptau_20 (~3GB).
+setup-batch:
     mkdir -p "{{PTAU_DIR}}"
-    if [ ! -f "{{PTAU_DIR}}/{{PTAU_FILE}}" ]; then \
-        echo "==> Downloading {{PTAU_FILE}}"; \
-        curl -L "{{PTAU_URL}}" -o "{{PTAU_DIR}}/{{PTAU_FILE}}"; \
+    if [ ! -f "{{PTAU_DIR}}/powersOfTau28_hez_final_20.ptau" ]; then \
+        echo "==> Downloading powersOfTau28_hez_final_20.ptau (~3GB)"; \
+        curl -L "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_20.ptau" -o "{{PTAU_DIR}}/powersOfTau28_hez_final_20.ptau"; \
     fi
-    echo "==> Phase-2 setup (tree_update)"
-    npx snarkjs groth16 setup "{{BUILD}}/tree_update.r1cs" "{{PTAU_DIR}}/{{PTAU_FILE}}" "{{BUILD}}/tree_update_0.zkey"
+    echo "==> Phase-2 setup (tree_update_batch)"
+    npx snarkjs groth16 setup "{{BUILD}}/tree_update_batch.r1cs" "{{PTAU_DIR}}/powersOfTau28_hez_final_20.ptau" "{{BUILD}}/tree_update_batch_0.zkey"
     echo "==> Single contribution (PROTOTYPE ONLY)"
-    npx snarkjs zkey contribute "{{BUILD}}/tree_update_0.zkey" "{{BUILD}}/tree_update_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
+    npx snarkjs zkey contribute "{{BUILD}}/tree_update_batch_0.zkey" "{{BUILD}}/tree_update_batch_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
     echo "==> Export verification key"
-    npx snarkjs zkey export verificationkey "{{BUILD}}/tree_update_final.zkey" "{{BUILD}}/tree_update_verification_key.json"
+    npx snarkjs zkey export verificationkey "{{BUILD}}/tree_update_batch_final.zkey" "{{BUILD}}/tree_update_batch_verification_key.json"
     echo "==> Export Solidity verifier"
-    npx snarkjs zkey export solidityverifier "{{BUILD}}/tree_update_final.zkey" "{{BUILD}}/TreeUpdateVerifier.sol"
-    echo "==> Done. Verifier at {{BUILD}}/TreeUpdateVerifier.sol"
+    npx snarkjs zkey export solidityverifier "{{BUILD}}/tree_update_batch_final.zkey" "{{BUILD}}/TreeUpdateBatchVerifier.sol"
+    echo "==> Done. Verifier at {{BUILD}}/TreeUpdateBatchVerifier.sol"
 
-# Prove + verify a tree_update witness.
-prove-tree input="":
-    INPUT="{{ if input == "" { ROOT / "circuits/test/tree_update_input.json" } else { input } }}"; \
+# Prove + verify a tree_update_batch witness.
+prove-batch input="":
+    INPUT="{{ if input == "" { ROOT / "circuits/test/tree_update_batch_input.json" } else { input } }}"; \
     echo "==> Compute witness from $INPUT"; \
-    node "{{BUILD}}/tree_update_js/generate_witness.js" "{{BUILD}}/tree_update_js/tree_update.wasm" "$INPUT" "{{BUILD}}/tree_update_witness.wtns"; \
+    node "{{BUILD}}/tree_update_batch_js/generate_witness.js" "{{BUILD}}/tree_update_batch_js/tree_update_batch.wasm" "$INPUT" "{{BUILD}}/tree_update_batch_witness.wtns"; \
     echo "==> Prove (groth16)"; \
-    npx snarkjs groth16 prove "{{BUILD}}/tree_update_final.zkey" "{{BUILD}}/tree_update_witness.wtns" "{{BUILD}}/tree_update_proof.json" "{{BUILD}}/tree_update_public.json"; \
+    npx snarkjs groth16 prove "{{BUILD}}/tree_update_batch_final.zkey" "{{BUILD}}/tree_update_batch_witness.wtns" "{{BUILD}}/tree_update_batch_proof.json" "{{BUILD}}/tree_update_batch_public.json"; \
     echo "==> Verify"; \
-    npx snarkjs groth16 verify "{{BUILD}}/tree_update_verification_key.json" "{{BUILD}}/tree_update_public.json" "{{BUILD}}/tree_update_proof.json"
+    npx snarkjs groth16 verify "{{BUILD}}/tree_update_batch_verification_key.json" "{{BUILD}}/tree_update_batch_public.json" "{{BUILD}}/tree_update_batch_proof.json"
 
-# Full rebuild for tree_update circuit + sync TreeUpdateVerifier.sol into contracts/src.
-rebuild-tree: compile-tree setup-tree
-    @echo "==> Patching contract name (Groth16Verifier -> TreeUpdateGroth16Verifier)"
-    @sed 's/contract Groth16Verifier/contract TreeUpdateGroth16Verifier/' "{{BUILD}}/TreeUpdateVerifier.sol" > "{{BUILD}}/TreeUpdateVerifier.patched.sol"
-    @echo "==> Syncing TreeUpdateVerifier.sol -> {{CONTRACTS_TREE_VERIFIER}}"
-    cp "{{BUILD}}/TreeUpdateVerifier.patched.sol" "{{CONTRACTS_TREE_VERIFIER}}"
-    @echo "==> rebuild-tree complete"
-    @echo "    r1cs:        {{BUILD}}/tree_update.r1cs"
-    @echo "    wasm:        {{BUILD}}/tree_update_js/tree_update.wasm"
-    @echo "    zkey:        {{BUILD}}/tree_update_final.zkey"
-    @echo "    vk:          {{BUILD}}/tree_update_verification_key.json"
-    @echo "    verifier:    {{CONTRACTS_TREE_VERIFIER}}"
+# Full rebuild for tree_update_batch circuit + sync TreeUpdateBatchVerifier.sol into contracts/src.
+rebuild-batch: compile-batch setup-batch
+    @echo "==> Patching contract name (Groth16Verifier -> TreeUpdateBatchGroth16Verifier)"
+    @sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' "{{BUILD}}/TreeUpdateBatchVerifier.sol" > "{{BUILD}}/TreeUpdateBatchVerifier.patched.sol"
+    @echo "==> Syncing TreeUpdateBatchVerifier.sol -> {{CONTRACTS_TREE_BATCH_VERIFIER}}"
+    cp "{{BUILD}}/TreeUpdateBatchVerifier.patched.sol" "{{CONTRACTS_TREE_BATCH_VERIFIER}}"
+    @echo "==> rebuild-batch complete"
+    @echo "    r1cs:        {{BUILD}}/tree_update_batch.r1cs"
+    @echo "    wasm:        {{BUILD}}/tree_update_batch_js/tree_update_batch.wasm"
+    @echo "    zkey:        {{BUILD}}/tree_update_batch_final.zkey"
+    @echo "    vk:          {{BUILD}}/tree_update_batch_verification_key.json"
+    @echo "    verifier:    {{CONTRACTS_TREE_BATCH_VERIFIER}}"
 
-# Build everything: 2x2 + tree_update.
-all-tree: compile compile-tree setup setup-tree
+# Build everything: 2x2 + tree_update_batch.
+all-tree: compile compile-batch setup setup-batch
 
 # Full rebuild after circuit edits: recompile -> trusted setup -> sync Verifier.sol
 # into contracts/src. Use after changes to 2x2.circom or any lib/*.circom; this

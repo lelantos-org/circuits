@@ -83,7 +83,7 @@ R1CS totals (BN254, `snarkjs r1cs info`):
 
 | Circuit | Constraints | Wires | Private inputs | Labels |
 |---|---:|---:|---:|---:|
-| `2x2.circom` (DEPTH=10, N_IN=2, N_OUT=2, GAMMA=5) | 102,970 | 103,037 | 154 | 247,289 |
+| `2x2.circom` (DEPTH=10, N_IN=2, N_OUT=2, GAMMA=5) | 91,400 | 91,477 | 172 | 222,195 |
 | `tree_update.circom` (DEPTH=10) | 34,068 | 34,082 | 35 | 54,982 |
 
 Verifier-visible: 1 public input (`z`) + 1 output (`y`) per circuit.
@@ -102,7 +102,7 @@ Per spent slot `i` (`SpentNote`, [src/lib/spent.circom](src/lib/spent.circom)):
 Per output slot `j` (`OutputNote`, [src/lib/output.circom](src/lib/output.circom)):
 - `out_cm[j] = NoteCommit(asset_id, value, pk, rho, rcm)`.
 - `out_cv[j] = value · V^t(asset_id) + rcv · H`; `rH_j = rcv · H` exported.
-- FMD clue (`ClueCheck`, [src/lib/clue.circom](src/lib/clue.circom)): `R = r · G_8`; for each of `GAMMA=5` flag-keys, `clue_bits[j]` low bits = `1 - lsb1(Poseidon(...))`. `out_clue_Rx`, `out_clue_Ry` exposed for PolyEval binding.
+- FMD clue (`ClueCheck`, [src/lib/clue.circom](src/lib/clue.circom)): `R = r · G_8`; for each of `GAMMA=5` flag-keys, `clue_bits[j]` low bits = `1 - legendre_bit(Poseidon(...))`, where `legendre_bit(h) = 1` iff `h` is a quadratic residue in 𝔽_r (witness pair `legendre_bit[gi], legendre_y[gi]` per slot, see [src/lib/hash_to_bit.circom](src/lib/hash_to_bit.circom)). `out_clue_Rx`, `out_clue_Ry` exposed for PolyEval binding.
 
 Public-bucket / balance:
 - `V^pub = HashToAssetGen(public_asset_id)` derived in-circuit. Pedersen image is on-curve and in the prime-order subgroup by construction, so no `SafePoint` is needed.
