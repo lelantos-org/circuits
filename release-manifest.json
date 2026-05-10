@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "ceremony": "single-contributor-prototype",
+  "ptau": "powersOfTau28_hez_final_17.ptau",
+  "warning": "Single-contributor trusted setup. NOT mainnet-safe. See README.",
+  "artifacts": {
+    "2x2.wasm": "b1e0bc4ffdce16efdde4dcc25880f139b948fb5c5c908fa9cd1f2c175776e807",
+    "2x2_final.zkey": "0565df0878ac452ed7cffc1090e06bbe1e31d69f164ddf7931b00ff7ddec1771",
+    "verification_key.json": "1140b49a2c1643138ed854a666a72d139af81666f1ec6fb5c064782f6637e87d"
+  }
+}

@@ -128,3 +128,16 @@ lint:
 
 clean:
     rm -rf "{{BUILD}}"
+
+# Stage and verify the runtime artifact bundle for npm publish.
+# Copies the witness wasm out of `build/2x2_js/` to a flat `build/2x2.wasm`
+# so the package `files` whitelist (and `exports` subpath map) resolves
+# without shipping the redundant `2x2_js/` glue. Then runs
+# `scripts/check-artifacts.mjs` to assert sizes + SHA-256 match
+# `release-manifest.json`.
+package: rebuild
+    @echo "==> Staging build/2x2.wasm for publish"
+    cp "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2.wasm"
+    @ls -lh "{{BUILD}}/2x2.wasm" "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json"
+    @echo "==> Verifying artifacts against release-manifest.json"
+    node scripts/check-artifacts.mjs

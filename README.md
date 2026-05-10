@@ -1,4 +1,94 @@
-# circuits
+# `@lelantos-org/circuits`
+
+> ⚠️ **PROTOTYPE — NOT MAINNET-SAFE**
+>
+> The shipped `2x2_final.zkey` is the output of a single-contributor
+> trusted-setup ceremony (random entropy from `openssl rand -hex 32`,
+> see [`justfile:32`](./justfile)). Anyone who knows the toxic waste
+> from that contribution can forge proofs.
+>
+> Use this package for **testnets and development only**. A real
+> multi-party Phase-2 ceremony will ship as
+> `@lelantos-org/circuits@1.0.0`.
+
+Companion artifact package for [`@lelantos-org/sdk`](../sdk). Ships
+the Groth16 prover artifacts for the 2x2 transact circuit
+(`2x2.wasm` + `2x2_final.zkey` + `verification_key.json`); the SDK's
+`Wallet.connect()` auto-resolves these via subpath `exports`.
+
+This README also doubles as the development guide for circuit authors
+— see "Layout" through "Status" below.
+
+## Consuming the published package
+
+### Node
+
+```bash
+npm install @lelantos-org/circuits
+```
+
+The SDK auto-resolves the artifacts via `import.meta.resolve`. No
+further wiring needed:
+
+```ts
+import { Wallet } from "@lelantos-org/sdk";
+
+const wallet = await Wallet.fromPrivateKey(pk, {
+    network: "anvil",
+    rpcUrl: "http://localhost:8545",
+});
+// SDK reads:
+//   node_modules/@lelantos-org/circuits/build/2x2.wasm
+//   node_modules/@lelantos-org/circuits/build/2x2_final.zkey
+```
+
+Override the location via `proverArtifacts` on `Wallet.connect()` or
+the `LELANTOS_PROVER_ARTIFACTS_DIR` env var.
+
+### Browser
+
+GitHub Packages does not expose a public CDN, so there is no zero-
+config browser path. Pick one:
+
+1. **Bundle the assets.** Vite/Webpack/Next.js can inline static
+   assets from `node_modules`. Resolve the artifact URLs through
+   your bundler's asset pipeline and pass them to `Wallet.connect`:
+   ```ts
+   import wasmUrl from "@lelantos-org/circuits/2x2/2x2.wasm?url";
+   import zkeyUrl from "@lelantos-org/circuits/2x2/2x2_final.zkey?url";
+   const wallet = await Wallet.connect({
+       ...,
+       proverArtifacts: { circuit: wasmUrl, zkey: zkeyUrl },
+   });
+   ```
+2. **Self-host.** Copy
+   `node_modules/@lelantos-org/circuits/build/{2x2.wasm,2x2_final.zkey}`
+   to your CDN and pass the public URLs as `proverArtifacts`.
+
+### Subpath exports
+
+| Specifier                                              | Resolves to                       |
+|--------------------------------------------------------|-----------------------------------|
+| `@lelantos-org/circuits/2x2/2x2.wasm`                  | `build/2x2.wasm` (4.8 MB)         |
+| `@lelantos-org/circuits/2x2/2x2_final.zkey`            | `build/2x2_final.zkey` (44 MB)    |
+| `@lelantos-org/circuits/2x2/verification_key.json`     | `build/verification_key.json`     |
+
+### Artifact provenance
+
+Every published version pins per-artifact SHA-256 hashes in
+[`release-manifest.json`](./release-manifest.json). `prepublishOnly`
+fails if a rebuild diverges — accidental ceremony rerolls cannot
+slip into a release. Verify a downloaded tarball:
+
+```bash
+shasum -a 256 \
+    node_modules/@lelantos-org/circuits/build/2x2.wasm \
+    node_modules/@lelantos-org/circuits/build/2x2_final.zkey
+```
+
+---
+
+## For circuit authors
 
 MASP (Multi-Asset Shielded Pool) circuits in Circom.
 
@@ -127,4 +217,4 @@ PI compression:
 
 ## Status
 
-Prototype. Trusted setup uses a single contributor — **not production-safe**. Do a real MPC ceremony before mainnet use.
+Prototype. Trusted setup uses a single contributor — **not production-safe**. Do a real MPC ceremony before mainnet use; this package will bump to `1.0.0` once that ceremony completes.

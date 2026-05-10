@@ -24,6 +24,10 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 //   - nullifier === Poseidon(TAG_NF, nk, rho)  where nk = Poseidon(TAG_NK, nsk).
 //   - value < 2^64.
 //   - cv === ValueCommit(value, HashToAssetGen(asset_id), rcv).
+//   - cv_dep === ValueCommit(value, HashToAssetGen(asset_id), rcv_dep).
+//   - merkle leaf is Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) — the deposit
+//     anchor that pins (asset_id, value) to the leaf and forecloses the
+//     cm-preimage-substitution attack on the deposit path.
 //
 // `rH` is exposed so the caller's PerAssetPointBalance can sum rcv·H points
 // across notes (rather than running into field-wraparound issues with a
@@ -37,6 +41,7 @@ template SpentNote(DEPTH) {
     signal input rcm;
     signal input nsk;
     signal input rcv;
+    signal input rcv_dep;
     signal input path_elements[DEPTH][3];
     signal input path_indices[DEPTH];
     signal input is_dummy;
@@ -65,9 +70,38 @@ template SpentNote(DEPTH) {
     cm.rho      <== rho;
     cm.rcm      <== rcm;
 
-    // 3. Merkle membership (bypassed when is_dummy == 1).
+    // 3. Range check (used by both ValueCommit invocations below).
+    component rng_in = RangeCheck64();
+    rng_in.v <== value;
+
+    // 4. cv_dep = ValueCommit(value, V^asset, rcv_dep). Same Pedersen commit
+    //    shape as cv, but with the depositor-anchored blinder rcv_dep so the
+    //    leaf format `Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)` matches what
+    //    the depositor (or the spend that produced this note) committed to.
+    component gen_in = HashToAssetGen();
+    gen_in.asset_id <== asset_id;
+
+    component vc_dep = ValueCommit();
+    for (var i = 0; i < 64; i++) {
+        vc_dep.bits[i] <== rng_in.bits[i];
+    }
+    vc_dep.gen[0] <== gen_in.gen[0];
+    vc_dep.gen[1] <== gen_in.gen[1];
+    vc_dep.rcv    <== rcv_dep;
+
+    // 5. Recompute Merkle leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
+    //    Domain-separated from NoteCommitment via TAG_LEAF=10 (≪ 2^64 lower
+    //    bound on packed_av in NoteCommitment), so first-input slot
+    //    distinguishes the two arity-4 hash sites.
+    component leaf_h = Poseidon(4);
+    leaf_h.inputs[0] <== TAG_LEAF();
+    leaf_h.inputs[1] <== cm.cm;
+    leaf_h.inputs[2] <== vc_dep.cv[0];
+    leaf_h.inputs[3] <== vc_dep.cv[1];
+
+    // 6. Merkle membership (bypassed when is_dummy == 1).
     component mp = MerkleProofOrDummy(DEPTH);
-    mp.leaf     <== cm.cm;
+    mp.leaf     <== leaf_h.out;
     mp.root     <== root;
     mp.is_dummy <== is_dummy;
     for (var d = 0; d < DEPTH; d++) {
@@ -77,7 +111,7 @@ template SpentNote(DEPTH) {
         mp.path_indices[d]     <== path_indices[d];
     }
 
-    // 4. Nullifier always real: nf = Poseidon(TAG_NF, nk, rho) with
+    // 7. Nullifier always real: nf = Poseidon(TAG_NF, nk, rho) with
     //    nk = Poseidon(TAG_NK, nsk). nk is derived in-circuit so the prover
     //    cannot smuggle a different nk than the one consistent with nsk.
     //    FVK auditor holds nk only and can recompute nf for any known rho.
@@ -91,29 +125,22 @@ template SpentNote(DEPTH) {
     nf_h.rho <== rho;
     nf_h.nf === nullifier;
 
-    // 5. Range check on private value. Bits exposed and threaded into
-    //    ValueCommit below so the value scalar mul does not redo Num2Bits(64).
-    component rng = RangeCheck64();
-    rng.v <== value;
-
-    // 6. Reject asset_id == 0 for real notes (ghost-note defense).
+    // 8. Reject asset_id == 0 for real notes (ghost-note defense).
     component asset_nz = IsZero();
     asset_nz.in <== asset_id;
     (1 - is_dummy) * asset_nz.out === 0;
 
-    // 7. Bind cv to (asset_id, value, rcv) via Sapling-style ValueCommit.
-    //    SOUNDNESS-CRITICAL: this equality forces the prover-supplied public
-    //    cv to be on-curve. Removing it lets a malicious prover smuggle off-
-    //    curve garbage as a public input and break the balance check.
-    component gen = HashToAssetGen();
-    gen.asset_id <== asset_id;
-
+    // 9. Bind cv to (asset_id, value, rcv) via Sapling-style ValueCommit.
+    //    Reuses rng_in.bits + gen_in from steps 3-4. SOUNDNESS-CRITICAL:
+    //    this equality forces the prover-supplied public cv to be on-curve.
+    //    Removing it lets a malicious prover smuggle off-curve garbage as a
+    //    public input and break the balance check.
     component vc = ValueCommit();
     for (var i = 0; i < 64; i++) {
-        vc.bits[i] <== rng.bits[i];
+        vc.bits[i] <== rng_in.bits[i];
     }
-    vc.gen[0] <== gen.gen[0];
-    vc.gen[1] <== gen.gen[1];
+    vc.gen[0] <== gen_in.gen[0];
+    vc.gen[1] <== gen_in.gen[1];
     vc.rcv    <== rcv;
 
     cv[0] === vc.cv[0];

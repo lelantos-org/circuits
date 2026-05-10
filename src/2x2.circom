@@ -57,6 +57,12 @@ include "lib/clue.circom";
 //     [17] chain_id
 //     [18] payer_address
 //     [19] relayer_address
+//     [20] out_cv_dep[0][0]    -- deposit-anchor Pedersen value commitment
+//     [21] out_cv_dep[0][1]       per output, exposed so the spend's
+//     [22] out_cv_dep[1][0]       tree_update_batch sees the same cv_dep
+//     [23] out_cv_dep[1][1]       baked into the inserted leaf.
+//   After base 24, each output appends 3 clue PI slots (clueRx, clueRy,
+//   clueBits). Total = 24 + 3 * N_OUT = 30 for N_OUT=2.
 //   Re-ordering this list is a soundness change for the contract.
 //
 // Per-slot logic is delegated to `SpentNote` (lib/spent.circom) and
@@ -92,6 +98,13 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     signal input payer_address;
     signal input relayer_address;
 
+    // ===== LOGICAL PIs (private witnesses, bound via PolyEval): cv_dep =====
+    // Output-side Pedersen value commitment that anchors (asset, value) into
+    // the inserted Merkle leaf via leaf = Poseidon(TAG_LEAF, cm, cv_dep_x,
+    // cv_dep_y). Pinned in PolyEval so the contract sees the same coords on-
+    // chain and forwards them to tree_update_batch's per-pair PI vector.
+    signal input out_cv_dep[N_OUT][2];
+
     // ===== PRIVATE: spent notes =====
     signal input in_asset[N_IN];
     signal input in_value[N_IN];
@@ -100,6 +113,7 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     signal input in_rcm[N_IN];
     signal input in_nsk[N_IN];
     signal input in_rcv[N_IN];
+    signal input in_rcv_dep[N_IN];
     signal input in_path_elements[N_IN][DEPTH][3];
     signal input in_path_indices[N_IN][DEPTH];
     signal input in_is_dummy[N_IN];
@@ -111,6 +125,7 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     signal input out_rho[N_OUT];
     signal input out_rcm[N_OUT];
     signal input out_rcv[N_OUT];
+    signal input out_rcv_dep[N_OUT];
 
     // ===== PRIVATE: FMD clue witnesses (per output) =====
     // `out_r`  : FMD blinding scalar, fresh per output (≤ 254 bits).
@@ -149,6 +164,7 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
         spent[i].rcm      <== in_rcm[i];
         spent[i].nsk      <== in_nsk[i];
         spent[i].rcv      <== in_rcv[i];
+        spent[i].rcv_dep  <== in_rcv_dep[i];
         spent[i].is_dummy <== in_is_dummy[i];
         for (var d = 0; d < DEPTH; d++) {
             spent[i].path_elements[d][0] <== in_path_elements[i][d][0];
@@ -180,9 +196,16 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
         out_note[j].rho      <== out_rho[j];
         out_note[j].rcm      <== out_rcm[j];
         out_note[j].rcv      <== out_rcv[j];
+        out_note[j].rcv_dep  <== out_rcv_dep[j];
         out_note[j].cm       <== out_cm[j];
         out_note[j].cv[0]    <== out_cv[j][0];
         out_note[j].cv[1]    <== out_cv[j][1];
+
+        // Bind public out_cv_dep to the OutputNote's computed cv_dep so the
+        // value committed at deposit anchor matches the leaf the contract
+        // will pass to tree_update_batch.
+        out_cv_dep[j][0] === out_note[j].cv_dep[0];
+        out_cv_dep[j][1] === out_note[j].cv_dep[1];
 
         // FMD clue: prove R = r·G_8 and clue_bits[i] = 1 - legendre_bit(Poseidon(...)).
         // Output Rx, Ry exposed for PolyEval binding.
@@ -263,12 +286,15 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     bal.pub_out_pt[1] <== pub_out_mul.out[1];
 
     // -------------------------------------------------------------------------
-    // SnarkCompression: bind the 20 logical PIs to (z, y) via Horner eval.
+    // SnarkCompression: bind the 24 base + 4 per-output logical PIs to (z, y)
+    // via Horner eval.
     //
-    // Coefficient ordering MUST match contracts/src/MASP.sol::_flatten().
+    // Coefficient ordering MUST match contracts/src/lib/PubInputs.sol :: compress(Transact, aux).
     // -------------------------------------------------------------------------
-    // 20 base PIs + 3 per output (clue Rx, Ry, bits).
-    var PI_BASE = 20;
+    // 20 base PIs + 4 cv_dep coords (2 per output) = 24 base
+    // + 3 clue PIs per output (clueRx, clueRy, bits)
+    // Total = 24 + 3 * N_OUT.
+    var PI_BASE = 24;
     var PI_PER_OUT = 3;
     component pe = PolyEval(PI_BASE + PI_PER_OUT * N_OUT);
     pe.coeffs[ 0] <== merkle_root;
@@ -291,6 +317,10 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     pe.coeffs[17] <== chain_id;
     pe.coeffs[18] <== payer_address;
     pe.coeffs[19] <== relayer_address;
+    pe.coeffs[20] <== out_cv_dep[0][0];
+    pe.coeffs[21] <== out_cv_dep[0][1];
+    pe.coeffs[22] <== out_cv_dep[1][0];
+    pe.coeffs[23] <== out_cv_dep[1][1];
     for (var j = 0; j < N_OUT; j++) {
         pe.coeffs[PI_BASE + PI_PER_OUT * j + 0] <== out_clue_Rx[j];
         pe.coeffs[PI_BASE + PI_PER_OUT * j + 1] <== out_clue_Ry[j];

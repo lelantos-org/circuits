@@ -1,0 +1,104 @@
+name: publish
+
+# Tag-driven release. Push a tag matching `v*` (e.g. `v0.1.0`) on a
+# branch whose `circuits/build/*` artifacts are committed-known via
+# release-manifest.json. CI rebuilds from circom + ptau, asserts the
+# hashes match the manifest, then publishes to GitHub Packages.
+#
+# `prepublishOnly` (set in package.json) calls `just package` which
+# runs `scripts/check-artifacts.mjs` — the SHA-256 manifest check is
+# the single gate against accidental ceremony reroll.
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CIRCOM_VERSION: v2.2.3
+      PTAU_FILE: powersOfTau28_hez_final_17.ptau
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://npm.pkg.github.com
+          scope: "@lelantos-org"
+          cache: npm
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Cache circom binary
+        id: cache-circom
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/circom
+          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}
+
+      - name: Install circom
+        if: steps.cache-circom.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/circom-linux-amd64" \
+            -o "$HOME/.local/bin/circom"
+          chmod +x "$HOME/.local/bin/circom"
+
+      - name: Add circom to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache ptau
+        uses: actions/cache@v4
+        with:
+          path: circuits/ptau/${{ env.PTAU_FILE }}
+          key: ptau-17
+
+      - name: Install npm dependencies
+        run: npm ci || npm install
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + verify artifacts against release-manifest.json
+        run: just package
+
+      - name: Confirm tag version matches package.json
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json version $pkg"
+            exit 1
+          fi
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Append release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            Published `@lelantos-org/circuits@${{ github.ref_name }}` to GitHub Packages.
+
+            Per-artifact SHA-256 hashes are pinned in `release-manifest.json`.
+            Verify a downloaded tarball locally with:
+
+            ```
+            shasum -a 256 \
+              node_modules/@lelantos-org/circuits/build/2x2.wasm \
+              node_modules/@lelantos-org/circuits/build/2x2_final.zkey \
+              node_modules/@lelantos-org/circuits/build/verification_key.json
+            ```

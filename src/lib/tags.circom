@@ -19,6 +19,14 @@ pragma circom 2.2.3;
 // | TAG_ASSET   | 7     | V^t = Pedersen(TAG_ASSET || asset_id_bits)  arity Pedersen(72)
 // | TAG_FMD_BIT | 8     | FMD bit derivation, arity-6 Poseidon              |
 // | TAG_NK      | 9     | nk  = Poseidon(TAG_NK, nsk)             arity 2    |
+// | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) arity 4 |
+//
+// TAG_LEAF domain-separates the Merkle leaf from `NoteCommitment` (also
+// arity-4 Poseidon, inputs = [packed_av, owner_pk, rho, rcm]) where
+// `packed_av = asset_id * 2^64 + value`. Since asset_id != 0 is required by
+// `output.circom` / `spent.circom`, packed_av >= 2^64 ≫ TAG_LEAF=10, so the
+// first input slot uniquely distinguishes leaf-hash vs note-commitment-hash
+// preimages.
 //
 // TAG_DK is reserved for the wallet-side FMD detection-key derivation
 // (`dk = Poseidon(TAG_DK, ivk)`). No template uses it — exposed here purely
@@ -40,5 +48,6 @@ function TAG_DK()     { return 6; }
 function TAG_ASSET()  { return 7; }
 function TAG_FMD_BIT(){ return 8; }
 function TAG_NK()     { return 9; }
+function TAG_LEAF()   { return 10; }
 
 function POW_2_64()   { return 18446744073709551616; }

@@ -65,14 +65,28 @@ export class TxBuilder {
     }
 
     note(value: bigint, ownerNsk: Field, rho: Field, asset: Field = DEFAULT_ASSET): Note {
-        return { asset, value, pk: derivePk(this.P, ownerNsk), rho, rcm: rho + 1n, rcv: rho + 2n };
+        return {
+            asset,
+            value,
+            pk: derivePk(this.P, ownerNsk),
+            rho,
+            rcm: rho + 1n,
+            rcv: rho + 2n,
+            rcvDep: rho + 3n,
+        };
     }
 
     // Insert a note into `tree`, returning a SpentNote with empty proof — call
     // `finalize` once the tree's root is frozen to populate path/indices.
+    // Leaf format: Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) — the deposit
+    // anchor that pins (asset, value) to the leaf.
     insert(tree: MerkleTree, n: Note, nsk: Field): SpentNote {
         const cm = commit(this.P, n);
-        const idx = tree.insert(cm);
+        const assetGen = this.J.hashToAssetGen(n.asset);
+        const cvDep = this.J.valueCommit(n.value, assetGen, n.rcvDep);
+        const TAG_LEAF = 10n;
+        const leaf = this.P.hash([TAG_LEAF, cm, cvDep[0], cvDep[1]]);
+        const idx = tree.insert(leaf);
         return {
             ...n, nsk, cm,
             nf: nullifier(this.P, nsk, n.rho),

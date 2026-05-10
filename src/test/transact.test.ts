@@ -163,7 +163,7 @@ describe("transact_2x2", function () {
         const realOut = tx.note(100n, aliceNsk, 9n);
         // Padding output: real value=0 note, real cm. Asset must be != 0.
         // value=0 ⇒ value*gen = identity, contributes neutrally to balance.
-        const dOut: Note = { asset: 999n, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv: 0n };
+        const dOut: Note = { asset: 999n, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv: 0n, rcvDep: 0n };
 
         const input = tx.build({
             publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
@@ -183,7 +183,7 @@ describe("transact_2x2", function () {
         inA = tx.finalize(tree, inA);
 
         const realOut = tx.note(100n, aliceNsk, 9n);
-        const dOut: Note = { asset: 0n, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv: 0n }; // illegal
+        const dOut: Note = { asset: 0n, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv: 0n, rcvDep: 0n }; // illegal
 
         const input = tx.build({
             publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
@@ -527,6 +527,41 @@ describe("transact_2x2", function () {
         await expectWitnessFails(circuit, input);
     });
 
+    it("FAILS when out_clue_bits exceeds 2^GAMMA range (Num2Bits(GAMMA) reject)", async () => {
+        // ClueCheck range-checks clue_bits via Num2Bits(GAMMA=5), forcing
+        // clue_bits < 32 in-circuit. Setting bit 5 violates this even if
+        // the low 5 bits still match the legendre witness — Num2Bits enforces
+        // the FULL input fit in GAMMA bits via `lc1 === in`.
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const outA = tx.note(75n, nsk, 9n);
+        const outB = tx.note(75n, nsk, 11n);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
+        });
+        const orig = BigInt((input.out_clue_bits as string[])[0]);
+        (input.out_clue_bits as string[])[0] = (orig | (1n << 5n)).toString();
+        await expectWitnessFails(circuit, input);
+    });
+
+    it("FAILS when out_clue_bits has high bits set (covert-channel attempt)", async () => {
+        // Same range-check defense: bit 100 set ⇒ value ≥ 2^100 >> 2^5,
+        // so Num2Bits(5) cannot satisfy lc1 === in. Locks down the
+        // would-be covert channel into PolyEval.
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const outA = tx.note(75n, nsk, 9n);
+        const outB = tx.note(75n, nsk, 11n);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
+        });
+        const orig = BigInt((input.out_clue_bits as string[])[0]);
+        (input.out_clue_bits as string[])[0] = (orig | (1n << 100n)).toString();
+        await expectWitnessFails(circuit, input);
+    });
+
     it("FAILS when out_legendre_bit is flipped (HashToBit reject)", async () => {
         const nsk = 11n;
         const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
@@ -553,6 +588,67 @@ describe("transact_2x2", function () {
         const orig = BigInt((input.out_legendre_y as string[][])[0][0]);
         (input.out_legendre_y as string[][])[0][0] = (orig + 1n).toString();
         await expectWitnessFails(circuit, input);
+    });
+
+    // ===== Range-check coverage for asset / public-bucket scalars =====
+    //
+    // HashToAssetGen wraps Num2Bits(64) on every asset_id (per-note and
+    // public-bucket). 2x2.circom layers RangeCheck64 on public_in/out.
+    // Each tampers ONE 64-bit-bound field to (1 << 64) and expects rejection.
+
+    /// Build a balanced honest input then apply `tamper` to the JSON shape
+    /// before submission. Used for parameterized range tests.
+    async function expectFailsAfterTamper(tamper: (input: Record<string, unknown>) => void) {
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const outA = tx.note(75n, nsk, 9n);
+        const outB = tx.note(75n, nsk, 11n);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
+        });
+        tamper(input);
+        await expectWitnessFails(circuit, input);
+    }
+
+    it("FAILS when public_asset_id exceeds 2^64 (HashToAssetGen Num2Bits)", async () => {
+        await expectFailsAfterTamper(input => {
+            input.public_asset_id = (1n << 64n).toString();
+        });
+    });
+
+    it("FAILS when in_asset[0] exceeds 2^64 (per-note Num2Bits in HashToAssetGen)", async () => {
+        await expectFailsAfterTamper(input => {
+            (input.in_asset as string[])[0] = (1n << 64n).toString();
+        });
+    });
+
+    it("FAILS when out_asset[0] exceeds 2^64 (per-note Num2Bits in HashToAssetGen)", async () => {
+        await expectFailsAfterTamper(input => {
+            (input.out_asset as string[])[0] = (1n << 64n).toString();
+        });
+    });
+
+    it("FAILS when public_in exceeds 2^64 (RangeCheck64)", async () => {
+        await expectFailsAfterTamper(input => {
+            input.public_in = (1n << 64n).toString();
+        });
+    });
+
+    it("FAILS when public_out exceeds 2^64 (RangeCheck64)", async () => {
+        await expectFailsAfterTamper(input => {
+            input.public_out = (1n << 64n).toString();
+        });
+    });
+
+    it("FAILS when out_cv (public output) is tampered", async () => {
+        // Mirror of the existing in_cv tamper test, but for OutputNote's
+        // `cv[0] === vc.cv[0]` binding. Catches a substituted public cv
+        // that doesn't match the ValueCommit recomputation.
+        await expectFailsAfterTamper(input => {
+            const orig = BigInt((input.out_cv as string[][])[0][0]);
+            (input.out_cv as string[][])[0][0] = (orig + 1n).toString();
+        });
     });
 
     it("multi-asset: per-asset imbalance fails even if scalar totals match", async () => {
