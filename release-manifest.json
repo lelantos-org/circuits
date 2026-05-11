@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.2",
   "ceremony": "single-contributor-prototype",
   "ptau": "powersOfTau28_hez_final_17.ptau",
   "warning": "Single-contributor trusted setup. NOT mainnet-safe. See README.",
