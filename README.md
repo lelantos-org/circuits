@@ -75,16 +75,25 @@ config browser path. Pick one:
 
 ### Artifact provenance
 
-Every published version pins per-artifact SHA-256 hashes in
-[`release-manifest.json`](./release-manifest.json). `prepublishOnly`
-fails if a rebuild diverges — accidental ceremony rerolls cannot
-slip into a release. Verify a downloaded tarball:
+The single-contributor ceremony (`snarkjs zkey contribute`) is non-
+deterministic — snarkjs mixes fresh `crypto.randomBytes(64)` into the
+entropy source on every run, so the `2x2_final.zkey` SHA-256 differs
+across rebuilds. Per-release hashes are recorded in the matching
+[GitHub Release notes](https://github.com/lelantos-org/circuits/releases),
+not pre-pinned. Verify a downloaded tarball against the release body:
 
 ```bash
 shasum -a 256 \
     node_modules/@lelantos-org/circuits/build/2x2.wasm \
-    node_modules/@lelantos-org/circuits/build/2x2_final.zkey
+    node_modules/@lelantos-org/circuits/build/2x2_final.zkey \
+    node_modules/@lelantos-org/circuits/build/verification_key.json
 ```
+
+The pre-publish gate ([`scripts/check-artifacts.mjs`](./scripts/check-artifacts.mjs))
+asserts presence, generous size bands, and vkey JSON shape — enough to
+catch a broken build, not the artifact itself. Strict SHA-pinning will
+return once the package switches to the post-MPC ceremony output
+committed to git.
 
 ---
 

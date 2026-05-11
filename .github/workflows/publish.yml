@@ -1,13 +1,13 @@
 name: publish
 
-# Tag-driven release. Push a tag matching `v*` (e.g. `v0.1.0`) on a
-# branch whose `circuits/build/*` artifacts are committed-known via
-# release-manifest.json. CI rebuilds from circom + ptau, asserts the
-# hashes match the manifest, then publishes to GitHub Packages.
+# Tag-driven release. Push a tag matching `v*` (e.g. `v0.1.0`) and CI
+# rebuilds artifacts from circom + ptau, runs sanity checks, publishes
+# to GitHub Packages, and writes per-release SHA-256 hashes into the
+# release body for downstream verification.
 #
-# `prepublishOnly` (set in package.json) calls `just package` which
-# runs `scripts/check-artifacts.mjs` — the SHA-256 manifest check is
-# the single gate against accidental ceremony reroll.
+# The trusted-setup ceremony is non-deterministic (snarkjs mixes fresh
+# randomness into the contribution regardless of `-e`), so the zkey +
+# vkey SHA-256 are recorded per-release, not pinned in advance.
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: read
+      contents: write   # required to attach SHAs to the release body
       packages: write
     env:
       CIRCOM_VERSION: v2.2.3
@@ -70,8 +70,21 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build + verify artifacts against release-manifest.json
-        run: just package
+      - name: Build + verify artifacts
+        id: build
+        run: |
+          # Tee stdout so we keep the human-readable lines AND capture
+          # the structured SHA output for the release body.
+          just package | tee /tmp/check-artifacts.log
+          # Extract the per-file SHA lines and the single-line JSON
+          # summary into step outputs.
+          grep -E '^(2x2\.wasm|2x2_final\.zkey|verification_key\.json)=' /tmp/check-artifacts.log > /tmp/shas.txt
+          {
+              echo 'shas<<EOF'
+              cat /tmp/shas.txt
+              echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          grep '^circuits-shas=' /tmp/check-artifacts.log >> "$GITHUB_OUTPUT"
 
       - name: Confirm tag version matches package.json
         run: |
@@ -93,12 +106,23 @@ jobs:
           body: |
             Published `@lelantos-org/circuits@${{ github.ref_name }}` to GitHub Packages.
 
-            Per-artifact SHA-256 hashes are pinned in `release-manifest.json`.
-            Verify a downloaded tarball locally with:
+            **PROTOTYPE — single-contributor trusted setup. NOT mainnet-safe.**
 
+            ### Artifact SHA-256
+
+            ```
+            ${{ steps.build.outputs.shas }}
+            ```
+
+            Verify a downloaded tarball locally:
             ```
             shasum -a 256 \
               node_modules/@lelantos-org/circuits/build/2x2.wasm \
               node_modules/@lelantos-org/circuits/build/2x2_final.zkey \
               node_modules/@lelantos-org/circuits/build/verification_key.json
             ```
+
+            The `2x2_final.zkey` + `verification_key.json` SHAs differ
+            across builds because the contribution step is non-
+            deterministic. Hashes recorded above are the canonical
+            values for this exact release.
