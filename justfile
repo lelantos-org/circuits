@@ -100,14 +100,21 @@ rebuild-batch: compile-batch setup-batch
 # Build everything: 2x2 + tree_update_batch.
 all-tree: compile compile-batch setup setup-batch
 
-# Full rebuild after circuit edits: recompile -> trusted setup -> sync Verifier.sol
-# into contracts/src. Use after changes to 2x2.circom or any lib/*.circom; this
-# regenerates 2x2.r1cs, 2x2.wasm, 2x2_final.zkey, verification_key.json, and
-# Verifier.sol, then copies the verifier into contracts/.
+# Build all 2x2 artifacts WITHOUT the contracts/ sync. Used by the
+# `package` recipe (publish CI does not have a sibling contracts repo
+# checked out). Local circuit authors should prefer `rebuild`, which
+# wraps this and also pushes Verifier.sol into ../contracts/src/.
 #
-# WARNING: re-runs the prototype single-contributor ceremony (INSECURE — see
-# `setup` recipe). Existing proofs become invalid after this command.
-rebuild: compile setup
+# WARNING: re-runs the prototype single-contributor ceremony (INSECURE
+# — see `setup` recipe). Existing proofs become invalid after.
+build-artifacts: compile setup
+
+# Full rebuild after circuit edits: recompile -> trusted setup -> sync
+# Verifier.sol into contracts/src. Use after changes to 2x2.circom or
+# any lib/*.circom; this regenerates 2x2.r1cs, 2x2.wasm, 2x2_final.zkey,
+# verification_key.json, and Verifier.sol, then copies the verifier
+# into contracts/.
+rebuild: build-artifacts
     @echo "==> Syncing Verifier.sol -> {{CONTRACTS_VERIFIER}}"
     cp "{{BUILD}}/Verifier.sol" "{{CONTRACTS_VERIFIER}}"
     @echo "==> rebuild complete"
@@ -135,7 +142,11 @@ clean:
 # without shipping the redundant `2x2_js/` glue. Then runs
 # `scripts/check-artifacts.mjs` to assert sizes + SHA-256 match
 # `release-manifest.json`.
-package: rebuild
+#
+# Depends on `build-artifacts` (NOT `rebuild`) so the publish workflow
+# does not require a sibling contracts/ checkout for the Verifier.sol
+# sync step.
+package: build-artifacts
     @echo "==> Staging build/2x2.wasm for publish"
     cp "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2.wasm"
     @ls -lh "{{BUILD}}/2x2.wasm" "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json"
