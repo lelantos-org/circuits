@@ -1,23 +1,17 @@
 # `@lelantos-org/circuits`
 
-> ⚠️ **PROTOTYPE — NOT MAINNET-SAFE**
->
-> The shipped `2x2_final.zkey` is the output of a single-contributor
-> trusted-setup ceremony (random entropy from `openssl rand -hex 32`,
-> see [`justfile:32`](./justfile)). Anyone who knows the toxic waste
-> from that contribution can forge proofs.
->
-> Use this package for **testnets and development only**. A real
-> multi-party Phase-2 ceremony will ship as
-> `@lelantos-org/circuits@1.0.0`.
-
 Companion artifact package for [`@lelantos-org/sdk`](../sdk). Ships
 the Groth16 prover artifacts for the 2x2 transact circuit
 (`2x2.wasm` + `2x2_final.zkey` + `verification_key.json`); the SDK's
 `Wallet.connect()` auto-resolves these via subpath `exports`.
 
-This README also doubles as the development guide for circuit authors
-— see "Layout" through "Status" below.
+The `tree_update_batch` artifacts (built locally via
+`just rebuild-batch`) are NOT shipped in the npm package — they live
+in the contracts repo's deployment pipeline.
+
+This README doubles as the development guide for circuit authors —
+see "Layout" through "Status" below. Design details:
+[src/README.md](src/README.md). Audit notes: [SECURITY.md](./SECURITY.md).
 
 ## Consuming the published package
 
@@ -70,7 +64,7 @@ config browser path. Pick one:
 | Specifier                                              | Resolves to                       |
 |--------------------------------------------------------|-----------------------------------|
 | `@lelantos-org/circuits/2x2/2x2.wasm`                  | `build/2x2.wasm` (4.8 MB)         |
-| `@lelantos-org/circuits/2x2/2x2_final.zkey`            | `build/2x2_final.zkey` (44 MB)    |
+| `@lelantos-org/circuits/2x2/2x2_final.zkey`            | `build/2x2_final.zkey` (52.7 MB)  |
 | `@lelantos-org/circuits/2x2/verification_key.json`     | `build/verification_key.json`     |
 
 ### Artifact provenance
@@ -99,80 +93,129 @@ committed to git.
 
 ## For circuit authors
 
-MASP (Multi-Asset Shielded Pool) circuits in Circom.
+MASP (Multi-Asset Shielded Pool) circuits in Circom 2.2.3.
 
-- `2x2.circom` — 2-in / 2-out shielded transact: ownership, no double-spend, per-asset balance, without revealing sender / receiver / asset / amount.
-- `tree_update.circom` — relayer-side proof that the on-chain commitment tree advances `oldRoot → newRoot` by inserting two leaves (`cm0`, `cm1`) at `[startIndex, startIndex+1]` over a relayer-supplied frontier. Lazy-root model.
+- [`src/2x2.circom`](src/2x2.circom) — 2-in / 2-out shielded transact:
+  ownership, no double-spend, per-asset balance, no leakage of sender /
+  receiver / asset / amount. Instantiated as `Transact(10, 2, 2, 5)`.
+- [`src/tree_update_batch.circom`](src/tree_update_batch.circom) —
+  relayer-side proof that the canonical commitment tree advances
+  `old_root → new_root` by inserting up to `MAX_N=8` pairs of leaves
+  (16 leaves max per batch) over a relayer-supplied frontier.
+  Instantiated as `TreeUpdateBatch(10, 8)`. Includes per-pair Pedersen
+  aggregate binding that closes the C-1 deposit-substitution attack on
+  the deposit path.
 
-Both circuits use SnarkCompression: 20 logical PIs (transact) / 5 logical PIs (tree_update) are folded into `(z, y)` via `PolyEval`, so the Solidity verifier sees only two field elements per proof.
+Both circuits use SnarkCompression: the logical PIs are folded into
+`(z, y)` via [`PolyEval`](src/lib/poly_eval.circom), so the Solidity
+verifier sees only two field elements per proof. Coefficient layouts
+are defined inside [`src/lib/poly_eval.circom`](src/lib/poly_eval.circom)
+(`TransactCompress` / `BatchCompress`) and MUST match
+[`contracts/src/lib/PubInputs.sol`](../contracts/src/lib/PubInputs.sol).
 
-See [src/README.md](src/README.md) for full design notes.
+See [src/README.md](src/README.md) for the full design write-up.
 
 ## Layout
 
 ```
 src/
-  2x2.circom            # transact circuit (2-in / 2-out)
-  tree_update.circom    # relayer tree-advance circuit (lazy root)
-  lib/                  # primitives — notes, merkle, asset gen, value commit,
-                        #   balance, spent, output, insert (QuaternaryInsert),
-                        #   poly_eval, tags
+  2x2.circom                # transact circuit (2-in / 2-out)
+  tree_update_batch.circom  # relayer batch tree-advance circuit
+  lib/
+    tags.circom             # domain-separation tag constants + 2^64
+    common.circom           # PathIndexSelectors + EmptySubtreeHashes
+    note.circom             # NoteCommitment, key derivation, Nullifier
+    merkle.circom           # quaternary Merkle level + dummy-aware proof
+    insert.circom           # QuaternaryInsert (single-leaf, frontier IO)
+    frontier_root.circom    # frontier → old_root rebuild (SOUNDNESS-CRITICAL)
+    asset_gen.circom        # HashToAssetGen — Pedersen hash-to-curve
+    value_commit.circom     # ValueCommit, MulH, ValueScalarMul, PointSum
+    balance.circom          # RangeCheck64, DummyZeroValue, PerAssetPointBalance
+    spent.circom            # SpentNote — per-input slot constraints
+    output.circom           # OutputNote — per-output slot constraints
+    clue.circom             # ClueCheck — FMD2 in-circuit clue derivation
+    hash_to_bit.circom      # 4-constraint Legendre-symbol bit extractor
+    poly_eval.circom        # PolyEval, TransactCompress, BatchCompress
   test/
-    *.test.ts           # transact / merkle / tree_update suites
-    helpers.ts          # witness builders + JS-side hashes
-    fixtures/           # frozen witness vectors used by tests
-justfile                # compile / setup / prove / rebuild / test recipes
-ptau/                   # phase-1 powers-of-tau (downloaded on demand)
-build/                  # compiled artifacts (gitignored)
+    *.test.ts               # mocha + circom_tester suites (144 tests)
+    helpers.ts              # witness builders + JS-side hashes
+    fixtures/               # frozen witness vectors used by tests
+SECURITY.md                 # audit checklist + circomspect baseline
+justfile                    # compile / setup / prove / rebuild / test recipes
+ptau/                       # phase-1 powers-of-tau (downloaded on demand)
+build/                      # compiled artifacts (gitignored)
 ```
 
 ## Requirements
 
-- [circom](https://docs.circom.io/) 2.x
+- [circom](https://docs.circom.io/) 2.2.3
 - [snarkjs](https://github.com/iden3/snarkjs)
 - node + npm (for `circomlib` in `node_modules` and tests)
 - [just](https://github.com/casey/just)
 - `curl`, `openssl`
+- [circomspect](https://github.com/trail-of-bits/circomspect) for `just lint`
 
 ## Usage
 
-Per-circuit recipes:
-
 ```bash
-# 2x2 transact
+# 2x2 transact (depends on ptau_17, ~64 MB)
 just compile              # r1cs / wasm / sym for 2x2.circom
 just setup                # phase-2 trusted setup (downloads ptau if missing)
 just prove path/to/input.json
 just rebuild              # compile + setup + sync Verifier.sol → ../contracts/src/
 just all                  # compile + setup + prove
 
-# tree_update
-just compile-tree
-just setup-tree
-just prove-tree path/to/input.json
-just rebuild-tree         # compile-tree + setup-tree + sync TreeUpdateVerifier.sol
-just all-tree             # compile + compile-tree + setup + setup-tree
+# tree_update_batch (depends on ptau_20, ~3 GB)
+just compile-batch
+just setup-batch
+just prove-batch path/to/input.json
+just rebuild-batch        # compile-batch + setup-batch + sync TreeUpdateBatchVerifier.sol
+just all-tree             # compile + compile-batch + setup + setup-batch
+```
 
+```bash
 just clean
 ```
 
-`rebuild` / `rebuild-tree` re-run the prototype single-contributor ceremony — existing proofs become invalid afterwards.
+`rebuild` / `rebuild-batch` re-run the prototype single-contributor
+ceremony — existing proofs become invalid afterwards.
 
 ### Tests
 
 ```bash
 npm install
-just test           # mocha + circom_tester; runs all *.test.ts suites
+just test     # mocha + circom_tester; runs all src/test/**/*.test.ts (144 tests)
 ```
 
-Tests use `circom_tester` (witness + constraint check only) — no ptau or trusted setup required. CI runs `just test`.
+Tests use `circom_tester` (witness + constraint check only) — no ptau
+or trusted setup required. CI runs `just test`.
+
+### Lint
+
+```bash
+just lint     # circomspect static analysis
+```
+
+12 warnings are known and documented in
+[SECURITY.md](./SECURITY.md#static-analysis-baseline-circomspect).
+New warnings outside that baseline MUST be triaged before merge.
 
 ## Verifier-visible public signals
 
-Both circuits expose only `[z, y]`. The logical PIs below are private witnesses bound through `PolyEval` (Schwartz–Zippel binding over the BN254 scalar field).
+Both circuits expose only `[z, y]`. Logical PIs are private witnesses
+bound through `PolyEval` (Schwartz–Zippel over BN254 scalar field).
 
-- **2x2 transact** — 20 logical PIs: `merkle_root`, `nullifier[2]`, `out_cm[2]`, `public_asset_id`, `public_in`, `public_out`, `in_cv[2]`, `out_cv[2]`, `recipient_address`, `chain_id`, `payer_address`, `relayer_address`. The public-bucket asset generator `V^pub` is derived in-circuit from `public_asset_id` via `HashToAssetGen`, so it is not exposed as a PI. Slot order MUST match `contracts/src/MASP.sol::_flatten()`.
-- **tree_update** — 5 logical PIs: `old_root`, `new_root`, `cm0`, `cm1`, `start_index`. Slot order MUST match `_compressTreeUpdatePI` in the contract.
+- **2x2 transact** — 30 logical PIs at `N_OUT=2`: `merkle_root`,
+  `nullifier[2]`, `out_cm[2]`, `public_asset_id`, `public_in`,
+  `public_out`, `in_cv[2][2]`, `out_cv[2][2]`, `recipient_address`,
+  `chain_id`, `payer_address`, `relayer_address`, `out_cv_dep[2][2]`,
+  `(out_clue_Rx, out_clue_Ry, out_clue_bits) · N_OUT`. Slot order MUST
+  match `contracts/src/lib/PubInputs.sol :: compress(Transact, aux)`.
+- **tree_update_batch** — `4 + 9·MAX_N = 76` logical PIs at `MAX_N=8`:
+  `old_root`, `new_root`, `start_index`, `actual_count`,
+  `cms[2·MAX_N]`, `cv_dep[2·MAX_N][2]`, `pair_asset[MAX_N]`,
+  `pair_public_in[MAX_N]`, `is_deposit[MAX_N]`. Slot order MUST match
+  `contracts/src/lib/PubInputs.sol :: compress(TreeUpdateBatch)`.
 
 Full design in [src/README.md](src/README.md).
 
@@ -180,50 +223,86 @@ Full design in [src/README.md](src/README.md).
 
 R1CS totals (BN254, `snarkjs r1cs info`):
 
-| Circuit | Constraints | Wires | Private inputs | Labels |
-|---|---:|---:|---:|---:|
-| `2x2.circom` (DEPTH=10, N_IN=2, N_OUT=2, GAMMA=5) | 91,400 | 91,477 | 172 | 222,195 |
-| `tree_update.circom` (DEPTH=10) | 34,068 | 34,082 | 35 | 54,982 |
+| Circuit                                                          | Constraints | Wires    | Private inputs | Labels   |
+|------------------------------------------------------------------|------------:|---------:|---------------:|---------:|
+| `2x2.circom` (DEPTH=10, N_IN=2, N_OUT=2, GAMMA=5)                |     111,728 |  111,805 |            180 |  273,709 |
+| `tree_update_batch.circom` (DEPTH=10, MAX_N=8)                   |     348,269 |  348,069 |            114 |  606,405 |
 
-Verifier-visible: 1 public input (`z`) + 1 output (`y`) per circuit.
+Verifier-visible: 1 public input (`z`) + 1 public output (`y`) per
+circuit.
 
-What each circuit enforces in-zk. Anything not listed is contract's job (see `Properties NOT enforced in-circuit` in [src/2x2.circom](src/2x2.circom)).
+What each circuit enforces in-zk. Anything not listed is the
+contract's job — see SECURITY.md "Properties NOT enforced in the
+circuit" and the `Properties NOT enforced in-circuit` block at the top
+of [src/2x2.circom](src/2x2.circom).
 
-### `2x2.circom` — Transact (DEPTH=10, N_IN=2, N_OUT=2, GAMMA=5)
+### `2x2.circom` — Transact(DEPTH=10, N_IN=2, N_OUT=2, GAMMA=5)
 
-Per spent slot `i` (`SpentNote`, [src/lib/spent.circom](src/lib/spent.circom)):
-- `is_dummy ∈ {0,1}`; if `is_dummy = 1` then `value = 0` (`DummyZeroValue`).
+Per spent slot `i` ([`SpentNote`](src/lib/spent.circom)):
+- `is_dummy ∈ {0,1}`; if `is_dummy = 1` then `value = 0` (via
+  `DummyZeroValue` in the parent).
+- Key hierarchy: `pk_check` from `nsk → ivk → pk` (bypassed for dummies).
 - Note commitment `cm_i = NoteCommit(asset_id, value, pk, rho, rcm)`.
-- Quaternary Merkle path: `cm_i` opens to `merkle_root` along `path_elements[DEPTH][3]` / `path_indices[DEPTH]` (skipped for dummies).
-- Nullifier `nullifier[i] = PRF_nsk(rho, cm_i)` — binds note to spending key.
-- Value commitment `in_cv[i] = value · V^t(asset_id) + rcv · H` on Baby-Jubjub; `rH_i = rcv · H` exported for balance.
+- Quaternary Merkle path opens to `merkle_root` over `DEPTH=10` levels
+  (skipped for dummies).
+- Nullifier `nullifier[i] = Poseidon(TAG_NF, nk, rho)` with
+  `nk = Poseidon(TAG_NK, nsk)` — always real, including dummies.
+- Value commitment `in_cv[i] = value · V^t(asset_id) + rcv · H` on
+  Baby-Jubjub; `rH_i = rcv · H` exposed for the balance check.
+- `asset_id != 0` for real notes (ghost-note defense).
+- `cv_dep_i = value · V^t + rcv_dep · H` recomputed and pinned into the
+  Merkle leaf `Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)` so the
+  spend reproduces the deposit-anchored commitment.
 
-Per output slot `j` (`OutputNote`, [src/lib/output.circom](src/lib/output.circom)):
+Per output slot `j` ([`OutputNote`](src/lib/output.circom)):
 - `out_cm[j] = NoteCommit(asset_id, value, pk, rho, rcm)`.
-- `out_cv[j] = value · V^t(asset_id) + rcv · H`; `rH_j = rcv · H` exported.
-- FMD clue (`ClueCheck`, [src/lib/clue.circom](src/lib/clue.circom)): `R = r · G_8`; for each of `GAMMA=5` flag-keys, `clue_bits[j]` low bits = `1 - legendre_bit(Poseidon(...))`, where `legendre_bit(h) = 1` iff `h` is a quadratic residue in 𝔽_r (witness pair `legendre_bit[gi], legendre_y[gi]` per slot, see [src/lib/hash_to_bit.circom](src/lib/hash_to_bit.circom)). `out_clue_Rx`, `out_clue_Ry` exposed for PolyEval binding.
+- `out_cv[j] = value · V^t + rcv · H`; `rH_j` exposed for balance.
+- `cv_dep[j] = value · V^t + rcv_dep · H` bound to public
+  `out_cv_dep[j]` so the contract forwards the same point to
+  `tree_update_batch`.
+- `asset_id != 0` (no dummy bypass on the output side).
+- FMD clue ([`ClueCheck`](src/lib/clue.circom)): `R = r · G_8` plus γ=5
+  Legendre-bit checks `clue_bits[j] === 1 - legendre_bit(...)` per slot.
 
 Public-bucket / balance:
-- `V^pub = HashToAssetGen(public_asset_id)` derived in-circuit. Pedersen image is on-curve and in the prime-order subgroup by construction, so no `SafePoint` is needed.
-- `RangeCheck64` on `public_in`, `public_out` (belt-and-suspenders to contract `< 2^64`).
-- `pub_in_pt = public_in · V^pub`, `pub_out_pt = public_out · V^pub` via `ValueScalarMul` over the 64 range bits.
-- `PerAssetPointBalance`: Edwards-point equality
-  `Σ in_cv + pub_in_pt + Σ out_rH  ==  Σ out_cv + pub_out_pt + Σ in_rH`.
-  `rcv·H` cancels ⇒ per-asset value conservation; distinct assets sit in distinct `V^t` subgroups so cross-asset cancel needs Pedersen DL break.
+- `V^pub = HashToAssetGen(public_asset_id)` derived in-circuit (no
+  externally witnessed point).
+- `RangeCheck64` on `public_in`, `public_out` (defense-in-depth on the
+  contract `< 2^64` check).
+- `PerAssetPointBalance`:
+  `Σ in_cv + pub_in·V^pub + Σ out_rH  ==  Σ out_cv + pub_out·V^pub + Σ in_rH`.
 
 PI compression:
-- `PolyEval(20 + 3·N_OUT)` Horner-evals `[merkle_root, nullifier[2], out_cm[2], public_asset_id, public_in/out, in_cv[2][2], out_cv[2][2], recipient_address, chain_id, payer_address, relayer_address, (out_clue_Rx, out_clue_Ry, out_clue_bits)·N_OUT]` at `z`. Output `y` is the only verifier-visible signal beside `z`. Slot order MUST match `MASP.sol::_flatten()`.
+- `TransactCompress(N_OUT)` (lib/poly_eval.circom) emits `y = Σ coeffs[k]·z^k`.
+  Slots [0..23] = base PIs; slots [24..24+3·N_OUT) = clue triples per
+  output. Total = 24 + 3·N_OUT = 30 for N_OUT=2.
 
-### `tree_update.circom` — TreeUpdate (DEPTH=10)
+### `tree_update_batch.circom` — TreeUpdateBatch(DEPTH=10, MAX_N=8)
 
-- `Num2Bits(2·DEPTH)` on `start_index` and on `start_index + 1` ⇒ both fit in 20 bits ⇒ `start_index ≤ 4^DEPTH − 2` (room for 2nd insert).
-- Per level `d`, 2-bit digits `idx0_digits[d] = b0 + 2·b1`, same for `idx1` from `start_index+1`.
-- `ins0 = QuaternaryInsert(DEPTH)` ([src/lib/insert.circom](src/lib/insert.circom)): inserts `cm0` at `start_index` over `frontier_in`, emits `frontier_out`.
-- `ins1 = QuaternaryInsert(DEPTH)`: inserts `cm1` at `start_index+1` over `ins0.frontier_out`.
-- `new_root === ins1.root` — binds public `new_root` to the chained inserts.
-- `old_root` is NOT recomputed; contract anchors it via `oldRoot == currentRoot()`. Inconsistent `(frontier_in, old_root)` only harms the relayer (useless ring entry, no soundness break).
-- `PolyEval(5)` over `[old_root, new_root, cm0, cm1, start_index]` at `z`, output `y`. Slot order MUST match contract `_compressTreeUpdatePI`.
+- Range-check `actual_count ∈ [1, MAX_N]` via `Num2Bits(COUNT_BITS=3)`.
+- Per-pair active selector `active[i] = (i < actual_count)`. Inactive
+  pairs MUST have all per-pair fields zero (cms, cv_dep, pair_asset,
+  pair_public_in, is_deposit, rcv_total) — enforced by padding
+  constraints (load-bearing for PolyEval binding).
+- `is_deposit[i] ∈ {0, 1}` (booleanized).
+- Per-cm Merkle leaf `leaves[k] = Poseidon(TAG_LEAF, cms[k], cv_dep[k][0], cv_dep[k][1])`.
+- Per-pair deposit binding when `active[i] · is_deposit[i] == 1`:
+  `cv_dep[2i] + cv_dep[2i+1] == pair_public_in[i] · V^pair_asset[i] + rcv_total[i] · H`.
+  Closes the C-1 deposit-substitution attack: forces both leaves in a
+  deposit pair to share the public `(asset, value)` total.
+- Frontier binding ([`FrontierRoot`](src/lib/frontier_root.circom)):
+  rebuild `old_root` from `frontier_in + start_index_bits` and assert
+  equality — without this, a relayer could forge an `old_root` matching
+  `currentRoot()` and DoS the pool.
+- Sequential pair-insert via two `QuaternaryInsert(DEPTH)` per pair;
+  inactive pairs carry the previous frontier / root through a mux.
+- `new_root === running_root[MAX_N]`.
+- `BatchCompress(MAX_N)` (lib/poly_eval.circom) folds 4 + 9·MAX_N
+  coefficients into `(z, y)`.
 
 ## Status
 
-Prototype. Trusted setup uses a single contributor — **not production-safe**. Do a real MPC ceremony before mainnet use; this package will bump to `1.0.0` once that ceremony completes.
+Prototype. Trusted setup uses a single contributor — **not
+production-safe**. Do a real MPC ceremony before mainnet use; this
+package will bump to `1.0.0` once that ceremony completes. See
+[SECURITY.md](./SECURITY.md) for the full mainnet checklist.

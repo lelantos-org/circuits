@@ -6,13 +6,12 @@ include "value_commit.circom";
 
 // Range checks, dummy bookkeeping, and per-asset point-balance check.
 
-// 64-bit range check on a private value. Without this on private signals the
-// prover could balance via field-overflow tricks the verifier cannot see.
+// 64-bit range check on a private value. Required to prevent field-overflow
+// attacks on private value signals (Σ value_in − Σ value_out could otherwise
+// wrap modulo p and validate a non-conservative balance).
 //
-// Exposes the 64 bits LSB-first so callers can thread them straight into
-// `ValueScalarMul` / `ValueCommit` and avoid a redundant Num2Bits(64) per
-// note. Net: 2 × Num2Bits(64) collapsed to 1 per spent / output / public-
-// bucket scalar mul.
+// Exposes the 64 bits LSB-first so callers can pass them directly into
+// `ValueScalarMul` / `ValueCommit`, avoiding a duplicate Num2Bits(64).
 template RangeCheck64() {
     signal input v;
     signal output bits[64];
@@ -48,11 +47,10 @@ template DummyZeroValue(N) {
 //   Σ value_in_i · V_i + public_in · V^pub
 //      == Σ value_out_j · V_j + public_out · V^pub
 //
-// Working with point sums of rH (already computed inside ValueCommit)
-// sidesteps the trap of representing `Σrcv_in − Σrcv_out` as a single field
-// scalar — that difference can wrap into a 254-bit field element when
-// out_rcv > in_rcv, breaking the 253-bit Num2Bits decomposition that a fixed
-// scalar mul would need.
+// Summing rH points (computed inside ValueCommit) avoids representing
+// `Σrcv_in − Σrcv_out` as a single field scalar; that difference can wrap
+// into a 254-bit field element when out_rcv > in_rcv, breaking the 253-bit
+// Num2Bits decomposition that a fixed scalar mul would need.
 //
 // Inputs:
 //   in_cv[N_IN][2], out_cv[N_OUT][2]    — per-note value commitments

@@ -25,13 +25,13 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 //   - value < 2^64.
 //   - cv === ValueCommit(value, HashToAssetGen(asset_id), rcv).
 //   - cv_dep === ValueCommit(value, HashToAssetGen(asset_id), rcv_dep).
-//   - merkle leaf is Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) — the deposit
-//     anchor that pins (asset_id, value) to the leaf and forecloses the
-//     cm-preimage-substitution attack on the deposit path.
+//   - merkle leaf is Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y). Pinning the
+//     deposit-anchored value commitment into the leaf prevents cm-preimage
+//     substitution on the deposit path.
 //
 // `rH` is exposed so the caller's PerAssetPointBalance can sum rcv·H points
-// across notes (rather than running into field-wraparound issues with a
-// scalar Σrcv_in − Σrcv_out).
+// across notes (avoids field-wraparound on a scalar Σrcv_in − Σrcv_out — see
+// balance.circom).
 template SpentNote(DEPTH) {
     // ---- private witness ----
     signal input asset_id;
@@ -75,9 +75,10 @@ template SpentNote(DEPTH) {
     rng_in.v <== value;
 
     // 4. cv_dep = ValueCommit(value, V^asset, rcv_dep). Same Pedersen commit
-    //    shape as cv, but with the depositor-anchored blinder rcv_dep so the
-    //    leaf format `Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)` matches what
-    //    the depositor (or the spend that produced this note) committed to.
+    //    shape as cv but with blinder rcv_dep. The leaf format
+    //    `Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)` requires cv_dep here to
+    //    match the value originally committed by the depositor (or by the
+    //    spend that produced this note).
     component gen_in = HashToAssetGen();
     gen_in.asset_id <== asset_id;
 
@@ -90,9 +91,9 @@ template SpentNote(DEPTH) {
     vc_dep.rcv    <== rcv_dep;
 
     // 5. Recompute Merkle leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
-    //    Domain-separated from NoteCommitment via TAG_LEAF=10 (≪ 2^64 lower
-    //    bound on packed_av in NoteCommitment), so first-input slot
-    //    distinguishes the two arity-4 hash sites.
+    //    Domain-separated from NoteCommitment via TAG_LEAF=10; NoteCommitment's
+    //    first slot holds packed_av ≥ 2^64, so the two arity-4 hash sites are
+    //    distinguishable by the first input alone.
     component leaf_h = Poseidon(4);
     leaf_h.inputs[0] <== TAG_LEAF();
     leaf_h.inputs[1] <== cm.cm;
@@ -112,11 +113,10 @@ template SpentNote(DEPTH) {
     }
 
     // 7. Nullifier always real: nf = Poseidon(TAG_NF, nk, rho) with
-    //    nk = Poseidon(TAG_NK, nsk). nk is derived in-circuit so the prover
-    //    cannot smuggle a different nk than the one consistent with nsk.
-    //    FVK auditor holds nk only and can recompute nf for any known rho.
-    //    Dummy slots use prover-chosen random (nsk, rho) so nf is
-    //    indistinguishable from a real spend on chain.
+    //    nk = Poseidon(TAG_NK, nsk). nk is derived in-circuit, forcing it to
+    //    be consistent with nsk. FVK auditor holds nk only and can recompute
+    //    nf for any known rho. Dummy slots use prover-chosen random
+    //    (nsk, rho) so nf is indistinguishable from a real spend on chain.
     component nk_d = DeriveNk();
     nk_d.nsk <== nsk;
 
@@ -132,9 +132,9 @@ template SpentNote(DEPTH) {
 
     // 9. Bind cv to (asset_id, value, rcv) via Sapling-style ValueCommit.
     //    Reuses rng_in.bits + gen_in from steps 3-4. SOUNDNESS-CRITICAL:
-    //    this equality forces the prover-supplied public cv to be on-curve.
-    //    Removing it lets a malicious prover smuggle off-curve garbage as a
-    //    public input and break the balance check.
+    //    forces the prover-supplied public cv to be on-curve. Without it, an
+    //    off-curve cv could pass as a public input and break the balance
+    //    check.
     component vc = ValueCommit();
     for (var i = 0; i < 64; i++) {
         vc.bits[i] <== rng_in.bits[i];

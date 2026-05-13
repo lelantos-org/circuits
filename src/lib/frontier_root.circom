@@ -3,13 +3,14 @@ pragma circom 2.2.3;
 include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "../../node_modules/circomlib/circuits/bitify.circom";
 include "tags.circom";
+include "common.circom";
 
 // FrontierRoot: rebuild lazy-root from frontier + leaf count.
 //
-// Binds the prover-supplied `frontier_in` to a public `old_root`. Without
-// this, `frontier_in` is unconstrained: a malicious relayer can submit any
-// frontier alongside `oldRoot == currentRoot()` and tree_update_batch
-// produces a `new_root` from forged state ⇒ permanent pool DoS.
+// Binds the prover-supplied `frontier_in` to the public `old_root`. Without
+// this, `frontier_in` is unconstrained: a relayer could submit any frontier
+// alongside `oldRoot == currentRoot()` and tree_update_batch would produce
+// a `new_root` from forged state (permanent pool DoS).
 //
 // Per level d with digit ∈ {0..3} = (start_index >> 2d) % 4, the 4 children
 // at this level are:
@@ -25,26 +26,15 @@ include "tags.circom";
 //
 // Cost ≈ DEPTH × Poseidon(5) + DEPTH × ~8 mul ≈ 8.7k constraints @ DEPTH=10.
 template FrontierRoot(DEPTH) {
-    // Bit decomposition of start_index supplied by the caller — avoids
-    // re-running Num2Bits when the parent template already needs it.
+    // Bit decomposition of start_index supplied by the caller. Reuses the
+    // Num2Bits already required by the parent template for index range checks.
     signal input start_index_bits[2 * DEPTH];
     signal input frontier_in[DEPTH][3];
     signal output root;
 
-    // Empty-subtree hashes. zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d]×4).
-    // Same precompute as QuaternaryInsert / MerkleLevel4.
-    signal zeros[DEPTH + 1];
-    component zh[DEPTH];
-    zeros[0] <== 0;
-    for (var i = 0; i < DEPTH; i++) {
-        zh[i] = Poseidon(5);
-        zh[i].inputs[0] <== TAG_MERKLE();
-        zh[i].inputs[1] <== zeros[i];
-        zh[i].inputs[2] <== zeros[i];
-        zh[i].inputs[3] <== zeros[i];
-        zh[i].inputs[4] <== zeros[i];
-        zeros[i + 1] <== zh[i].out;
-    }
+    // Empty-subtree hashes. Shared with QuaternaryInsert via
+    // EmptySubtreeHashes (lib/common.circom). Referenced as `zh.zeros[d]`.
+    component zh = EmptySubtreeHashes(DEPTH);
 
     // Per-level digit selectors s_k = 1 iff digit == k, from the two
     // low bits of start_index at this level.
@@ -86,19 +76,19 @@ template FrontierRoot(DEPTH) {
         c[d][0] <== c_eq[d][0] + c_post[d][0];
 
         // Slot 1: digit < 1 ⇒ zeros; digit == 1 ⇒ cur; digit > 1 ⇒ f[1].
-        c_pre[d][1] <== s[d][0] * zeros[d];
+        c_pre[d][1] <== s[d][0] * zh.zeros[d];
         c_eq[d][1]  <== s[d][1] * cur[d];
         c_post[d][1] <== (s[d][2] + s[d][3]) * frontier_in[d][1];
         c[d][1] <== c_pre[d][1] + c_eq[d][1] + c_post[d][1];
 
         // Slot 2: digit < 2 ⇒ zeros; digit == 2 ⇒ cur; digit > 2 ⇒ f[2].
-        c_pre[d][2] <== (s[d][0] + s[d][1]) * zeros[d];
+        c_pre[d][2] <== (s[d][0] + s[d][1]) * zh.zeros[d];
         c_eq[d][2]  <== s[d][2] * cur[d];
         c_post[d][2] <== s[d][3] * frontier_in[d][2];
         c[d][2] <== c_pre[d][2] + c_eq[d][2] + c_post[d][2];
 
         // Slot 3: digit < 3 ⇒ zeros; digit == 3 ⇒ cur.
-        c_pre[d][3] <== (s[d][0] + s[d][1] + s[d][2]) * zeros[d];
+        c_pre[d][3] <== (s[d][0] + s[d][1] + s[d][2]) * zh.zeros[d];
         c_eq[d][3]  <== s[d][3] * cur[d];
         c_post[d][3] <== 0;
         c[d][3] <== c_pre[d][3] + c_eq[d][3];

@@ -1,0 +1,53 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  circomspect:
+    runs-on: [self-hosted]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Cache cargo bin
+        id: cache-cargo
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/circomspect
+          key: circomspect-${{ runner.os }}
+
+      - name: Install circomspect
+        if: steps.cache-cargo.outputs.cache-hit != 'true'
+        run: cargo install circomspect --locked
+
+      - name: Install npm dependencies
+        run: npm ci || npm install
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # circomspect exits non-zero on any warning. The baseline of 12 known
+      # warnings is documented in SECURITY.md (section "Static-analysis
+      # baseline"). Advisory-only — does not block PRs. Reviewers MUST
+      # inspect this job's log and ensure any new findings are either fixed
+      # or added to the SECURITY.md baseline before merging.
+      - name: Run circomspect
+        run: just lint
+        continue-on-error: true

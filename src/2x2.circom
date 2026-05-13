@@ -15,8 +15,7 @@ include "lib/clue.circom";
 //   N_OUT  — number of output-note slots. Padding outputs are real value=0
 //            notes addressed to self (no on-chain dummy sentinel).
 //
-//
-// Multi-asset model (Sapling / Namada-faithful):
+// Multi-asset model (Sapling / Namada):
 //   - Each note carries a private asset_id. Circuit derives a Baby-Jubjub
 //     generator V^t = HashToAssetGen(asset_id) per note.
 //   - Public bucket also derives V^pub = HashToAssetGen(public_asset_id)
@@ -26,17 +25,18 @@ include "lib/clue.circom";
 //        Σ in_cv + public_in · V^pub + Σ out_rH
 //          == Σ out_cv + public_out · V^pub + Σ in_rH
 //   - Distinct assets live in distinct V^t subgroups, so cross-asset balance
-//     leakage is impossible without breaking the discrete log of Pedersen.
+//     requires breaking the discrete log of Pedersen.
 //
 // Public-input compression (SnarkCompression):
 //   The verifier sees only two public signals:
 //     - z : Fiat-Shamir challenge supplied by the caller (contract).
-//     - y : circuit-computed PolyEval evaluation, y = Σ_{k=0..19} c_k·z^k.
-//   The 20 logical "public" signals below (formerly the verifier's PI vector)
-//   are demoted to private witnesses; PolyEval binds all 20 to (z, y) so any
-//   contract-side tamper changes y for almost every z (Schwartz–Zippel).
+//     - y : circuit-computed PolyEval evaluation, y = Σ_{k=0..N-1} c_k·z^k.
+//   The logical public signals below are private witnesses; PolyEval binds
+//   them all to (z, y). Any contract-side tamper changes y for almost every
+//   z (Schwartz–Zippel: collision prob ≤ (N-1)/p over prime field p).
 //
-//   Coefficient slot layout (MUST match contracts/src/MASP.sol::_flatten):
+//   Coefficient slot layout (MUST match contracts/src/lib/PubInputs.sol ::
+//   compress(Transact, aux)):
 //     [ 0] merkle_root
 //     [ 1] nullifier[0]
 //     [ 2] nullifier[1]
@@ -57,16 +57,16 @@ include "lib/clue.circom";
 //     [17] chain_id
 //     [18] payer_address
 //     [19] relayer_address
-//     [20] out_cv_dep[0][0]    -- deposit-anchor Pedersen value commitment
-//     [21] out_cv_dep[0][1]       per output, exposed so the spend's
+//     [20] out_cv_dep[0][0]    -- per-output deposit-anchor Pedersen value
+//     [21] out_cv_dep[0][1]       commitment, exposed so the spend's
 //     [22] out_cv_dep[1][0]       tree_update_batch sees the same cv_dep
 //     [23] out_cv_dep[1][1]       baked into the inserted leaf.
-//   After base 24, each output appends 3 clue PI slots (clueRx, clueRy,
-//   clueBits). Total = 24 + 3 * N_OUT = 30 for N_OUT=2.
+//   Slots [24 .. 24 + 3·N_OUT - 1]: per-output (clueRx, clueRy, clueBits).
+//   Total = 24 + 3 · N_OUT = 30 for N_OUT=2.
 //   Re-ordering this list is a soundness change for the contract.
 //
 // Per-slot logic is delegated to `SpentNote` (lib/spent.circom) and
-// `OutputNote` (lib/output.circom). This file is a wiring layer only.
+// `OutputNote` (lib/output.circom). This file is a wiring layer.
 //
 // Properties NOT enforced in-circuit — contract MUST check before verifying:
 //   - chain_id == block.chainid
@@ -76,7 +76,7 @@ include "lib/clue.circom";
 //   - nullifier[i] always inserted (no sentinel); revert on already-spent
 //   - out_cm[j] always inserted into cm tree (no sentinel)
 //
-// Properties now also enforced in-circuit (defense-in-depth on contract):
+// Properties enforced in-circuit (contract checks are defense-in-depth):
 //   - in_asset[i], out_asset[j] < 2^64 (via Num2Bits(64) inside HashToAssetGen)
 
 template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
@@ -130,15 +130,15 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     // ===== PRIVATE: FMD clue witnesses (per output) =====
     // `out_r`  : FMD blinding scalar, fresh per output (≤ 254 bits).
     // `out_fk` : recipient flag-key array (γ Baby-Jubjub points).
-    // Sender MUST set every slot to a real (r, fk) — pad/dummy outputs
-    // also produce a clue; cheapest is sender's own fk + random r so
-    // the resulting clue lands on sender's own subscription harmlessly.
+    // Sender MUST set every slot to a real (r, fk); pad/dummy outputs also
+    // produce a clue. A common choice is sender's own fk plus a random r so
+    // the resulting clue lands on the sender's own subscription.
     signal input out_r[N_OUT];
     signal input out_fk[N_OUT][GAMMA][2];
 
     // ===== LOGICAL PIs (private witnesses, bound via PolyEval): clue =====
-    // 14-bit packed clueBits per output; first GAMMA bits constrained
-    // honest, rest unconstrained but contract masks upper-2 bits zero.
+    // 14-bit packed clueBits per output; first GAMMA bits constrained in
+    // ClueCheck; upper bits are masked to zero by the contract.
     signal input out_clue_bits[N_OUT];
     // Legendre-symbol witness pair per (output, γ-slot). Computed by
     // `fmdLegendreWitness` in sdk/src/crypto/sqrt.ts. See HashToBit gadget
@@ -231,8 +231,8 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     // image of the Pedersen hash for any 64-bit asset_id.
     //
     // ValueScalarMul consumes pre-decomposed bits, so an explicit
-    // RangeCheck64 is wired here for public_in / public_out — belt-and-
-    // suspenders to the on-chain `< 2^64` check.
+    // RangeCheck64 is wired here for public_in / public_out. Defense-in-depth
+    // to the contract's `< 2^64` check.
     // -------------------------------------------------------------------------
     component pub_gen = HashToAssetGen();
     pub_gen.asset_id <== public_asset_id;
@@ -264,8 +264,8 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     //   Σ in_cv + public_in·V^pub + Σ out_rH  ==  Σ out_cv + public_out·V^pub + Σ in_rH
     // Equivalent to per-asset value conservation:
     //   Σ value_in·V_in + public_in·V^pub  ==  Σ value_out·V_out + public_out·V^pub
-    // Distinct assets live in distinct subgroups (independent V^t points),
-    // so cross-asset cancellation is infeasible.
+    // V^t points for distinct assets are independent Pedersen images;
+    // cross-asset cancellation requires breaking discrete log of Pedersen.
     // -------------------------------------------------------------------------
     component bal = PerAssetPointBalance(N_IN, N_OUT);
     for (var i = 0; i < N_IN; i++) {
@@ -286,56 +286,57 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     bal.pub_out_pt[1] <== pub_out_mul.out[1];
 
     // -------------------------------------------------------------------------
-    // SnarkCompression: bind the 24 base + 4 per-output logical PIs to (z, y)
-    // via Horner eval.
-    //
-    // Coefficient ordering MUST match contracts/src/lib/PubInputs.sol :: compress(Transact, aux).
+    // SnarkCompression: bind logical PIs to (z, y) via Horner eval.
+    // Slot layout (matches contracts/src/lib/PubInputs.sol :: compress(Transact))
+    // lives in TransactCompress (lib/poly_eval.circom).
     // -------------------------------------------------------------------------
-    // 20 base PIs + 4 cv_dep coords (2 per output) = 24 base
-    // + 3 clue PIs per output (clueRx, clueRy, bits)
-    // Total = 24 + 3 * N_OUT.
-    var PI_BASE = 24;
-    var PI_PER_OUT = 3;
-    component pe = PolyEval(PI_BASE + PI_PER_OUT * N_OUT);
-    pe.coeffs[ 0] <== merkle_root;
-    pe.coeffs[ 1] <== nullifier[0];
-    pe.coeffs[ 2] <== nullifier[1];
-    pe.coeffs[ 3] <== out_cm[0];
-    pe.coeffs[ 4] <== out_cm[1];
-    pe.coeffs[ 5] <== public_asset_id;
-    pe.coeffs[ 6] <== public_in;
-    pe.coeffs[ 7] <== public_out;
-    pe.coeffs[ 8] <== in_cv[0][0];
-    pe.coeffs[ 9] <== in_cv[0][1];
-    pe.coeffs[10] <== in_cv[1][0];
-    pe.coeffs[11] <== in_cv[1][1];
-    pe.coeffs[12] <== out_cv[0][0];
-    pe.coeffs[13] <== out_cv[0][1];
-    pe.coeffs[14] <== out_cv[1][0];
-    pe.coeffs[15] <== out_cv[1][1];
-    pe.coeffs[16] <== recipient_address;
-    pe.coeffs[17] <== chain_id;
-    pe.coeffs[18] <== payer_address;
-    pe.coeffs[19] <== relayer_address;
-    pe.coeffs[20] <== out_cv_dep[0][0];
-    pe.coeffs[21] <== out_cv_dep[0][1];
-    pe.coeffs[22] <== out_cv_dep[1][0];
-    pe.coeffs[23] <== out_cv_dep[1][1];
-    for (var j = 0; j < N_OUT; j++) {
-        pe.coeffs[PI_BASE + PI_PER_OUT * j + 0] <== out_clue_Rx[j];
-        pe.coeffs[PI_BASE + PI_PER_OUT * j + 1] <== out_clue_Ry[j];
-        pe.coeffs[PI_BASE + PI_PER_OUT * j + 2] <== out_clue_bits[j];
-    }
+    component pe = TransactCompress(N_OUT);
     pe.z <== z;
-    y    <== pe.y;
+    pe.merkle_root <== merkle_root;
+    pe.nullifier[0] <== nullifier[0];
+    pe.nullifier[1] <== nullifier[1];
+    pe.out_cm[0] <== out_cm[0];
+    pe.out_cm[1] <== out_cm[1];
+    pe.public_asset_id <== public_asset_id;
+    pe.public_in <== public_in;
+    pe.public_out <== public_out;
+    for (var i = 0; i < 2; i++) {
+        for (var k = 0; k < 2; k++) {
+            pe.in_cv[i][k] <== in_cv[i][k];
+            pe.out_cv[i][k] <== out_cv[i][k];
+            pe.out_cv_dep[i][k] <== out_cv_dep[i][k];
+        }
+    }
+    pe.recipient_address <== recipient_address;
+    pe.chain_id <== chain_id;
+    pe.payer_address <== payer_address;
+    pe.relayer_address <== relayer_address;
+    for (var j = 0; j < N_OUT; j++) {
+        pe.out_clue_Rx[j] <== out_clue_Rx[j];
+        pe.out_clue_Ry[j] <== out_clue_Ry[j];
+        pe.out_clue_bits[j] <== out_clue_bits[j];
+    }
+    y <== pe.y;
 }
 
 // Public signals layout (verifier IC0..IC2):
 //   IC0 = constant term, IC1 binds z, IC2 binds y.
 // y is a `signal output` of Transact and therefore implicitly public.
+//
+// Top-level parameters — Transact(DEPTH, N_IN, N_OUT, GAMMA):
+//   DEPTH = 10  // quaternary tree → 4^10 = 1,048,576 leaves
+//               //   (binary-equivalent depth 20). Must equal on-chain
+//               //   CommitmentTree depth.
+//   N_IN  = 2   // spent-note slots per tx. Empty slots = dummies.
+//   N_OUT = 2   // output-note slots per tx. Real notes of value=0 to self
+//               //   are used for padding; there is no on-chain dummy
+//               //   sentinel.
+//   GAMMA = 5   // FMD2 clue slots per output. Must equal
+//               //   FMD_DEFAULT_GAMMA in sdk/src/fmd.ts. Bumping requires
+//               //   new trusted setup + regenerated Verifier.sol.
+//
+// Changing any of these is a soundness change for the contract (PI layout
+// depends on N_IN/N_OUT/GAMMA) and a r1cs change (new ceremony required).
 component main {
     public [ z ]
-// Quaternary tree: depth 10 → 4^10 = 1,048,576 leaves (binary-equivalent depth 20).
-// GAMMA = 5 matches FMD_DEFAULT_GAMMA in sdk/src/fmd.ts. Bumping requires
-// new trusted setup + regenerated Verifier.sol.
 } = Transact(10, 2, 2, 5);

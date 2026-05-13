@@ -3,6 +3,7 @@ pragma circom 2.2.3;
 include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "../../node_modules/circomlib/circuits/bitify.circom";
 include "tags.circom";
+include "common.circom";
 
 // Quaternary (arity-4) incremental insert. Mirrors the on-chain
 // CommitmentTree._insert semantics from the Solidity v1 implementation but
@@ -22,10 +23,90 @@ include "tags.circom";
 //
 // Frontier writes (slots 0..2 only — slot 3 needs no write because the parent
 // advances and a fresh sibling group begins above):
-//   frontier_out[level][s] = (slot == s) ? cur : frontier_in[level][s]
+//   frontier_out[slot] = (slot == s) ? cur : f[s]
 //
-// `idx_digit[level]` is the quaternary digit of the leaf-index at `level`.
-// Each digit is range-checked to {0..3} via Num2Bits(2) here.
+// `idx_digit` is the quaternary digit of the leaf-index at this level. The
+// digit is range-checked to {0..3} via PathIndexSelectors.
+
+// One level of QuaternaryInsert. Produces the parent node hash and the
+// updated frontier triple for this level.
+template QuaternaryInsertLevel() {
+    signal input cur;
+    signal input frontier_in[3];
+    signal input zero;
+    signal input idx_digit;
+
+    signal output cur_next;
+    signal output frontier_out[3];
+
+    // Selectors: s[k] = 1 iff idx_digit == k. Also range-checks idx_digit.
+    component sel = PathIndexSelectors();
+    sel.path_index <== idx_digit;
+    signal s0; signal s1; signal s2; signal s3;
+    s0 <== sel.s[0];
+    s1 <== sel.s[1];
+    s2 <== sel.s[2];
+    s3 <== sel.s[3];
+
+    // c0 = s0·cur + (1-s0)·f[0]
+    signal c0_cur;
+    signal c0_sib;
+    c0_cur <== s0 * cur;
+    c0_sib <== (1 - s0) * frontier_in[0];
+    signal c0;
+    c0 <== c0_cur + c0_sib;
+
+    // c1 = s0·z + s1·cur + (s2+s3)·f[1]
+    signal c1_z;
+    signal c1_cur;
+    signal c1_sib;
+    c1_z   <== s0 * zero;
+    c1_cur <== s1 * cur;
+    c1_sib <== (s2 + s3) * frontier_in[1];
+    signal c1;
+    c1 <== c1_z + c1_cur + c1_sib;
+
+    // c2 = (s0+s1)·z + s2·cur + s3·f[2]
+    signal c2_z;
+    signal c2_cur;
+    signal c2_sib;
+    c2_z   <== (s0 + s1) * zero;
+    c2_cur <== s2 * cur;
+    c2_sib <== s3 * frontier_in[2];
+    signal c2;
+    c2 <== c2_z + c2_cur + c2_sib;
+
+    // c3 = (s0+s1+s2)·z + s3·cur
+    signal c3_z;
+    signal c3_cur;
+    c3_z   <== (s0 + s1 + s2) * zero;
+    c3_cur <== s3 * cur;
+    signal c3;
+    c3 <== c3_z + c3_cur;
+
+    // Parent hash.
+    component h = Poseidon(5);
+    h.inputs[0] <== TAG_MERKLE();
+    h.inputs[1] <== c0;
+    h.inputs[2] <== c1;
+    h.inputs[3] <== c2;
+    h.inputs[4] <== c3;
+    cur_next <== h.out;
+
+    // Frontier writes (slots 0..2):  out[k] = s[k]·cur + (1-s[k])·f[k].
+    signal sk[3];
+    sk[0] <== s0;
+    sk[1] <== s1;
+    sk[2] <== s2;
+    signal w_cur[3];
+    signal w_sib[3];
+    for (var k = 0; k < 3; k++) {
+        w_cur[k] <== sk[k] * cur;
+        w_sib[k] <== (1 - sk[k]) * frontier_in[k];
+        frontier_out[k] <== w_cur[k] + w_sib[k];
+    }
+}
+
 template QuaternaryInsert(DEPTH) {
     signal input leaf;
     signal input idx_digit[DEPTH];
@@ -34,117 +115,25 @@ template QuaternaryInsert(DEPTH) {
     signal output root;
     signal output frontier_out[DEPTH][3];
 
-    // Precompute zero-subtree roots at each level.
-    component zh[DEPTH];
-    signal zeros[DEPTH + 1];
-    zeros[0] <== 0;
-    for (var i = 0; i < DEPTH; i++) {
-        zh[i] = Poseidon(5);
-        zh[i].inputs[0] <== TAG_MERKLE();
-        zh[i].inputs[1] <== zeros[i];
-        zh[i].inputs[2] <== zeros[i];
-        zh[i].inputs[3] <== zeros[i];
-        zh[i].inputs[4] <== zeros[i];
-        zeros[i + 1] <== zh[i].out;
-    }
+    // Empty-subtree precompute shared with FrontierRoot.
+    component zh = EmptySubtreeHashes(DEPTH);
 
-    // Per-level component + signal arrays declared up front (Circom 2.x
-    // doesn't allow signal declarations inside loop bodies).
-    component slot_bits[DEPTH];
-    component h[DEPTH];
+    component lvl[DEPTH];
     signal cur[DEPTH + 1];
-
-    signal b0[DEPTH];
-    signal b1[DEPTH];
-    signal bb[DEPTH];
-    signal s0[DEPTH];
-    signal s1[DEPTH];
-    signal s2[DEPTH];
-    signal s3[DEPTH];
-
-    signal c0[DEPTH];
-    signal c1[DEPTH];
-    signal c2[DEPTH];
-    signal c3[DEPTH];
-
-    signal c0_a[DEPTH];
-    signal c0_b[DEPTH];
-    signal c1_a[DEPTH];
-    signal c1_b[DEPTH];
-    signal c1_c[DEPTH];
-    signal c2_a[DEPTH];
-    signal c2_b[DEPTH];
-    signal c2_c[DEPTH];
-    signal c3_a[DEPTH];
-    signal c3_b[DEPTH];
-
-    signal w0_a[DEPTH];
-    signal w0_b[DEPTH];
-    signal w1_a[DEPTH];
-    signal w1_b[DEPTH];
-    signal w2_a[DEPTH];
-    signal w2_b[DEPTH];
-
     cur[0] <== leaf;
 
-    for (var lvl = 0; lvl < DEPTH; lvl++) {
-        // Range-check digit to {0..3}.
-        slot_bits[lvl] = Num2Bits(2);
-        slot_bits[lvl].in <== idx_digit[lvl];
-
-        b0[lvl] <== slot_bits[lvl].out[0];
-        b1[lvl] <== slot_bits[lvl].out[1];
-        bb[lvl] <== b0[lvl] * b1[lvl];
-
-        // Selectors: s_k = 1 iff slot == k.
-        s0[lvl] <== 1 - b0[lvl] - b1[lvl] + bb[lvl];  // (1-b0)*(1-b1)
-        s1[lvl] <== b0[lvl] - bb[lvl];                 // b0*(1-b1)
-        s2[lvl] <== b1[lvl] - bb[lvl];                 // (1-b0)*b1
-        s3[lvl] <== bb[lvl];                            // b0*b1
-
-        // c0 = s0*cur + (1-s0)*f[0]
-        c0_a[lvl] <== s0[lvl] * cur[lvl];
-        c0_b[lvl] <== (1 - s0[lvl]) * frontier_in[lvl][0];
-        c0[lvl] <== c0_a[lvl] + c0_b[lvl];
-
-        // c1 = s0*z + s1*cur + (s2+s3)*f[1]
-        c1_a[lvl] <== s0[lvl] * zeros[lvl];
-        c1_b[lvl] <== s1[lvl] * cur[lvl];
-        c1_c[lvl] <== (s2[lvl] + s3[lvl]) * frontier_in[lvl][1];
-        c1[lvl] <== c1_a[lvl] + c1_b[lvl] + c1_c[lvl];
-
-        // c2 = (s0+s1)*z + s2*cur + s3*f[2]
-        c2_a[lvl] <== (s0[lvl] + s1[lvl]) * zeros[lvl];
-        c2_b[lvl] <== s2[lvl] * cur[lvl];
-        c2_c[lvl] <== s3[lvl] * frontier_in[lvl][2];
-        c2[lvl] <== c2_a[lvl] + c2_b[lvl] + c2_c[lvl];
-
-        // c3 = (s0+s1+s2)*z + s3*cur
-        c3_a[lvl] <== (s0[lvl] + s1[lvl] + s2[lvl]) * zeros[lvl];
-        c3_b[lvl] <== s3[lvl] * cur[lvl];
-        c3[lvl] <== c3_a[lvl] + c3_b[lvl];
-
-        // Hash level node.
-        h[lvl] = Poseidon(5);
-        h[lvl].inputs[0] <== TAG_MERKLE();
-        h[lvl].inputs[1] <== c0[lvl];
-        h[lvl].inputs[2] <== c1[lvl];
-        h[lvl].inputs[3] <== c2[lvl];
-        h[lvl].inputs[4] <== c3[lvl];
-        cur[lvl + 1] <== h[lvl].out;
-
-        // Frontier writes (slots 0..2).
-        w0_a[lvl] <== s0[lvl] * cur[lvl];
-        w0_b[lvl] <== (1 - s0[lvl]) * frontier_in[lvl][0];
-        frontier_out[lvl][0] <== w0_a[lvl] + w0_b[lvl];
-
-        w1_a[lvl] <== s1[lvl] * cur[lvl];
-        w1_b[lvl] <== (1 - s1[lvl]) * frontier_in[lvl][1];
-        frontier_out[lvl][1] <== w1_a[lvl] + w1_b[lvl];
-
-        w2_a[lvl] <== s2[lvl] * cur[lvl];
-        w2_b[lvl] <== (1 - s2[lvl]) * frontier_in[lvl][2];
-        frontier_out[lvl][2] <== w2_a[lvl] + w2_b[lvl];
+    for (var i = 0; i < DEPTH; i++) {
+        lvl[i] = QuaternaryInsertLevel();
+        lvl[i].cur <== cur[i];
+        lvl[i].zero <== zh.zeros[i];
+        lvl[i].idx_digit <== idx_digit[i];
+        for (var k = 0; k < 3; k++) {
+            lvl[i].frontier_in[k] <== frontier_in[i][k];
+        }
+        cur[i + 1] <== lvl[i].cur_next;
+        for (var k = 0; k < 3; k++) {
+            frontier_out[i][k] <== lvl[i].frontier_out[k];
+        }
     }
 
     root <== cur[DEPTH];

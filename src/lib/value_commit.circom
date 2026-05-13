@@ -17,8 +17,8 @@ include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 //
 // H is a fixed Baby-Jubjub generator independent of any AssetGen output.
 // HashToAssetGen runs circomlib Pedersen on 72 bits (TAG_ASSET || asset_id),
-// which compiles into 1 segment and consumes Pedersen BASE[0]. We pick
-// H = BASE[2]: outside the image of HashToAssetGen and therefore independent.
+// compiling into 1 segment and consuming Pedersen BASE[0]. H is set to
+// BASE[2], which lies outside the image of HashToAssetGen.
 
 function H_BASE_X() {
     return 5802099305472655231388284418920769829666717045250560929368476121199858275951;
@@ -29,14 +29,12 @@ function H_BASE_Y() {
 
 // Variable-base scalar multiplication value · gen.
 // Scalar consumed as pre-decomposed 64 bits LSB-first; the caller MUST run
-// `RangeCheck64` on the originating value and pipe its `bits` output here.
-// Threading the bits avoids a redundant Num2Bits(64) per scalar mul (~64
-// constraints saved per call × 6 call sites in Transact(_,2,2) ≈ ~380
-// constraints).
+// `RangeCheck64` on the originating value and pass its `bits` output here.
+// Threading the bits removes the redundant Num2Bits(64) inside this template.
 //
-// EscalarMulAny handles scalar=0 → identity (0,1) and gracefully accepts the
-// identity as a base. Dummy notes (value=0) therefore contribute identity to
-// any subsequent point sum, which is the additive neutral element on Edwards.
+// EscalarMulAny maps scalar=0 to identity (0,1) and accepts the identity as
+// a base. Dummy notes (value=0) therefore contribute identity to any
+// subsequent point sum (additive neutral element on Edwards).
 //
 // Cost ≈ 2k constraints (one segment, 64 bits).
 template ValueScalarMul() {
@@ -55,9 +53,9 @@ template ValueScalarMul() {
     out[1] <== mul.out[1];
 }
 
-// Fixed-base scalar multiplication rcv · H. 253-bit scalar; caller decomposes
-// rcv elsewhere if it wants a tighter bound. Used both per-note (rcv) and
-// once over the rcv_delta in the balance check.
+// Fixed-base scalar multiplication rcv · H. 253-bit scalar. Used per-note
+// (rcv) and over rcv_delta in the balance check. A caller wanting a tighter
+// scalar bound decomposes rcv before passing it in.
 //
 // Cost ≈ 3k constraints.
 template MulH() {
@@ -80,11 +78,12 @@ template MulH() {
 }
 
 // cv = value · gen + rcv · H. Sapling-style hiding value commitment.
-// Public output of the transact circuit so off-chain auditors can verify
-// per-asset balance without redoing the SNARK. Also exposes the rcv·H
-// component so the balance check can sum rH points across notes (avoids the
-// scalar-sum-can-be-negative trap of working with `Σrcv_in − Σrcv_out` in
-// field arithmetic).
+//
+// cv is a public output of the transact circuit; off-chain auditors verify
+// per-asset balance from cv alone. rH = rcv · H is also exposed so the
+// balance check can sum rH points across notes without computing
+// Σrcv_in − Σrcv_out in field arithmetic (the field sum is unsigned and
+// admits no negative-balance encoding).
 template ValueCommit() {
     signal input bits[64];
     signal input gen[2];
@@ -115,7 +114,8 @@ template ValueCommit() {
 }
 
 // Chained Edwards point sum over N points. PointSum(0).out is the identity
-// (0,1). BabyAdd is complete on the prime-order subgroup our points live in.
+// (0,1). BabyAdd is complete on the prime-order subgroup containing all
+// inputs accepted by this circuit.
 template PointSum(N) {
     signal input pts[N][2];
     signal output out[2];

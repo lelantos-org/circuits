@@ -33,19 +33,19 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 //   cv_dep[2i] + cv_dep[2i+1]  ==  pair_public_in[i] · V^pair_asset[i]
 //                                  + rcv_total[i] · H
 //
-// where V^pair_asset[i] = HashToAssetGen(pair_asset[i]). This is the load-
-// bearing C-1 fix: the deposit path runs no transact SNARK, so the per-pair
-// Pedersen aggregate forces (asset_j, value_j) for every leaf in the pair to
-// sum to (pair_asset[i], pair_public_in[i]). Independence of asset
-// generators rules out cross-asset substitution.
+// where V^pair_asset[i] = HashToAssetGen(pair_asset[i]). The deposit path
+// runs no transact SNARK, so this per-pair Pedersen aggregate forces
+// (asset_j, value_j) for every leaf in the pair to sum to (pair_asset[i],
+// pair_public_in[i]). Asset generators are independent Pedersen images,
+// ruling out cross-asset substitution.
 //
-// `is_deposit[i] = 0` skips the aggregate (used by spend's tree update where
-// the two output notes may have differing per-output (asset, value) and the
-// 2x2 balance circuit already proves conservation).
+// `is_deposit[i] = 0` skips the aggregate (spend's tree update: the two
+// output notes may carry differing (asset, value) and 2x2's balance circuit
+// already proves conservation for them).
 //
-// PI compression mirrors prior tree_update.circom: logical PIs folded into
-// (z, y) via PolyEval. Coefficient ordering MUST match the contract's
-// PubInputs.TreeUpdateBatch::compress order:
+// PI compression: logical PIs folded into (z, y) via PolyEval. Coefficient
+// ordering MUST match contracts/src/lib/PubInputs.sol ::
+// compress(TreeUpdateBatch):
 //
 //   [0]                                       old_root
 //   [1]                                       new_root
@@ -61,7 +61,7 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // Total = 4 + 9*MAX_N coefficients (= 76 for MAX_N=8).
 //
 // Quaternary tree, depth DEPTH → 4^DEPTH leaves.
-// We need start_index + 2*MAX_N - 1 to fit in 2*DEPTH bits.
+// Caller MUST ensure start_index + 2·MAX_N - 1 fits in 2·DEPTH bits.
 template TreeUpdateBatch(DEPTH, MAX_N) {
     // ===== PUBLIC =====
     signal input  z;
@@ -110,6 +110,14 @@ template TreeUpdateBatch(DEPTH, MAX_N) {
     //    cms / cv_dep zeroed per inactive pair. pair_asset / pair_public_in /
     //    is_deposit / rcv_total also zero (padding cannot smuggle aggregate
     //    constraints into inactive slots).
+    //
+    //    SOUNDNESS NOTE (cv_dep zeroing): the per-pair deposit aggregate
+    //      cv_dep[2i] + cv_dep[2i+1] == public_in[i]·V^asset[i] + rcv_total[i]·H
+    //    only fires for active+deposit pairs (gated below). Inactive cv_dep
+    //    slots still feed the public-input polynomial (PolyEval below), so
+    //    without these zero-constraints a prover could inject arbitrary
+    //    cv_dep into inactive slots and break the contract's binding to
+    //    cv_dep. All padding-zero rows are load-bearing.
     // -------------------------------------------------------------------------
     for (var i = 0; i < MAX_N; i++) {
         (1 - active[i]) * cms[2 * i]     === 0;
@@ -147,17 +155,15 @@ template TreeUpdateBatch(DEPTH, MAX_N) {
     }
 
     // -------------------------------------------------------------------------
-    // 6. Per-pair deposit binding: enforce Pedersen aggregate when active and
-    //    is_deposit[i] == 1. C-1 closure: forces (asset_j, value_j) of both
-    //    output cms in the pair to satisfy
+    // 6. Per-pair deposit binding. Enforced when active[i]==1 and
+    //    is_deposit[i]==1. Forces (asset_j, value_j) of both output cms in
+    //    the pair to satisfy
     //       Σ value_j · V^pair_asset = pair_public_in · V^pair_asset
-    //    (independence of asset generators rules out cross-asset).
     //
-    //    Soundness rests on:
-    //      - HashToAssetGen producing independent generators per asset_id
-    //        (already an existing assumption underpinning PerAssetPointBalance).
-    //      - H = BASE[2] independent of every V^t (already documented in
-    //        value_commit.circom).
+    //    Soundness assumptions:
+    //      - HashToAssetGen produces independent generators per asset_id
+    //        (also relied on by PerAssetPointBalance).
+    //      - H = BASE[2] is independent of every V^t (see value_commit.circom).
     //      - Pedersen binding on (value, asset_id): given fixed cv_dep_total,
     //        knowing two openings with distinct (asset, value) pairs implies
     //        a discrete-log relation between V^pair_asset and H.
@@ -214,15 +220,14 @@ template TreeUpdateBatch(DEPTH, MAX_N) {
     // -------------------------------------------------------------------------
     // 7. Bind frontier_in to old_root  (SOUNDNESS-CRITICAL).
     //
-    //    Without this binding `frontier_in` is unconstrained: a malicious
-    //    relayer passes `oldRoot == currentRoot()` on chain while supplying
-    //    a forged frontier, then `new_root` (derived from that frontier +
-    //    honest leaves) overwrites `currentRoot` with a state no honest
-    //    user can extend ⇒ permanent pool-wide DoS.
+    //    `frontier_in` is prover-supplied. Without this binding, a relayer
+    //    could submit `oldRoot == currentRoot()` on chain alongside a forged
+    //    `frontier_in`, producing a `new_root` that overwrites currentRoot
+    //    with a state no honest user can extend (permanent pool-wide DoS).
     //
-    //    Defense: recompute old_root inside the SNARK from frontier_in +
-    //    start_index digits (== on-chain `committedCount`) and assert
-    //    equality. See lib/frontier_root.circom.
+    //    The constraint below recomputes old_root inside the SNARK from
+    //    frontier_in + start_index digits (== on-chain `committedCount`) and
+    //    asserts equality. See lib/frontier_root.circom.
     // -------------------------------------------------------------------------
     var BITS = 2 * DEPTH;
     component start_index_bits = Num2Bits(BITS);
@@ -258,7 +263,7 @@ template TreeUpdateBatch(DEPTH, MAX_N) {
 
     // Running tree state. fr[i][lvl][s] is the frontier after pair i;
     // fr[0] == frontier_in. running_root[i] is the root after pair i;
-    // running_root[0] := old_root (now soundly bound via FrontierRoot in
+    // running_root[0] := old_root (bound to frontier_in via FrontierRoot in
     // section 7) and is read only by the inactive-pair mux.
     signal fr[MAX_N + 1][DEPTH][3];
     signal running_root[MAX_N + 1];
@@ -328,44 +333,40 @@ template TreeUpdateBatch(DEPTH, MAX_N) {
     new_root === running_root[MAX_N];
 
     // -------------------------------------------------------------------------
-    // 10. PolyEval compression. Coefficient layout MUST match
-    //    contracts/src/lib/PubInputs.sol :: TreeUpdateBatch.compress order.
-    //    Total = 4 + 9*MAX_N coefficients.
+    // 10. PolyEval compression. Slot layout lives in BatchCompress
+    //     (lib/poly_eval.circom) and MUST match PubInputs.sol ::
+    //     TreeUpdateBatch.compress.
     // -------------------------------------------------------------------------
-    var TOTAL = 4 + 9 * MAX_N;
-    component pe = PolyEval(TOTAL);
-    pe.coeffs[0] <== old_root;
-    pe.coeffs[1] <== new_root;
-    pe.coeffs[2] <== start_index;
-    pe.coeffs[3] <== actual_count;
-    var off = 4;
-    for (var i = 0; i < 2 * MAX_N; i++) {
-        pe.coeffs[off + i] <== cms[i];
-    }
-    off = off + 2 * MAX_N;
-    for (var i = 0; i < 2 * MAX_N; i++) {
-        pe.coeffs[off + 2 * i + 0] <== cv_dep[i][0];
-        pe.coeffs[off + 2 * i + 1] <== cv_dep[i][1];
-    }
-    off = off + 4 * MAX_N;
-    for (var i = 0; i < MAX_N; i++) {
-        pe.coeffs[off + i] <== pair_asset[i];
-    }
-    off = off + MAX_N;
-    for (var i = 0; i < MAX_N; i++) {
-        pe.coeffs[off + i] <== pair_public_in[i];
-    }
-    off = off + MAX_N;
-    for (var i = 0; i < MAX_N; i++) {
-        pe.coeffs[off + i] <== is_deposit[i];
-    }
+    component pe = BatchCompress(MAX_N);
     pe.z <== z;
+    pe.old_root <== old_root;
+    pe.new_root <== new_root;
+    pe.start_index <== start_index;
+    pe.actual_count <== actual_count;
+    for (var i = 0; i < 2 * MAX_N; i++) {
+        pe.cms[i] <== cms[i];
+        pe.cv_dep[i][0] <== cv_dep[i][0];
+        pe.cv_dep[i][1] <== cv_dep[i][1];
+    }
+    for (var i = 0; i < MAX_N; i++) {
+        pe.pair_asset[i] <== pair_asset[i];
+        pe.pair_public_in[i] <== pair_public_in[i];
+        pe.is_deposit[i] <== is_deposit[i];
+    }
     y <== pe.y;
 }
 
-// DEPTH = 10 (matches on-chain CommitmentTree).
-// MAX_N = 8 (16 leaves per batch; halved from 16 to amortize prover cost
-// with the new Pedersen-aggregate constraints + free up ptau headroom).
+// Top-level parameters — TreeUpdateBatch(DEPTH, MAX_N):
+//   DEPTH = 10  // quaternary tree depth; MUST match the 2x2.circom DEPTH
+//               //   and the on-chain CommitmentTree depth.
+//   MAX_N = 8   // max number of pairs (2 leaves each) per batch → up to
+//               //   16 leaves. Halved from MAX_N=16 because adding the
+//               //   Pedersen-aggregate per-pair check raised the
+//               //   constraint count past the ptau_20 ceremony headroom.
+//               //   Range: actual_count ∈ [1, MAX_N].
+//
+// Changing either parameter is a r1cs / ceremony change (re-run
+// `just rebuild-batch`) and a contract change (PI layout = 4 + 9·MAX_N).
 component main {
     public [ z ]
 } = TreeUpdateBatch(10, 8);

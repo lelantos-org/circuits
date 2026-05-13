@@ -12,8 +12,8 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 //     padding outputs are real value=0 notes addressed to the wallet itself,
 //     so they are indistinguishable on chain from a real send).
 //   - value < 2^64.
-//   - asset_id != 0 (ghost-note defense; uniform — no dummy bypass on the
-//     output side).
+//   - asset_id != 0 (ghost-note defense; applies to every output, no dummy
+//     bypass).
 //   - cv == ValueCommit(value, HashToAssetGen(asset_id), rcv).
 //   - cv_dep == ValueCommit(value, HashToAssetGen(asset_id), rcv_dep).
 //     Anchors (asset_id, value) into the Merkle leaf via
@@ -79,9 +79,9 @@ template OutputNote() {
     rH[0] <== vc.rH[0];
     rH[1] <== vc.rH[1];
 
-    // 5. Bind cv_dep to (asset_id, value, rcv_dep). Reuses gen + rng.bits;
-    //    fresh blinder ensures cv_dep ≠ cv so the public cv can re-randomize
-    //    across spends without breaking the leaf anchor.
+    // 5. Bind cv_dep to (asset_id, value, rcv_dep). Reuses gen + rng.bits.
+    //    rcv_dep is fresh (≠ rcv) so cv can re-randomize across spends while
+    //    cv_dep stays pinned to the leaf via the deposit-anchored blinder.
     component vc_dep = ValueCommit();
     for (var i = 0; i < 64; i++) {
         vc_dep.bits[i] <== rng.bits[i];

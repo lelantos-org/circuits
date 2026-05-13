@@ -17,13 +17,13 @@ include "tags.circom";
 // `[TAG_ASSET, ...assetId_LE_8]` to circomlibjs `pedersen.hash(buf)` for
 // byte-for-byte parity.
 //
-// Note: a 264-bit zero-padded input would yield the identical point because
-// zero bits contribute the identity in additive Pedersen, but uses 2 segments
+// A 264-bit zero-padded input would yield the identical point (zero bits
+// contribute the identity in additive Pedersen) but spans 2 Pedersen segments
 // instead of 1.
 //
-// Soundness bonus: Num2Bits(64) also enforces asset_id < 2^64 in-circuit on
-// every private in_asset / out_asset (previously enforced only on
-// public_asset_id by the contract).
+// Side-effect: Num2Bits(64) enforces asset_id < 2^64 in-circuit on every
+// private in_asset / out_asset; contract enforces the same bound on
+// public_asset_id.
 //
 // Bit layout (LSB-first per Pedersen window):
 //   bits[ 0.. 7] = TAG_ASSET (8 bits, LSB-first)

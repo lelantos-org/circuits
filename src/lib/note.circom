@@ -3,20 +3,20 @@ pragma circom 2.2.3;
 include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "tags.circom";
 
-// Note primitives: key derivation (nsk → ivk → pk, nsk → nk), commitment, nullifier.
-// Domain-separation tag values come from tags.circom — single source of truth
-// shared with merkle.circom and test/helpers.ts.
+// Note primitives: key derivation (nsk → ivk → pk, nsk → nk), commitment,
+// nullifier. Domain-separation tag values are defined in tags.circom; the
+// same constants are mirrored by sdk/src/crypto/tags.ts.
 //
 // Key hierarchy:
 //   nsk  (spend authority, never leaves owner)
 //    ├─ ivk = Poseidon(TAG_IVK, nsk)   (incoming view key; can decrypt notes)
 //    │    └─ pk  = Poseidon(TAG_PK, ivk)   (owner_pk bound in note commitment)
 //    └─ nk  = Poseidon(TAG_NK, nsk)    (nullifier-deriving key; FVK component)
-// nf = Poseidon(TAG_NF, nk, rho). Auditor with nk can recompute nf for any
-// known rho ⇒ detect spends. Cannot derive nsk from nk (Poseidon one-way),
-// so spend authority remains gated by nsk via pk_check in spent.circom.
-// FMD detection key dk is derived off-circuit from ivk (or independently)
-// and lives entirely off-chain — no circuit constraints needed for clues.
+// nf = Poseidon(TAG_NF, nk, rho). Auditor holding nk can recompute nf for
+// any known rho (spend detection). Poseidon one-way prevents deriving nsk
+// from nk, so spend authority stays gated by nsk via pk_check in
+// spent.circom. FMD detection key dk lives off-chain; no circuit
+// constraints touch it.
 
 // ivk = Poseidon(TAG_IVK, nsk)
 template DeriveIvk() {
@@ -53,10 +53,12 @@ template DerivePk() {
 
 // cm = Poseidon(packed_av, owner_pk, rho, rcm)
 //   packed_av = asset_id * 2^64 + value
-// Domain separation by arity: NoteCommitment is the only Poseidon(4) site.
-// Soundness of the packing requires asset_id and value < 2^64; the caller
-// (transact circuit) range-checks both via AssetEquality+RangeCheck64 on
-// public_asset and per-note RangeCheck64 on value.
+// Domain separation by first-input: NoteCommitment uses packed_av (≥ 2^64
+// for any nonzero asset_id), distinguishing it from MerkleLevel4 (TAG_MERKLE)
+// and the spend/output leaf hashes (TAG_LEAF).
+// Soundness of the packing requires asset_id, value < 2^64; the caller
+// range-checks asset_id via HashToAssetGen's Num2Bits(64) and value via
+// RangeCheck64.
 template NoteCommitment() {
     signal input asset_id;
     signal input value;
