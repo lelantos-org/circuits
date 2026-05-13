@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -30,20 +33,39 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-circom-${{ env.CIRCOM_VERSION }}
+
       - name: Cache circom binary
         id: cache-circom
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/circom
-          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}
+          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install circom
         if: steps.cache-circom.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/circom-linux-amd64" \
-            -o "$HOME/.local/bin/circom"
-          chmod +x "$HOME/.local/bin/circom"
+          os=$(uname -s)
+          arch=$(uname -m)
+          case "$os-$arch" in
+            Linux-x86_64)  asset=circom-linux-amd64 ;;
+            Darwin-x86_64) asset=circom-macos-amd64 ;;
+            *)             asset="" ;;
+          esac
+          if [ -n "$asset" ]; then
+            curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/${asset}" \
+              -o "$HOME/.local/bin/circom"
+            chmod +x "$HOME/.local/bin/circom"
+          else
+            cargo install --git https://github.com/iden3/circom --tag "${CIRCOM_VERSION}" --root "$HOME/.local" circom
+          fi
 
       - name: Add circom to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -52,7 +74,7 @@ jobs:
         run: circom --version
 
       - name: Install npm dependencies
-        run: npm ci || npm install
+        run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

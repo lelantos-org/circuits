@@ -13,6 +13,9 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
@@ -24,11 +27,21 @@ jobs:
     permissions:
       contents: write   # required to attach SHAs to the release body
       packages: write
+      id-token: write   # required for `npm publish --provenance` (Sigstore)
     env:
       CIRCOM_VERSION: v2.2.3
       PTAU_FILE: powersOfTau28_hez_final_17.ptau
     steps:
       - uses: actions/checkout@v4
+
+      - name: Confirm tag version matches package.json
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json version $pkg"
+            exit 1
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -36,25 +49,45 @@ jobs:
           node-version: "24"
           registry-url: https://npm.pkg.github.com
           scope: "@lelantos-org"
+          always-auth: true
           cache: npm
 
       - name: Install just
         uses: extractions/setup-just@v2
+
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-circom-${{ env.CIRCOM_VERSION }}
 
       - name: Cache circom binary
         id: cache-circom
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/circom
-          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}
+          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install circom
         if: steps.cache-circom.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/circom-linux-amd64" \
-            -o "$HOME/.local/bin/circom"
-          chmod +x "$HOME/.local/bin/circom"
+          os=$(uname -s)
+          arch=$(uname -m)
+          case "$os-$arch" in
+            Linux-x86_64)  asset=circom-linux-amd64 ;;
+            Darwin-x86_64) asset=circom-macos-amd64 ;;
+            *)             asset="" ;;
+          esac
+          if [ -n "$asset" ]; then
+            curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/${asset}" \
+              -o "$HOME/.local/bin/circom"
+            chmod +x "$HOME/.local/bin/circom"
+          else
+            cargo install --git https://github.com/iden3/circom --tag "${CIRCOM_VERSION}" --root "$HOME/.local" circom
+          fi
 
       - name: Add circom to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -66,7 +99,7 @@ jobs:
           key: ptau-17
 
       - name: Install npm dependencies
-        run: npm ci || npm install
+        run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -86,17 +119,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           grep '^circuits-shas=' /tmp/check-artifacts.log >> "$GITHUB_OUTPUT"
 
-      - name: Confirm tag version matches package.json
-        run: |
-          tag="${GITHUB_REF#refs/tags/v}"
-          pkg=$(node -p "require('./package.json').version")
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag v$tag does not match package.json version $pkg"
-            exit 1
-          fi
-
       - name: Publish to GitHub Packages
-        run: npm publish
+        run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
