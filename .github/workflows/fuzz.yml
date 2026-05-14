@@ -51,6 +51,9 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Cache cargo registry + git
         uses: actions/cache@v4
         with:
