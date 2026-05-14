@@ -1,6 +1,6 @@
 {
   "name": "@lelantos-org/circuits",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Lelantos MASP Groth16 prover artifacts (2x2 transact circuit). PROTOTYPE — single-contributor zkey, NOT mainnet-safe.",
   "license": "Apache-2.0",
   "type": "module",
@@ -27,8 +27,7 @@
     "test": "FUZZ=medium NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 600000 'src/test/**/*.test.ts'",
     "test:unit": "FUZZ=medium NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 600000 --ignore 'src/test/fuzz/**' 'src/test/**/*.test.ts'",
     "test:fuzz": "FUZZ=${FUZZ:-heavy} NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 1800000 'src/test/fuzz/**/*.test.ts'",
-    "package": "just package",
-    "prepublishOnly": "just package"
+    "package": "just package"
   },
   "devDependencies": {
     "@lelantos-org/sdk": "^0.3.6",

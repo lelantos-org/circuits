@@ -94,7 +94,7 @@ jobs:
       - name: Cache ptau
         uses: actions/cache@v4
         with:
-          path: circuits/ptau/${{ env.PTAU_FILE }}
+          path: ptau/${{ env.PTAU_FILE }}
           key: ptau-17
 
       - name: Install npm dependencies
