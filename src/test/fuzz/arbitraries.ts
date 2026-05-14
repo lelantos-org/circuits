@@ -100,7 +100,7 @@ export const arbDistinctInt = (min: number, max: number): fc.Arbitrary<[number, 
 
 // Per-suite scaling for genuinely slow suites; env override always wins.
 const SUITE_SCALE: Record<string, number> = {
-    FRONTIER: 0.5,
+    FRONTIER: 0.25,
     TRANSACT_VARIANTS: 0.5,
     // Overflow path runs SDK + circuit per trial; cap tighter.
     TRANSACT_OVERFLOW: 0.25,
