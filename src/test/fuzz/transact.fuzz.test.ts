@@ -14,10 +14,12 @@ const CIRCUIT = srcPath("2x2.circom");
 const fcParams = fcParamsFor("TRANSACT");
 
 // Pin balanced-split edge cases worth seeding into every fc.assert.
+// Note: MAX_VALUE = 2^64 - 1 is odd, so 2 * (MAX_VALUE / 2n) = MAX_VALUE - 1.
+// Each tuple must satisfy o1 + o2 === v1 + v2 (circuit rejects otherwise).
 const BALANCED_EXAMPLES = [
     { v1: 0n, v2: 0n, o1: 0n, o2: 0n },
-    { v1: MAX_VALUE / 2n, v2: MAX_VALUE / 2n, o1: MAX_VALUE, o2: 0n },
-    { v1: MAX_VALUE / 2n, v2: MAX_VALUE / 2n, o1: 0n, o2: MAX_VALUE },
+    { v1: MAX_VALUE / 2n, v2: MAX_VALUE / 2n, o1: MAX_VALUE - 1n, o2: 0n },
+    { v1: MAX_VALUE / 2n, v2: MAX_VALUE / 2n, o1: 0n, o2: MAX_VALUE - 1n },
 ];
 
 describe("transact_2x2 [fuzz]", function () {

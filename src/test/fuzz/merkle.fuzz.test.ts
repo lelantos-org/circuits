@@ -61,8 +61,11 @@ describe("quaternary merkle [fuzz]", function () {
             fc.array(arbField(1n << 200n), { minLength: N_LEAVES, maxLength: N_LEAVES }),
             fc.integer({ min: 0, max: N_LEAVES - 1 }),
             fc.integer({ min: 0, max: DEPTH - 1 }),
-            // Two distinct sibling slots in [0, ARITY-1]; covers 0↔3 boundary.
-            arbDistinctInt(0, ARITY - 1),
+            // Two distinct sibling slots in [0, ARITY-2]. pathElements[lvl]
+            // holds the ARITY-1 = 3 non-queried siblings, so valid indices
+            // are 0..2; covers 0↔2 boundary that the old adjacent-only
+            // (swapA, swapA+1) scheme missed.
+            arbDistinctInt(0, ARITY - 2),
             async (leaves, queryIdx, swapLevel, [a, b]) => {
                 const tree = new MerkleTree(P, DEPTH);
                 for (const l of leaves) tree.insert(l);
