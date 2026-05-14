@@ -27,7 +27,6 @@ jobs:
     permissions:
       contents: write   # required to attach SHAs to the release body
       packages: write
-      id-token: write   # required for `npm publish --provenance` (Sigstore)
     env:
       CIRCOM_VERSION: v2.2.3
       PTAU_FILE: powersOfTau28_hez_final_17.ptau
@@ -120,7 +119,7 @@ jobs:
           grep '^circuits-shas=' /tmp/check-artifacts.log >> "$GITHUB_OUTPUT"
 
       - name: Publish to GitHub Packages
-        run: npm publish --provenance
+        run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
