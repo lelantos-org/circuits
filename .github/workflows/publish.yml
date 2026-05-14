@@ -102,7 +102,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build + verify artifacts
+      - name: Build + verify 2x2 artifacts
         id: build
         run: |
           # Tee stdout so we keep the human-readable lines AND capture
@@ -118,34 +118,64 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           grep '^circuits-shas=' /tmp/check-artifacts.log >> "$GITHUB_OUTPUT"
 
+      - name: Cache ptau_20 (tree_update_batch)
+        uses: actions/cache@v4
+        with:
+          path: ptau/powersOfTau28_hez_final_20.ptau
+          key: ptau-20
+
+      - name: Build tree_update_batch artifacts
+        id: build_batch
+        run: |
+          just compile-batch setup-batch
+          # Stage flat wasm next to its r1cs for release upload.
+          cp build/tree_update_batch_js/tree_update_batch.wasm build/tree_update_batch.wasm
+          # Compute SHA-256 for every release asset (used in the body).
+          {
+              echo 'release_shas<<EOF'
+              sha256sum \
+                build/2x2.r1cs \
+                build/2x2.wasm \
+                build/2x2_final.zkey \
+                build/tree_update_batch.r1cs \
+                build/tree_update_batch.wasm \
+                build/tree_update_batch_final.zkey
+              echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Publish to GitHub Packages
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Append release notes
+      - name: Attach artifacts + release notes
         uses: softprops/action-gh-release@v2
         with:
+          files: |
+            build/2x2.r1cs
+            build/2x2.wasm
+            build/2x2_final.zkey
+            build/tree_update_batch.r1cs
+            build/tree_update_batch.wasm
+            build/tree_update_batch_final.zkey
           body: |
             Published `@lelantos-org/circuits@${{ github.ref_name }}` to GitHub Packages.
 
             **PROTOTYPE — single-contributor trusted setup. NOT mainnet-safe.**
 
-            ### Artifact SHA-256
+            ### Release asset SHA-256
 
             ```
-            ${{ steps.build.outputs.shas }}
+            ${{ steps.build_batch.outputs.release_shas }}
             ```
 
-            Verify a downloaded tarball locally:
+            Verify a downloaded asset locally:
             ```
-            shasum -a 256 \
-              node_modules/@lelantos-org/circuits/build/2x2.wasm \
-              node_modules/@lelantos-org/circuits/build/2x2_final.zkey \
-              node_modules/@lelantos-org/circuits/build/verification_key.json
+            shasum -a 256 2x2.r1cs 2x2.wasm 2x2_final.zkey \
+                          tree_update_batch.r1cs tree_update_batch.wasm tree_update_batch_final.zkey
             ```
 
-            The `2x2_final.zkey` + `verification_key.json` SHAs differ
-            across builds because the contribution step is non-
-            deterministic. Hashes recorded above are the canonical
-            values for this exact release.
+            The `*_final.zkey` (and the npm tarball's `verification_key.json`)
+            SHAs differ across builds because the contribution step is non-
+            deterministic. Hashes recorded above are the canonical values
+            for this exact release.
