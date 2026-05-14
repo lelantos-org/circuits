@@ -1,29 +1,47 @@
 name: fuzz
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   schedule:
     - cron: '0 4 * * *'
   workflow_dispatch:
+    inputs:
+      fuzz_mode:
+        description: 'FUZZ tier (light/medium/heavy)'
+        required: false
+        default: 'heavy'
 
 permissions:
   contents: read
 
 # Fuzz runs are long (heavy mode, 30-min mocha timeout). Do not cancel an
 # in-flight nightly run when a manual workflow_dispatch fires on the same
-# ref — let the running job finish.
+# ref — let the running job finish. PR/push runs (light/medium) are cheap
+# enough that we let GitHub's default per-ref dedup happen instead.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   fuzz:
     runs-on: [self-hosted]
+    # PR runs use FUZZ=light (~minutes); push-to-main FUZZ=medium; cron +
+    # manual default FUZZ=heavy. Single timeout covers heavy mode.
     timeout-minutes: 60
     permissions:
       contents: read
       packages: read
     env:
       CIRCOM_VERSION: v2.2.3
+      FUZZ: >-
+        ${{
+          github.event_name == 'pull_request' && 'light' ||
+          github.event_name == 'push' && 'medium' ||
+          github.event_name == 'workflow_dispatch' && (inputs.fuzz_mode || 'heavy') ||
+          'heavy'
+        }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,5 +96,5 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run heavy fuzz suite
-        run: npm run test:fuzz
+      - name: Run fuzz suite (FUZZ=${{ env.FUZZ }})
+        run: just test-fuzz

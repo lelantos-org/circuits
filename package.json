@@ -25,7 +25,8 @@
   },
   "scripts": {
     "test": "FUZZ=medium NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 600000 'src/test/**/*.test.ts'",
-    "test:fuzz": "FUZZ=heavy NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 1800000 'src/test/fuzz/**/*.test.ts'",
+    "test:unit": "FUZZ=medium NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 600000 --ignore 'src/test/fuzz/**' 'src/test/**/*.test.ts'",
+    "test:fuzz": "FUZZ=${FUZZ:-heavy} NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 1800000 'src/test/fuzz/**/*.test.ts'",
     "package": "just package",
     "prepublishOnly": "just package"
   },

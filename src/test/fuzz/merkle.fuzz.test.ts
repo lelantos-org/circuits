@@ -5,12 +5,26 @@ import { Poseidon, MerkleTree, Field } from "../helpers";
 import { fixturePath, loadCircuit } from "../lib/circuit";
 import { merkleInputJson } from "../lib/inputs";
 import { expectWitnessFails, witnessMatchesRoot } from "../lib/expect";
-import { fcParams, arbField } from "./arbitraries";
+import { fcParamsFor, arbField, arbDistinctInt, R } from "./arbitraries";
 
 const DEPTH = 2;
 const ARITY = 4;
 const N_LEAVES = ARITY ** DEPTH;
 const WRAPPER = fixturePath("test_merkle_d2.circom");
+const fcParams = fcParamsFor("MERKLE");
+
+// Boundary leaf vectors worth pinning.
+const ALL_ZERO = Array<bigint>(N_LEAVES).fill(0n);
+const ALL_ONE = Array<bigint>(N_LEAVES).fill(1n);
+const ALL_MAX = Array<bigint>(N_LEAVES).fill(R - 1n);
+const DUPLICATE = Array<bigint>(N_LEAVES).fill(0xc0ffeen);
+const ROUND_TRIP_EXAMPLES: [bigint[], number][] = [
+    [ALL_ZERO, 0],
+    [ALL_ZERO, N_LEAVES - 1],
+    [ALL_ONE, 0],
+    [ALL_MAX, N_LEAVES - 1],
+    [DUPLICATE, 7],
+];
 
 describe("quaternary merkle [fuzz]", function () {
     this.timeout(900000);
@@ -39,7 +53,7 @@ describe("quaternary merkle [fuzz]", function () {
                 await circuit.checkConstraints(w);
                 await circuit.assertOut(w, { root: expected.toString() });
             },
-        ), fcParams);
+        ), fcParamsFor("MERKLE", { examples: ROUND_TRIP_EXAMPLES }));
     });
 
     it("permuting any two siblings within a level changes the root", async () => {
@@ -47,16 +61,18 @@ describe("quaternary merkle [fuzz]", function () {
             fc.array(arbField(1n << 200n), { minLength: N_LEAVES, maxLength: N_LEAVES }),
             fc.integer({ min: 0, max: N_LEAVES - 1 }),
             fc.integer({ min: 0, max: DEPTH - 1 }),
-            fc.integer({ min: 0, max: ARITY - 3 }),
-            async (leaves, queryIdx, swapLevel, swapA) => {
+            // Two distinct sibling slots in [0, ARITY-1]; covers 0↔3 boundary.
+            arbDistinctInt(0, ARITY - 1),
+            async (leaves, queryIdx, swapLevel, [a, b]) => {
                 const tree = new MerkleTree(P, DEPTH);
                 for (const l of leaves) tree.insert(l);
                 const { pathElements, pathIndices } = tree.proof(queryIdx);
 
                 const swapped: Field[][] = pathElements.map(lvl => lvl.slice());
-                const a = swapA;
-                const b = swapA + 1;
-                if (swapped[swapLevel][a] === swapped[swapLevel][b]) return; // no-op swap
+                // If siblings at (a, b) happen to share the same value the
+                // swap is a no-op; root will match honest and assertion below
+                // expects rejection — skip in that genuinely-degenerate case.
+                if (swapped[swapLevel][a] === swapped[swapLevel][b]) return;
                 [swapped[swapLevel][a], swapped[swapLevel][b]] = [swapped[swapLevel][b], swapped[swapLevel][a]];
 
                 const w = await circuit.calculateWitness(

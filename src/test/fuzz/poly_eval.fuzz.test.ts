@@ -14,18 +14,12 @@
 import { expect } from "chai";
 import * as fc from "fast-check";
 
-import { BN254_FR } from "@lelantos-org/sdk/crypto";
 import { fixturePath, loadCircuit } from "../lib/circuit";
-import { fcParams, arbField } from "./arbitraries";
+import { fcParamsFor, arbField, mod, R, arbDistinctBigInt } from "./arbitraries";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
 const N = 26;
-const R = BN254_FR;
-
-function mod(a: bigint, p: bigint): bigint {
-    const r = a % p;
-    return r < 0n ? r + p : r;
-}
+const fcParams = fcParamsFor("POLYEVAL");
 
 function hornerEval(coeffs: bigint[], z: bigint): bigint {
     let acc = 0n;
@@ -40,6 +34,20 @@ function toInput(coeffs: bigint[], z: bigint) {
 // Coefficient array arbitrary — N entries clamped to [0, R).
 const arbCoeffs = fc.array(arbField(R - 1n), { minLength: N, maxLength: N });
 const arbZ = arbField(R - 1n);
+// Permutation property needs z ∉ {0, 1} (those are sum-/index-invariant).
+const arbZForPermutation = fc.bigInt(2n, R - 1n);
+
+// Boundary coefficient vectors.
+const ALL_ZERO_COEFFS = Array<bigint>(N).fill(0n);
+const ALL_MAX_COEFFS = Array<bigint>(N).fill(R - 1n);
+const COEFFS_Z_EXAMPLES: [bigint[], bigint][] = [
+    [ALL_ZERO_COEFFS, 0n],
+    [ALL_ZERO_COEFFS, 1n],
+    [ALL_ZERO_COEFFS, R - 1n],
+    [ALL_MAX_COEFFS, 1n],
+    [ALL_MAX_COEFFS, R - 1n],
+];
+const COEFFS_ONLY_EXAMPLES: [bigint[]][] = [[ALL_ZERO_COEFFS], [ALL_MAX_COEFFS]];
 
 describe("PolyEval [fuzz, N=26]", function () {
     this.timeout(600_000);
@@ -52,7 +60,7 @@ describe("PolyEval [fuzz, N=26]", function () {
             const expected = hornerEval(coeffs, z);
             const w = await circuit.calculateWitness(toInput(coeffs, z), true);
             await circuit.assertOut(w, { y: expected.toString() });
-        }), fcParams);
+        }), fcParamsFor("POLYEVAL", { examples: COEFFS_Z_EXAMPLES }));
     });
 
     it("linearity: eval(a+b, z) = eval(a, z) + eval(b, z) mod R", async () => {
@@ -83,7 +91,7 @@ describe("PolyEval [fuzz, N=26]", function () {
         await fc.assert(fc.asyncProperty(arbCoeffs, async coeffs => {
             const w = await circuit.calculateWitness(toInput(coeffs, 0n), true);
             await circuit.assertOut(w, { y: coeffs[0].toString() });
-        }), fcParams);
+        }), fcParamsFor("POLYEVAL", { examples: COEFFS_ONLY_EXAMPLES }));
     });
 
     it("z = 1 ⇒ y = Σ coeffs mod R", async () => {
@@ -91,17 +99,18 @@ describe("PolyEval [fuzz, N=26]", function () {
             const sum = mod(coeffs.reduce((s, c) => s + c, 0n), R);
             const w = await circuit.calculateWitness(toInput(coeffs, 1n), true);
             await circuit.assertOut(w, { y: sum.toString() });
-        }), fcParams);
+        }), fcParamsFor("POLYEVAL", { examples: COEFFS_ONLY_EXAMPLES }));
     });
 
     it("permutation alters y (Schwartz–Zippel sanity)", async () => {
-        await fc.assert(fc.asyncProperty(arbCoeffs, arbZ, async (coeffs, z) => {
-            // Need two non-equal entries to make the swap observable.
-            if (coeffs[0] === coeffs[N - 1]) return;
-            // Also need z ≠ 1 (sum-invariant under permutation) and z ≠ 0
-            // (only c[0] matters; swap of c[0] vs c[N-1] still moves y, but
-            // we keep the check tighter).
-            if (z === 0n || z === 1n) return;
+        // Build (c0, cN-1) as a distinct pair so swap is observable without
+        // .filter / early-return; remaining N-2 slots stay uniform.
+        const arbCoeffsDistinctEnds = fc.tuple(
+            arbDistinctBigInt(0n, R - 1n),
+            fc.array(arbField(R - 1n), { minLength: N - 2, maxLength: N - 2 }),
+        ).map(([[c0, cLast], middle]) => [c0, ...middle, cLast]);
+
+        await fc.assert(fc.asyncProperty(arbCoeffsDistinctEnds, arbZForPermutation, async (coeffs, z) => {
             const swapped = [...coeffs];
             [swapped[0], swapped[N - 1]] = [swapped[N - 1], swapped[0]];
             const yA = hornerEval(coeffs, z);

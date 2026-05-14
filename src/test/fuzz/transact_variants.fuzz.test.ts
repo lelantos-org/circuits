@@ -23,12 +23,13 @@ import { MerkleTree, Field, Note, SpentNote } from "../helpers";
 import { loadCircuit, srcPath } from "../lib/circuit";
 import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { expectWitnessFails } from "../lib/expect";
-import { arbBalancedSplit, arbNsk, arbField, NUM_RUNS, MAX_VALUE } from "./arbitraries";
+import { arbBalancedSplit, arbNsk, arbField, MAX_VALUE, fcParamsFor } from "./arbitraries";
 
 const DEPTH = 10;
 const CIRCUIT = srcPath("2x2.circom");
-const RUNS = Math.max(2, Math.floor(NUM_RUNS / 2));
-const fcParams = { numRuns: RUNS };
+// `TRANSACT_VARIANTS` is slow (≥1 depth-10 witness per trial); SUITE_SCALE
+// halves vs NUM_RUNS by default. Override: FUZZ_RUNS_TRANSACT_VARIANTS=N.
+const fcParams = fcParamsFor("TRANSACT_VARIANTS");
 
 // Construct an honest balanced 2-in-2-out witness (same asset, same
 // owner-nsk for inputs). Returns the freshly-built circom input dict.
@@ -188,9 +189,9 @@ describe("transact_2x2 variants [fuzz]", function () {
             arbBalancedSplit(), arbNsk(), arbNsk(),
             fc.integer({ min: 0, max: DEPTH - 1 }),
             fc.integer({ min: 0, max: 2 }),
-            arbField(1n << 200n),
+            // bump ∈ [1, 2^200) — non-zero by construction.
+            fc.bigInt(1n, (1n << 200n) - 1n),
             async ({ v1, v2, o1, o2 }, aliceNsk, bobNsk, lvl, slot, bump) => {
-                if (bump === 0n) return;
                 const { input } = await buildBalanced(
                     tx, v1, v2, o1, o2, aliceNsk, bobNsk,
                     301n, 302n, 303n, 304n,

@@ -27,7 +27,7 @@ import { fiatShamirZ, hornerEval } from "@lelantos-org/sdk";
 import { loadCircuit, srcPath } from "../lib/circuit";
 import { treeUpdateBatchInputJson, flattenTreeUpdateBatch } from "../lib/inputs";
 import { expectWitnessFails } from "../lib/expect";
-import { NUM_RUNS } from "./arbitraries";
+import { fcParamsFor } from "./arbitraries";
 
 const DEPTH = 10;
 const MAX_N = 8;
@@ -36,11 +36,10 @@ const TAG_LEAF = 10n;
 const CAPACITY = 4 ** DEPTH;
 const WRAPPER = srcPath("tree_update_batch.circom");
 
-// Frontier rebuild + insert chain are the slowest part of the circuit;
-// halve the shared run count so the suite still finishes in CI budget.
-// Heavy-mode users get the full sweep.
-const RUNS = Math.max(2, Math.floor(NUM_RUNS / 2));
-const fcParams = { numRuns: RUNS };
+// Suite-tuned run count. `FRONTIER` scale defaults to 0.5x NUM_RUNS in
+// arbitraries.ts; override via `FUZZ_RUNS_FRONTIER=N`. Suite is the slowest
+// in the tree because each trial builds two depth-10 witnesses.
+const fcParams = fcParamsFor("FRONTIER");
 
 interface Pair {
     cm0: Field;
@@ -191,30 +190,37 @@ describe("frontier_root [fuzz, depth=10, MAX_N=8]", function () {
     });
 
     it("any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..8 pairs)", async () => {
+        // Compose digits + k together so 2·k always fits remaining capacity
+        // (drops the old `if (startIndex + 2*k > CAPACITY) return;` skip).
+        // We also require at least one digit==3 so `tamperableLevels` is
+        // non-empty; if the random draw gives all-zero digits we clear the
+        // top level to 3 (still a valid edge-digit pattern).
+        const arbDigitsK = fc.array(fc.constantFrom(0, 3), { minLength: DEPTH, maxLength: DEPTH })
+            .chain(rawDigits => {
+                const digits = rawDigits.some(d => d === 3) ? rawDigits : (() => {
+                    const d = [...rawDigits];
+                    d[DEPTH - 1] = 3;
+                    return d;
+                })();
+                const startIndex = startIndexFromEdgeDigits(digits);
+                const headroom = Math.max(1, Math.min(MAX_N, Math.floor((CAPACITY - startIndex) / 2)));
+                return fc.integer({ min: 1, max: headroom }).map(k => ({ digits, k }));
+            });
+        // Tamper level picked uniformly over the filled subset (no levelSeed
+        // bias from the previous `levelSeed % tLevels.length` mod).
+        const arbTamperLevel = arbDigitsK.chain(({ digits, k }) => {
+            const tLevels = tamperableLevels(digits);
+            return fc.constantFrom(...tLevels).map(level => ({ digits, k, level }));
+        });
+
         await fc.assert(fc.asyncProperty(
-            // Edge-digit pattern at each of the 10 levels — slot 0 (empty
-            // siblings) or slot 3 (all siblings filled).
-            fc.array(fc.constantFrom(0, 3), { minLength: DEPTH, maxLength: DEPTH }),
-            // 1..MAX_N active pairs ⇒ every padding combo from "1 pair + 7
-            // padding slots" up to "fully packed batch, no padding" is hit.
-            fc.integer({ min: 1, max: MAX_N }),
-            // Tamper coordinate: which filled level, which slot index inside it.
-            fc.integer({ min: 0, max: 1 << 20 }),
+            arbTamperLevel,
+            // Which of the 3 filled slots at the chosen level to perturb.
             fc.integer({ min: 0, max: 2 }),
             // isDeposit per active pair (Pedersen aggregate path vs spend skip).
             fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_N, maxLength: MAX_N }),
-            async (digits, k, levelSeed, slotIdx, depositFlags) => {
+            async ({ digits, k, level }, slotIdx, depositFlags) => {
                 const startIndex = startIndexFromEdgeDigits(digits);
-                // Ensure we have headroom for 2·k inserts. 4^10 capacity is
-                // ample, but any digit pattern can land near the top.
-                if (startIndex + 2 * k > CAPACITY) return;
-
-                const tLevels = tamperableLevels(digits);
-                // Need at least one filled level to perturb. The all-zero
-                // pattern (start_index = 0) has nothing to tamper at this
-                // layer — covered separately by the existing depth-3 unit
-                // test "empty tree ... reproduces empty root".
-                if (tLevels.length === 0) return;
 
                 const pairs: Pair[] = [];
                 for (let i = 0; i < k; i++) {
@@ -227,7 +233,6 @@ describe("frontier_root [fuzz, depth=10, MAX_N=8]", function () {
                 const wHonest = await circuit.calculateWitness(treeUpdateBatchInputJson(honest), true);
                 await circuit.checkConstraints(wHonest);
 
-                const level = tLevels[levelSeed % tLevels.length];
                 // At digit==3 every slot 0..2 holds a real filled sibling
                 // (MerkleTree.frontier zeros only `k >= currentSlot`).
                 // Bump by 1 — still inside the BN254 scalar field since
@@ -247,6 +252,10 @@ describe("frontier_root [fuzz, depth=10, MAX_N=8]", function () {
                     `frontier perturbation at (level=${level}, slot=${slotIdx}) must reject`,
                 );
             },
-        ), fcParams);
+        ), fcParamsFor("FRONTIER", { examples: [
+            // Boundary digit patterns + tamper at extremes.
+            [{ digits: Array<number>(DEPTH).fill(3).map((_, i) => i === DEPTH - 1 ? 0 : 3), k: 1, level: 0 }, 0, Array<0 | 1>(MAX_N).fill(1)],
+            [{ digits: [...Array<number>(DEPTH - 1).fill(0), 3], k: 1, level: DEPTH - 1 }, 2, Array<0 | 1>(MAX_N).fill(0)],
+        ] }));
     });
 });

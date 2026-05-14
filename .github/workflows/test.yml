@@ -79,4 +79,4 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests
-        run: just test
+        run: just test-unit

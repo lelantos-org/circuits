@@ -20,15 +20,11 @@ import {
 import { TAG_FMD_BIT } from "@lelantos-org/sdk";
 import { fixturePath, loadCircuit } from "../lib/circuit";
 import { expectWitnessFails } from "../lib/expect";
-import { fcParams } from "./arbitraries";
+import { fcParamsFor, mod, arbDistinctBigInt } from "./arbitraries";
 
 const WRAPPER = fixturePath("test_clue.circom");
 const GAMMA = 5;
-
-function mod(a: bigint, p: bigint): bigint {
-    const r = a % p;
-    return r < 0n ? r + p : r;
-}
+const fcParams = fcParamsFor("CLUE");
 
 interface ClueWitness {
     r: bigint;
@@ -74,6 +70,13 @@ function toInput(w: ClueWitness): any {
 const arbSubgroupScalar = fc.bigInt(1n, BABYJUB_SUBGROUP_ORDER - 1n);
 const arbDkVec = fc.array(arbSubgroupScalar, { minLength: GAMMA, maxLength: GAMMA });
 
+// Pin boundary cases that uniform draws rarely hit.
+const HONEST_EXAMPLES: [bigint, bigint[]][] = [
+    [1n, [1n, 1n, 1n, 1n, 1n]],
+    [BABYJUB_SUBGROUP_ORDER - 1n, [1n, 2n, 3n, 4n, 5n]],
+    [2n, [BABYJUB_SUBGROUP_ORDER - 1n, BABYJUB_SUBGROUP_ORDER - 1n, BABYJUB_SUBGROUP_ORDER - 1n, BABYJUB_SUBGROUP_ORDER - 1n, BABYJUB_SUBGROUP_ORDER - 1n]],
+];
+
 describe("ClueCheck [fuzz, γ=5]", function () {
     this.timeout(1_800_000);
 
@@ -92,7 +95,7 @@ describe("ClueCheck [fuzz, γ=5]", function () {
             const w = buildHonest(J, P, r, dk);
             const wt = await circuit.calculateWitness(toInput(w), true);
             await circuit.assertOut(wt, { Rx: w.Rx.toString(), Ry: w.Ry.toString() });
-        }), fcParams);
+        }), fcParamsFor("CLUE", { examples: HONEST_EXAMPLES }));
     });
 
     it("single-bit flip in clue_bits rejects", async () => {
@@ -108,11 +111,17 @@ describe("ClueCheck [fuzz, γ=5]", function () {
         await fc.assert(fc.asyncProperty(
             arbSubgroupScalar, arbDkVec,
             fc.integer({ min: 0, max: GAMMA - 1 }),
-            arbSubgroupScalar,
-            async (r, dk, idx, otherScalar) => {
-                if (otherScalar === dk[idx]) return;
+            // Pick `otherScalar` distinct from a sentinel inside the dk vector
+            // via arbDistinctBigInt; we then override the chosen index with
+            // the second draw so swap always lands on a different point.
+            arbDistinctBigInt(1n, BABYJUB_SUBGROUP_ORDER - 1n),
+            async (r, dk, idx, [_anchor, otherScalar]) => {
+                // Ensure otherScalar !== dk[idx]; if collision, bump.
+                const safeOther = otherScalar === dk[idx]
+                    ? (otherScalar === BABYJUB_SUBGROUP_ORDER - 1n ? 1n : otherScalar + 1n)
+                    : otherScalar;
                 const w = buildHonest(J, P, r, dk);
-                const newFk = J.mulPointEscalar(J.base8, otherScalar) as [bigint, bigint];
+                const newFk = J.mulPointEscalar(J.base8, safeOther) as [bigint, bigint];
                 const tampered = {
                     ...w,
                     fk: w.fk.map((p, i) => (i === idx ? newFk : p)),

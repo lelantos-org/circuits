@@ -49,6 +49,10 @@ jobs:
           path: ~/.cargo/bin/circomspect
           key: circomspect-${{ env.CIRCOMSPECT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
 
+      - name: Install Rust toolchain
+        if: steps.cache-cargo.outputs.cache-hit != 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
       - name: Install circomspect
         if: steps.cache-cargo.outputs.cache-hit != 'true'
         run: cargo install circomspect --locked --version "${CIRCOMSPECT_VERSION}"

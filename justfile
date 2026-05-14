@@ -124,6 +124,14 @@ rebuild-batch: compile-batch setup-batch
 test:
     npm test
 
+# Run unit tests, excluding fuzz suite (covered by `just test-fuzz`).
+test-unit:
+    npm run test:unit
+
+# Run heavy fuzz suite.
+test-fuzz:
+    npm run test:fuzz
+
 # Static analysis via Trail of Bits circomspect. Install: cargo install circomspect
 #
 # Suppressed analysis passes (each reviewed; rationale below). To audit, run

@@ -19,18 +19,19 @@ import {
 } from "@lelantos-org/sdk/crypto";
 import { fixturePath, loadCircuit } from "../lib/circuit";
 import { expectWitnessFails } from "../lib/expect";
-import { fcParams, arbField } from "./arbitraries";
+import { fcParamsFor, mod, R } from "./arbitraries";
 
 const WRAPPER = fixturePath("test_hash_to_bit.circom");
-const R = BN254_FR;
 
-function mod(a: bigint, p: bigint): bigint {
-    const r = a % p;
-    return r < 0n ? r + p : r;
-}
+// Avoid hash = 0 (range-check edge tested separately in unit file). Range
+// [1, R-1] directly — no .filter shrink penalty.
+const arbNonzeroHash = fc.bigInt(1n, R - 1n);
 
-// Avoid hash = 0 (range-check edge tested separately in unit file).
-const arbNonzeroHash = arbField(R - 1n).filter(h => h !== 0n);
+// Pin near-boundary field elements (uniform draws rarely land here).
+const HASH_EXAMPLES: [bigint][] = [[1n], [2n], [R - 2n], [R - 1n]];
+
+const fcParams = fcParamsFor("HASHTOBIT");
+const fcParamsWithExamples = fcParamsFor("HASHTOBIT", { examples: HASH_EXAMPLES });
 
 describe("HashToBit [fuzz]", function () {
     this.timeout(600_000);
@@ -49,7 +50,7 @@ describe("HashToBit [fuzz]", function () {
                 bit: w.bit.toString(),
                 y: w.y.toString(),
             }, true);
-        }), fcParams);
+        }), fcParamsWithExamples);
     });
 
     it("flipping bit (keeping same y) rejects", async () => {
@@ -64,20 +65,20 @@ describe("HashToBit [fuzz]", function () {
                 bit: flipped.toString(),
                 y: w.y.toString(),
             }, "bit-flip with honest y must reject");
-        }), fcParams);
+        }), fcParamsWithExamples);
     });
 
     it("y → -y mod R re-verifies (gadget binds y², not y)", async () => {
+        // hash ∈ [1, R-1] ⇒ y ≠ 0 ⇒ -y ≠ y. No early-return guard needed.
         await fc.assert(fc.asyncProperty(arbNonzeroHash, async hash => {
             const w = fmdLegendreWitness(hash);
             const yNeg = mod(R - w.y, R);
-            if (yNeg === w.y) return; // y = 0 case — only at hash = 0, filtered out
             await circuit.calculateWitness({
                 hash: hash.toString(),
                 bit: w.bit.toString(),
                 y: yNeg.toString(),
             }, true);
-        }), fcParams);
+        }), fcParamsWithExamples);
     });
 
     it("QR / QNR distribution ~50/50 (Legendre branch coverage)", async () => {

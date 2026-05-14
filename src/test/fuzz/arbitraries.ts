@@ -2,8 +2,15 @@
 // Builds on existing helpers in ../helpers.ts (which re-exports SDK crypto).
 // Keeps generated values inside circuit-enforced ranges (64-bit values, valid
 // path indices) so positive properties don't trip range checks accidentally.
+//
+// Env vars:
+//   FUZZ=light|medium|heavy            global run-count (5 / 20 / 100)
+//   FUZZ_RUNS_<SUITE>=N                per-suite override, overrides FUZZ
+//     SUITE keys: CLUE, FRONTIER, HASHTOBIT, MERKLE, POLYEVAL,
+//                 TRANSACT, TRANSACT_VARIANTS
 
 import * as fc from "fast-check";
+import { BN254_FR } from "@lelantos-org/sdk/crypto";
 
 // FUZZ env: light=5, medium=20 (default), heavy=100.
 const FUZZ = (process.env.FUZZ || "medium").toLowerCase();
@@ -17,9 +24,27 @@ export const fcParams = { numRuns: NUM_RUNS };
 // 64-bit value used by transact circuit (range-checked via Num2Bits(64)).
 export const MAX_VALUE = (1n << 64n) - 1n;
 
+// BN254 scalar field modulus — used by every gadget that constrains a Field.
+export const R = BN254_FR;
+
+// Canonical-positive modulo. Centralized so fuzz files don't redefine
+// per-suite (previously duped in clue / hash_to_bit / poly_eval).
+export const mod = (a: bigint, p: bigint): bigint => {
+    const r = a % p;
+    return r < 0n ? r + p : r;
+};
+
 // Random bigint in [0, max] from a fast-check uint sequence (deterministic seed).
 export const arbField = (max: bigint = MAX_VALUE): fc.Arbitrary<bigint> =>
     fc.bigInt(0n, max);
+
+// Boundary-biased field arbitrary — interleaves {0, 1, max-1, max} with uniform draws.
+// Use in `examples` arrays or when shrinking must visit edges quickly.
+export const arbBoundaryField = (max: bigint): fc.Arbitrary<bigint> =>
+    fc.oneof(
+        { arbitrary: fc.bigInt(0n, max), weight: 7 },
+        { arbitrary: fc.constantFrom(0n, 1n, max - 1n, max), weight: 3 },
+    );
 
 // Avoid 0 so random nsks produce distinct pks reliably.
 export const arbNsk = (): fc.Arbitrary<bigint> =>
@@ -52,3 +77,50 @@ export const arbPathIndex = (): fc.Arbitrary<number> => fc.integer({ min: 0, max
 
 export const arbPathIndices = (depth: number): fc.Arbitrary<number[]> =>
     fc.array(arbPathIndex(), { minLength: depth, maxLength: depth });
+
+// Distinct-pair arbitraries via chain (no .filter shrink penalty).
+// If the second draw collides with the first, bump by +1 (wrapping at max).
+export const arbDistinctBigInt = (min: bigint, max: bigint): fc.Arbitrary<[bigint, bigint]> =>
+    fc.bigInt(min, max).chain(a =>
+        fc.bigInt(min, max).map(b => {
+            if (b !== a) return [a, b] as [bigint, bigint];
+            const bumped = a === max ? min : a + 1n;
+            return [a, bumped] as [bigint, bigint];
+        }),
+    );
+
+export const arbDistinctInt = (min: number, max: number): fc.Arbitrary<[number, number]> =>
+    fc.integer({ min, max }).chain(a =>
+        fc.integer({ min, max }).map(b => {
+            if (b !== a) return [a, b] as [number, number];
+            const bumped = a === max ? min : a + 1;
+            return [a, bumped] as [number, number];
+        }),
+    );
+
+// Per-suite scaling for genuinely slow suites; env override always wins.
+const SUITE_SCALE: Record<string, number> = {
+    FRONTIER: 0.5,
+    TRANSACT_VARIANTS: 0.5,
+    // Overflow path runs SDK + circuit per trial; cap tighter.
+    TRANSACT_OVERFLOW: 0.25,
+};
+
+export function runsFor(suite: string): number {
+    const env = process.env[`FUZZ_RUNS_${suite}`];
+    if (env) {
+        const n = parseInt(env, 10);
+        if (!isNaN(n) && n > 0) return n;
+    }
+    const scale = SUITE_SCALE[suite] ?? 1;
+    return Math.max(2, Math.floor(NUM_RUNS * scale));
+}
+
+export function fcParamsFor<E = unknown>(
+    suite: string,
+    extra?: { examples?: E[] },
+): { numRuns: number; examples?: E[] } {
+    const out: { numRuns: number; examples?: E[] } = { numRuns: runsFor(suite) };
+    if (extra?.examples && extra.examples.length > 0) out.examples = extra.examples;
+    return out;
+}
