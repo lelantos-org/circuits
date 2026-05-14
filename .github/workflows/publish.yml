@@ -34,15 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Confirm tag version matches package.json
-        run: |
-          tag="${GITHUB_REF#refs/tags/v}"
-          pkg=$(node -p "require('./package.json').version")
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag v$tag does not match package.json version $pkg"
-            exit 1
-          fi
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -51,6 +42,15 @@ jobs:
           scope: "@lelantos-org"
           always-auth: true
           cache: npm
+
+      - name: Confirm tag version matches package.json
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json version $pkg"
+            exit 1
+          fi
 
       - name: Install just
         uses: extractions/setup-just@v2
