@@ -7,39 +7,19 @@ include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "hash_to_bit.circom";
 include "tags.circom";
 
-// FMD2 (lelantos.fmd.v2 / Poseidon scheme) bit-derivation, in-circuit.
+// FMD2 (lelantos.fmd.v2) in-circuit bit derivation. Mirrors `shared_bit`
+// in fmd-crypto/src/clue.rs and sdk/src/fmd.ts:
 //
-// Mirrors `shared_bit` in backend/crates/fmd-crypto/src/clue.rs and
-// sdk/src/fmd.ts, byte-identical:
+//   R     = r · G_8                                 (circomlib G8)
+//   S_i   = r · fk_i                                for i ∈ [γ]
+//   bit_i = legendre_bit(Poseidon(TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y))
 //
-//   R    = r · G_8                          (Baby-Jubjub fixed base, circomlib G8)
-//   S_i  = r · fk_i                          for i ∈ [γ]
-//   bit_i = legendre_bit(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
-//   where legendre_bit(h) = 1 iff h is a quadratic residue in 𝔽_r.
+// Sender constraint: clue_bits[i] === 1 - bit_i. Forces honest derivation —
+// flipping a bit requires a valid (r, fk) whose Poseidon output flips
+// residuosity. clue_bits is PolyEval-bound; upper bits ≥ GAMMA masked by
+// the contract (CLUE_BITS_MASK = 0x3FFF). Rx/Ry exposed for PolyEval binding.
 //
-// Sender flips: clue_bits[i] === 1 - bit_i. Receiver tests:
-//   bit_i ⊕ c_bits[i] === 1
-// Honest sender ⇒ all γ checks pass. Constraining `clue_bits[i] === 1 - bit_i`
-// here forces the sender to derive bits honestly: a malicious sender cannot
-// set `clue_bits = all-ones` without also producing a valid `r, fk` whose
-// Poseidon outputs all are non-residues.
-//
-// Cost (γ=5):
-//   1× EscalarMulFix(254)         R = r·G_8         ~3 k
-//   γ× EscalarMulAny(254)         S_i = r·fk_i      ~γ × 4 k
-//   γ× Poseidon(6)                bit_i             ~γ × 200
-//   γ× HashToBit()                Legendre extract  ~γ × 4
-// γ=5 total ≈ 24 k. γ=14 total ≈ 62 k.
-//
-// `r` is the FMD blinding scalar (private witness). `fk[i]` is the
-// recipient flag-key point (private witness). `clue_bits` is a public
-// witness (PolyEval-bound); 14 bits of which the first GAMMA are
-// constrained — bits ≥ GAMMA are unconstrained here but the contract
-// enforces upper-2-bits zero via `CLUE_BITS_MASK = 0x3FFF`.
-//
-// `R_x, R_y` are exposed as outputs so the caller can pipe them into
-// PolyEval (the contract reads them from `aux.clueRx, aux.clueRy` and
-// re-feeds them as PIs).
+// Cost (γ=5) ≈ 24k. γ=14 ≈ 62k.
 template ClueCheck(GAMMA) {
     signal input r;                  // private, Fr (≤ 254 bits)
     signal input fk[GAMMA][2];       // private, recipient flag-key points
@@ -49,13 +29,12 @@ template ClueCheck(GAMMA) {
     signal output Rx;                // public output, R = r·G_8
     signal output Ry;
 
-    // 1. Decompose r into bits once; reused by R = r·G8 and γ × S_i = r·fk_i.
-    //    _strict variant rejects r ≥ p (BN254 scalar prime ~2^253.6), preventing
-    //    field aliasing on the top bits.
+    // 1. Decompose r once; reused by R = r·G8 and γ × S_i = r·fk_i.
+    //    _strict rejects r ≥ p to prevent top-bit field aliasing.
     component rbits = Num2Bits_strict();
     rbits.in <== r;
 
-    // 2. R = r · G_8 (circomlib base point, see fmd-crypto/clue.rs:79-89).
+    // 2. R = r · G_8 (circomlib base point).
     var G8[2];
     G8[0] = 5299619240641551281634865583518297030282874472190772894086521144482721001553;
     G8[1] = 16950150798460657717958625567821834550301663161624707787222815936182638968203;
@@ -67,11 +46,11 @@ template ClueCheck(GAMMA) {
     Rx <== rmul.out[0];
     Ry <== rmul.out[1];
 
-    // 3. clue_bits → γ bits. Higher bits unconstrained (contract masks).
+    // 3. clue_bits → γ bits (higher bits masked by contract).
     component cbits = Num2Bits(GAMMA);
     cbits.in <== clue_bits;
 
-    // 4. Per-component shared secret + Poseidon hash + Legendre bit.
+    // 4. Per-slot shared secret + Poseidon hash + Legendre bit.
     component s[GAMMA];
     component h[GAMMA];
     component hb[GAMMA];
@@ -84,7 +63,6 @@ template ClueCheck(GAMMA) {
         s[i].p[0] <== fk[i][0];
         s[i].p[1] <== fk[i][1];
 
-        // bit_i = legendre_bit(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
         h[i] = Poseidon(6);
         h[i].inputs[0] <== TAG_FMD_BIT();
         h[i].inputs[1] <== Rx;
@@ -98,7 +76,6 @@ template ClueCheck(GAMMA) {
         hb[i].bit <== legendre_bit[i];
         hb[i].y <== legendre_y[i];
 
-        // Sender format: c_bits[i] === 1 - legendre_bit(Poseidon(...))
         cbits.out[i] === 1 - legendre_bit[i];
     }
 }

@@ -9,7 +9,7 @@ subgroup. The package exports two Groth16-friendly entry points:
   quaternary Merkle tree of depth 10 (`4^10 = 1,048,576` leaves)
   consuming up to two shielded inputs and producing up to two shielded
   outputs per proof. `GAMMA` is the FMD2 clue width (default 5,
-  matches `FMD_DEFAULT_GAMMA` in `sdk/src/fmd.ts`); each output carries
+  matches `FMD_DEFAULT_GAMMA` in `sdk/src/fmd/fmd.ts`); each output carries
   an in-circuit FMD clue derivation (§7a).
 - [`TreeUpdateBatch(DEPTH, MAX_N)`](tree_update_batch.circom),
   instantiated as `TreeUpdateBatch(10, 8)` — a relayer-side proof that
@@ -53,7 +53,7 @@ enforces the following properties for every accepted transaction:
   Poseidon nullifiers; unused output slots are real `value=0` notes
   whose commitment is a real Poseidon hash. No `bytes32(0)` sentinel
   leaks the transaction shape.
-- **Deposit binding (C-1 closure).** For every deposit-mode pair in
+- **Deposit binding.** For every deposit-mode pair in
   `tree_update_batch`, the Pedersen aggregate
   `cv_dep[2i] + cv_dep[2i+1] == pair_public_in[i] · V^pair_asset[i] +
   rcv_total[i] · H` forces both leaves in the pair to commit to the
@@ -117,7 +117,7 @@ y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[N-1]·z^(N-1)
 ```
 
 Slot layout for `N_OUT = 2` (MUST match
-`contracts/src/lib/PubInputs.sol :: compress(Transact, aux)`
+`contracts/src/libs/PubInputs.sol :: compress(Transact, aux)`
 byte-for-byte; reordering is a soundness change for the contract):
 
 | Slot | Coeff | Slot | Coeff |
@@ -386,7 +386,7 @@ Files: [`lib/clue.circom`](lib/clue.circom),
 Each output proves a fresh Fuzzy Message Detection clue
 `(R, clue_bits)` was derived honestly from the recipient's flag-key
 `fk` (γ Baby-Jubjub points). Mirrors `shared_bit` in
-`backend/crates/fmd-crypto/src/clue.rs` and `sdk/src/fmd.ts`
+`backend/crates/fmd-crypto/src/clue/detect.rs` and `sdk/src/fmd/fmd.ts`
 byte-for-byte.
 
 ```
@@ -655,7 +655,8 @@ Dominated by MAX_N pairs × 2 inserts × 10 Merkle levels of
 | [`test/clue.test.ts`](test/clue.test.ts) | ClueCheck test suite. |
 | [`test/poly_eval.test.ts`](test/poly_eval.test.ts) | PolyEval test suite. |
 | [`test/hash_to_bit.test.ts`](test/hash_to_bit.test.ts) | HashToBit test suite. |
-| [`test/fixtures/`](test/fixtures/) | Frozen witness vectors used by the test suites. |
+| [`test/fixtures/`](test/fixtures/) | Small-parameter test-wrapper circoms (`test_clue.circom`, `test_frontier_root_d3.circom`, `test_hash_to_bit.circom`, `test_merkle_d2.circom`, `test_poly_eval.circom`) instantiating library templates at compact sizes for unit testing. |
+| [`test/fuzz/`](test/fuzz/) | Property-based fuzz suites (fast-check) covering Transact, Merkle, ClueCheck, FrontierRoot, HashToBit, PolyEval, and Transact variant flows. |
 
 ---
 
@@ -727,7 +728,7 @@ After `MAX_N` pairs, `new_root === running_root[MAX_N]`.
 
 **SnarkCompression.** 76 logical PIs folded into `(z, y)` via
 `BatchCompress(MAX_N)`. Slot order MUST match
-`contracts/src/lib/PubInputs.sol :: compress(TreeUpdateBatch)`:
+`contracts/src/libs/PubInputs.sol :: compress(TreeUpdateBatch)`:
 
 | Slot range | Coeffs |
 |---|---|

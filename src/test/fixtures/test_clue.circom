@@ -1,9 +1,6 @@
 pragma circom 2.2.3;
 
-// Test wrapper: expose ClueCheck(GAMMA=5) directly, mirroring
-// FMD_DEFAULT_GAMMA in sdk/src/fmd.ts. Lets us validate the FMD2
-// bit-derivation + R = r·G_8 binding in isolation, without wiring through
-// the full Transact circuit.
+// Test wrapper: ClueCheck(GAMMA=5) in isolation (matches FMD_DEFAULT_GAMMA).
 
 include "../../lib/clue.circom";
 

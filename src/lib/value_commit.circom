@@ -6,19 +6,12 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 include "../../node_modules/circomlib/circuits/escalarmulany.circom";
 include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 
-// Sapling-style value commitment over Baby-Jubjub:
-//   cv = value * AssetGen + rcv * H
-//
-// Inputs:
-//   value (≤ 2^64, range-checked outside this lib)
-//   gen[2] = AssetGen (Edwards point; output of HashToAssetGen for per-note
-//                      assets, or witnessed point for the public bucket)
-//   rcv (253-bit blinding scalar)
-//
-// H is a fixed Baby-Jubjub generator independent of any AssetGen output.
-// HashToAssetGen runs circomlib Pedersen on 72 bits (TAG_ASSET || asset_id),
-// compiling into 1 segment and consuming Pedersen BASE[0]. H is set to
-// BASE[2], which lies outside the image of HashToAssetGen.
+// Sapling-style Baby-Jubjub value commitment: cv = value · AssetGen + rcv · H.
+//   value: ≤ 2^64 (range-checked by caller).
+//   gen:   AssetGen (HashToAssetGen output or public-bucket point).
+//   rcv:   253-bit blinder.
+// H = circomlib Pedersen BASE[2]; HashToAssetGen uses BASE[0], so H is
+// outside its image.
 
 function H_BASE_X() {
     return 5802099305472655231388284418920769829666717045250560929368476121199858275951;
@@ -27,16 +20,9 @@ function H_BASE_Y() {
     return 5980429700218124965372158798884772646841287887664001482443826541541529227896;
 }
 
-// Variable-base scalar multiplication value · gen.
-// Scalar consumed as pre-decomposed 64 bits LSB-first; the caller MUST run
-// `RangeCheck64` on the originating value and pass its `bits` output here.
-// Threading the bits removes the redundant Num2Bits(64) inside this template.
-//
-// EscalarMulAny maps scalar=0 to identity (0,1) and accepts the identity as
-// a base. Dummy notes (value=0) therefore contribute identity to any
-// subsequent point sum (additive neutral element on Edwards).
-//
-// Cost ≈ 2k constraints (one segment, 64 bits).
+// Variable-base scalar mul: value · gen. Bits pre-decomposed (LSB-first 64);
+// caller passes RangeCheck64.bits. scalar=0 → identity (0,1), so dummy notes
+// add identity to point sums. Cost ≈ 2k constraints.
 template ValueScalarMul() {
     signal input bits[64];
     signal input gen[2];
@@ -53,11 +39,7 @@ template ValueScalarMul() {
     out[1] <== mul.out[1];
 }
 
-// Fixed-base scalar multiplication rcv · H. 253-bit scalar. Used per-note
-// (rcv) and over rcv_delta in the balance check. A caller wanting a tighter
-// scalar bound decomposes rcv before passing it in.
-//
-// Cost ≈ 3k constraints.
+// Fixed-base scalar mul: rcv · H, 253-bit scalar. Cost ≈ 3k constraints.
 template MulH() {
     signal input scalar;
     signal output out[2];
@@ -77,13 +59,8 @@ template MulH() {
     out[1] <== mul.out[1];
 }
 
-// cv = value · gen + rcv · H. Sapling-style hiding value commitment.
-//
-// cv is a public output of the transact circuit; off-chain auditors verify
-// per-asset balance from cv alone. rH = rcv · H is also exposed so the
-// balance check can sum rH points across notes without computing
-// Σrcv_in − Σrcv_out in field arithmetic (the field sum is unsigned and
-// admits no negative-balance encoding).
+// cv = value · gen + rcv · H. rH exposed so the balance check sums points
+// across notes (avoids Σrcv_in − Σrcv_out field-wrap).
 template ValueCommit() {
     signal input bits[64];
     signal input gen[2];
@@ -113,9 +90,8 @@ template ValueCommit() {
     rH[1] <== rHmul.out[1];
 }
 
-// Chained Edwards point sum over N points. PointSum(0).out is the identity
-// (0,1). BabyAdd is complete on the prime-order subgroup containing all
-// inputs accepted by this circuit.
+// Chained Edwards point sum. PointSum(0) = identity (0,1). BabyAdd is
+// complete on the prime-order subgroup.
 template PointSum(N) {
     signal input pts[N][2];
     signal output out[2];

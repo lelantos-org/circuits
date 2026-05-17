@@ -1,8 +1,6 @@
 pragma circom 2.1.0;
 
-// Test wrapper: exposes MerkleRoot at depth 2 so we can unit-test the
-// quaternary tree implementation without going through the full transact circuit.
-// 4^2 = 16 leaves — small enough to enumerate every position cheaply.
+// Test wrapper: MerkleRoot at depth 2 (16 leaves).
 
 include "../../lib/merkle.circom";
 

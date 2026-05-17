@@ -3,20 +3,15 @@ pragma circom 2.2.3;
 include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "tags.circom";
 
-// Note primitives: key derivation (nsk → ivk → pk, nsk → nk), commitment,
-// nullifier. Domain-separation tag values are defined in tags.circom; the
-// same constants are mirrored by sdk/src/crypto/tags.ts.
+// Note primitives: key derivation, commitment, nullifier.
 //
 // Key hierarchy:
-//   nsk  (spend authority, never leaves owner)
-//    ├─ ivk = Poseidon(TAG_IVK, nsk)   (incoming view key; can decrypt notes)
-//    │    └─ pk  = Poseidon(TAG_PK, ivk)   (owner_pk bound in note commitment)
-//    └─ nk  = Poseidon(TAG_NK, nsk)    (nullifier-deriving key; FVK component)
-// nf = Poseidon(TAG_NF, nk, rho). Auditor holding nk can recompute nf for
-// any known rho (spend detection). Poseidon one-way prevents deriving nsk
-// from nk, so spend authority stays gated by nsk via pk_check in
-// spent.circom. FMD detection key dk lives off-chain; no circuit
-// constraints touch it.
+//   nsk (spend authority)
+//    ├─ ivk = Poseidon(TAG_IVK, nsk)   incoming view key
+//    │    └─ pk = Poseidon(TAG_PK, ivk)
+//    └─ nk  = Poseidon(TAG_NK, nsk)    nullifier-deriving key (FVK)
+// nf = Poseidon(TAG_NF, nk, rho). Auditor with nk recomputes nf for known rho.
+// Poseidon one-wayness keeps spend auth gated by nsk (pk_check in spent.circom).
 
 // ivk = Poseidon(TAG_IVK, nsk)
 template DeriveIvk() {
@@ -51,14 +46,10 @@ template DerivePk() {
     pk <== h.out;
 }
 
-// cm = Poseidon(packed_av, owner_pk, rho, rcm)
-//   packed_av = asset_id * 2^64 + value
-// Domain separation by first-input: NoteCommitment uses packed_av (≥ 2^64
-// for any nonzero asset_id), distinguishing it from MerkleLevel4 (TAG_MERKLE)
-// and the spend/output leaf hashes (TAG_LEAF).
-// Soundness of the packing requires asset_id, value < 2^64; the caller
-// range-checks asset_id via HashToAssetGen's Num2Bits(64) and value via
-// RangeCheck64.
+// cm = Poseidon(packed_av, owner_pk, rho, rcm) where
+//   packed_av = asset_id · 2^64 + value.
+// packed_av ≥ 2^64 (asset_id ≠ 0) separates this from TAG_MERKLE and TAG_LEAF
+// arity-4 hashes. Requires asset_id, value < 2^64 (enforced by caller).
 template NoteCommitment() {
     signal input asset_id;
     signal input value;

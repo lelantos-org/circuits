@@ -1,7 +1,6 @@
 pragma circom 2.2.3;
 
-// Test wrapper: expose HashToBit gadget directly so we can stress its
-// soundness + completeness without dragging in the full ClueCheck loop.
+// Test wrapper: HashToBit in isolation.
 
 include "../../lib/hash_to_bit.circom";
 

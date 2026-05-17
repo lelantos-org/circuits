@@ -1,11 +1,7 @@
 pragma circom 2.2.3;
 
-// Test wrapper: expose PolyEval(N=20 + 3·N_OUT) directly so we can
-// validate Horner evaluation, coefficient ordering, and z-boundary
-// behaviour without the full Transact circuit.
-//
-// N matches `Transact(_, _, 2, _)` instantiation (PI_BASE=20, PI_PER_OUT=3,
-// N_OUT=2 ⇒ 26 coefficients).
+// Test wrapper: PolyEval(26) matching Transact(_, _, 2, _) (PI_BASE=20 +
+// 3·N_OUT=6). NB: TransactCompress now uses PI_BASE=24; update if extending.
 
 include "../../lib/poly_eval.circom";
 

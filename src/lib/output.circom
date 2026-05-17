@@ -6,25 +6,18 @@ include "asset_gen.circom";
 include "value_commit.circom";
 include "../../node_modules/circomlib/circuits/comparators.circom";
 
-// OutputNote: enforces every constraint for ONE output-note slot.
-//
+// OutputNote: constraints for ONE output-note slot.
 //   - cm == NoteCommitment(asset_id, value, pk, rho, rcm)  (always real;
-//     padding outputs are real value=0 notes addressed to the wallet itself,
-//     so they are indistinguishable on chain from a real send).
+//     padding = value=0 notes to self).
 //   - value < 2^64.
-//   - asset_id != 0 (ghost-note defense; applies to every output, no dummy
-//     bypass).
-//   - cv == ValueCommit(value, HashToAssetGen(asset_id), rcv).
+//   - asset_id != 0 (ghost-note defense, no dummy bypass).
+//   - cv     == ValueCommit(value, HashToAssetGen(asset_id), rcv).
 //   - cv_dep == ValueCommit(value, HashToAssetGen(asset_id), rcv_dep).
-//     Anchors (asset_id, value) into the Merkle leaf via
-//     leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y), so a future spend
-//     of this leaf cannot open it under a different (asset_id, value).
+//     Anchored into leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y), so a
+//     future spend cannot reopen under different (asset_id, value).
 //
-// `rH` is exposed for the caller's PerAssetPointBalance.
-// `cv_dep` is exposed so the caller can:
-//   1. pin it via PolyEval (so the contract sees it on-chain), and
-//   2. forward it to the spend-side `tree_update_batch` PI vector for
-//      leaf-format binding.
+// rH exposed for PerAssetPointBalance. cv_dep exposed so caller can pin it via
+// PolyEval and forward to tree_update_batch for leaf-format binding.
 template OutputNote() {
     // ---- private witness ----
     signal input asset_id;
@@ -43,7 +36,7 @@ template OutputNote() {
     signal output rH[2];
     signal output cv_dep[2];
 
-    // 1. Recompute commitment + bind to public cm.
+    // 1. Bind cm.
     component cm_h = NoteCommitment();
     cm_h.asset_id <== asset_id;
     cm_h.value    <== value;
@@ -52,16 +45,16 @@ template OutputNote() {
     cm_h.rcm      <== rcm;
     cm_h.cm === cm;
 
-    // 2. Range check on private value. Bits threaded into ValueCommit below.
+    // 2. Range-check value; bits threaded into both ValueCommits.
     component rng = RangeCheck64();
     rng.v <== value;
 
-    // 3. Reject asset_id == 0 (ghost-note defense, no dummy bypass).
+    // 3. asset_id != 0 (ghost-note defense).
     component asset_nz = IsZero();
     asset_nz.in <== asset_id;
     asset_nz.out === 0;
 
-    // 4. Bind cv to (asset_id, value, rcv). SOUNDNESS-CRITICAL — see SpentNote.
+    // 4. Bind cv to (asset_id, value, rcv).
     component gen = HashToAssetGen();
     gen.asset_id <== asset_id;
 
@@ -79,9 +72,8 @@ template OutputNote() {
     rH[0] <== vc.rH[0];
     rH[1] <== vc.rH[1];
 
-    // 5. Bind cv_dep to (asset_id, value, rcv_dep). Reuses gen + rng.bits.
-    //    rcv_dep is fresh (≠ rcv) so cv can re-randomize across spends while
-    //    cv_dep stays pinned to the leaf via the deposit-anchored blinder.
+    // 5. Bind cv_dep to (asset_id, value, rcv_dep). Fresh rcv_dep ≠ rcv lets
+    //    cv re-randomize while cv_dep stays pinned to the leaf.
     component vc_dep = ValueCommit();
     for (var i = 0; i < 64; i++) {
         vc_dep.bits[i] <== rng.bits[i];

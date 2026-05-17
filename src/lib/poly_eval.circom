@@ -1,18 +1,9 @@
 pragma circom 2.2.3;
 
-// Horner-form polynomial evaluation.
-//
-// Given coefficients c[0..N-1] and challenge z, computes
-//   y = c[0] + c[1]·z + c[2]·z^2 + ... + c[N-1]·z^{N-1}
-//
-// Used by Transact to compress N would-be public inputs into a single
-// (z, y) public pair. Verifier still binds every coeff because any change
-// to c[k] alters y for almost all z (Schwartz–Zippel: collision prob ≤
-// (N-1)/p over prime field p — negligible at BN254 scalar size).
-//
-// Coefficient ordering is load-bearing: it MUST match
-// contracts/src/MASP.sol :: _flatten() byte-for-byte. Any reordering is
-// a soundness change for the contract's binding of public state.
+// Horner-form polynomial evaluation: y = Σ c[k]·z^k for k ∈ [0, N).
+// Compresses N logical PIs into a single (z, y) pair. Schwartz–Zippel:
+// collision prob ≤ (N-1)/p over BN254 scalar — negligible.
+// Coefficient ordering MUST match contracts/src/lib/PubInputs.sol byte-for-byte.
 template PolyEval(N) {
     signal input coeffs[N];
     signal input z;
@@ -26,22 +17,17 @@ template PolyEval(N) {
     y <== acc[N];
 }
 
-// Transact public-input compressor.
-//
-// Packs the 24 base PIs + 3·N_OUT clue PIs into a (z, y) pair via PolyEval.
-//
-// Coefficient ordering MUST match `contracts/src/lib/PubInputs.sol ::
-// compress(Transact, aux)`. The slot layout is documented in
-// `src/2x2.circom` header; any change here is a soundness change for the
-// contract.
+// Transact PI compressor: 24 base + 3·N_OUT clue coeffs → (z, y).
+// Layout MUST match PubInputs.sol :: compress(Transact, aux). Slot layout
+// documented in src/2x2.circom header.
 template TransactCompress(N_OUT) {
     var PI_BASE = 24;          // 20 base + 4 cv_dep coords
-    var PI_PER_OUT = 3;        // (clueRx, clueRy, clueBits) per output
+    var PI_PER_OUT = 3;        // (clueRx, clueRy, clueBits)
     var N = PI_BASE + PI_PER_OUT * N_OUT;
 
     signal input z;
 
-    // Base 24 logical PIs (slots [0..23]).
+    // Base 24 logical PIs.
     signal input merkle_root;
     signal input nullifier[2];
     signal input out_cm[2];
@@ -56,7 +42,7 @@ template TransactCompress(N_OUT) {
     signal input relayer_address;
     signal input out_cv_dep[2][2];
 
-    // Per-output clue PIs (slots [24..24+3·N_OUT)).
+    // Per-output clue PIs.
     signal input out_clue_Rx[N_OUT];
     signal input out_clue_Ry[N_OUT];
     signal input out_clue_bits[N_OUT];
@@ -97,13 +83,9 @@ template TransactCompress(N_OUT) {
     y <== pe.y;
 }
 
-// TreeUpdateBatch public-input compressor.
-//
-// Packs `4 + 9·MAX_N` logical PIs into a (z, y) pair via PolyEval.
-//
-// Coefficient ordering MUST match `contracts/src/lib/PubInputs.sol ::
-// compress(TreeUpdateBatch)`. Slot layout documented in the
-// `tree_update_batch.circom` header.
+// TreeUpdateBatch PI compressor: 4 + 9·MAX_N coeffs → (z, y).
+// Layout MUST match PubInputs.sol :: compress(TreeUpdateBatch); slot layout
+// in tree_update_batch.circom header.
 template BatchCompress(MAX_N) {
     var N = 4 + 9 * MAX_N;
 

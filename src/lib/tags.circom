@@ -1,44 +1,24 @@
 pragma circom 2.2.3;
 
-// Domain separation tags + shared constants. Single source of truth across
-// note.circom, merkle.circom, balance.circom and 2x2.circom.
+// Domain-separation tags. Single source of truth; mirror sdk/src/crypto/tags.ts.
+// Changing any value breaks compatibility with prior proofs.
 //
-// Tag values are baked into hash inputs; changing any constant breaks
-// commitment / nullifier / Merkle-node compatibility with prior proofs and
-// with test/helpers.ts. Update in lockstep.
+// | Tag         | Value | Use                                                       |
+// |-------------|-------|-----------------------------------------------------------|
+// | TAG_CM      | 1     | Reserved (NoteCommitment uses packed_av instead).         |
+// | TAG_NF      | 2     | nf  = Poseidon(TAG_NF, nk, rho)                           |
+// | TAG_PK      | 3     | pk  = Poseidon(TAG_PK, ivk)                               |
+// | TAG_IVK     | 4     | ivk = Poseidon(TAG_IVK, nsk)                              |
+// | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)                       |
+// | TAG_DK      | 6     | dk  = Poseidon(TAG_DK, ivk)  (off-circuit, FMD)           |
+// | TAG_ASSET   | 7     | V^t = Pedersen(TAG_ASSET || asset_id_bits)                |
+// | TAG_FMD_BIT | 8     | FMD bit derivation, Poseidon(6)                           |
+// | TAG_NK      | 9     | nk  = Poseidon(TAG_NK, nsk)                               |
+// | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)         |
 //
-// | Tag         | Value | Use                                                |
-// |-------------|-------|----------------------------------------------------|
-// | TAG_CM      | 1     | Reserved (unused; arity-4 + (asset,value) packing  |
-// |             |       | already distinguishes NoteCommitment).             |
-// | TAG_NF      | 2     | nf  = Poseidon(TAG_NF, nk, rho)         arity 3    |
-// | TAG_PK      | 3     | pk  = Poseidon(TAG_PK, ivk)             arity 2    |
-// | TAG_IVK     | 4     | ivk = Poseidon(TAG_IVK, nsk)            arity 2    |
-// | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)     arity 5    |
-// | TAG_DK      | 6     | dk  = Poseidon(TAG_DK, ivk)  (off-circuit, FMD)    |
-// | TAG_ASSET   | 7     | V^t = Pedersen(TAG_ASSET || asset_id_bits)  arity Pedersen(72)
-// | TAG_FMD_BIT | 8     | FMD bit derivation, arity-6 Poseidon              |
-// | TAG_NK      | 9     | nk  = Poseidon(TAG_NK, nsk)             arity 2    |
-// | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) arity 4 |
-//
-// TAG_LEAF domain-separates the Merkle leaf from `NoteCommitment` (also
-// arity-4 Poseidon, inputs = [packed_av, owner_pk, rho, rcm]) where
-// `packed_av = asset_id * 2^64 + value`. Since asset_id != 0 is required by
-// `output.circom` / `spent.circom`, packed_av >= 2^64 ≫ TAG_LEAF=10, so the
-// first input slot uniquely distinguishes leaf-hash vs note-commitment-hash
-// preimages.
-//
-// TAG_DK is reserved for the wallet-side FMD detection-key derivation
-// (`dk = Poseidon(TAG_DK, ivk)`). No template uses it — exposed here purely
-// so the SDK and any future audit can pin a single canonical value and avoid
-// collision with the in-circuit tags.
-//
-// TAG_ASSET is prepended (LSB-first byte) to the 64-bit asset_id input of
-// `HashToAssetGen` to domain-separate the asset-generator hash from any other
-// Pedersen call that might one day share Baby-Jubjub `BASE[0]`.
-//
-// POW_2_64 = 2^64; used both as the asset/value packing multiplier in
-// NoteCommitment and as the bound enforced by RangeCheck64 on private values.
+// TAG_LEAF separates leaf hash from NoteCommitment: both are Poseidon(4) but
+// NoteCommitment's first input is packed_av ≥ 2^64 (asset_id ≠ 0 enforced),
+// while TAG_LEAF = 10. POW_2_64 packs (asset_id, value) and bounds RangeCheck64.
 function TAG_CM()     { return 1; }
 function TAG_NF()     { return 2; }
 function TAG_PK()     { return 3; }

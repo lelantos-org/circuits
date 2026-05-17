@@ -4,20 +4,10 @@ include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "../../node_modules/circomlib/circuits/bitify.circom";
 include "tags.circom";
 
-// 2-bit quaternary digit decomposition + one-hot selector vector.
-//
-// Given a path index ∈ {0,1,2,3} produces:
-//   bits[0..1]   — Num2Bits(2)-range-checked bit decomposition (LSB first)
-//   s[0..3]      — one-hot selectors: s[k] = 1 iff path_index == k
-//
-// Selectors are mutually exclusive and sum to 1:
-//   s[0] = (1-b0)(1-b1)
-//   s[1] = b0·(1-b1)
-//   s[2] = (1-b0)·b1
-//   s[3] = b0·b1
-//
-// Cost: one quadratic constraint `bb = b0·b1`; the other three selectors are
-// linear combinations of (b0, b1, bb). Used by MerkleLevel4 and
+// 2-bit quaternary digit decomposition + one-hot selectors.
+//   path_index ∈ {0..3} → bits[0..1] (LSB-first) + s[k] = 1 iff path_index == k.
+//   s[0]=(1-b0)(1-b1), s[1]=b0(1-b1), s[2]=(1-b0)b1, s[3]=b0·b1.
+// Cost: 1 quadratic (bb = b0·b1); rest linear. Used by MerkleLevel4 and
 // QuaternaryInsertLevel.
 template PathIndexSelectors() {
     signal input path_index;
@@ -37,18 +27,11 @@ template PathIndexSelectors() {
     s[3] <== bb;
 }
 
-// Empty-subtree (quaternary, TAG_MERKLE-prefixed) Poseidon ladder.
-//
+// Empty-subtree hash ladder (quaternary, TAG_MERKLE).
 //   zeros[0]   = 0
-//   zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d], zeros[d], zeros[d], zeros[d])
-//
-// `zeros[d]` is the root hash of an empty quaternary subtree of depth d.
-// Used by:
-//   - QuaternaryInsert (lib/insert.circom)  : fills initially-empty siblings
-//   - FrontierRoot     (lib/frontier_root.circom) : right-of-cursor branches
-//
-// Domain separation MUST match `MerkleLevel4` (same TAG_MERKLE), otherwise an
-// empty subtree could collide with a non-empty branch under a different tag.
+//   zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d]×4)
+// Used by QuaternaryInsert (empty siblings) and FrontierRoot (right-of-cursor
+// branches). MUST share TAG_MERKLE with MerkleLevel4 to prevent collisions.
 template EmptySubtreeHashes(DEPTH) {
     signal output zeros[DEPTH + 1];
 

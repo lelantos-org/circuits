@@ -5,31 +5,21 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 include "tags.circom";
 include "common.circom";
 
-// Quaternary (arity-4) incremental insert. Mirrors the on-chain
-// CommitmentTree._insert semantics from the Solidity v1 implementation but
-// inside the circuit so the relayer can prove a tree advancement off-chain.
+// Quaternary (arity-4) incremental insert. Mirrors on-chain
+// CommitmentTree._insert so the relayer can prove tree advancement off-chain.
 //
-// Slot-fill table at each level given digit `slot` ∈ {0,1,2,3}:
-//
+// Per-level slot-fill given digit ∈ {0..3} (cur = running node, f = frontier,
+// z = zeros[level]):
 //                      slot 0     slot 1     slot 2     slot 3
 //   c0                 cur        f[0]       f[0]       f[0]
 //   c1                 z          cur        f[1]       f[1]
 //   c2                 z          z          cur        f[2]
 //   c3                 z          z          z          cur
 //
-// where `cur` is the running per-level node value (leaf at level 0), `f[i]`
-// are the current frontier siblings at this level, and `z = zeros[level]` is
-// the empty-subtree hash.
-//
-// Frontier writes (slots 0..2 only — slot 3 needs no write because the parent
-// advances and a fresh sibling group begins above):
-//   frontier_out[slot] = (slot == s) ? cur : f[s]
-//
-// `idx_digit` is the quaternary digit of the leaf-index at this level. The
-// digit is range-checked to {0..3} via PathIndexSelectors.
+// Frontier writes (slots 0..2): frontier_out[k] = (k == digit) ? cur : f[k].
+// idx_digit range-checked to {0..3} via PathIndexSelectors.
 
-// One level of QuaternaryInsert. Produces the parent node hash and the
-// updated frontier triple for this level.
+// One level: parent hash + updated frontier.
 template QuaternaryInsertLevel() {
     signal input cur;
     signal input frontier_in[3];
@@ -39,7 +29,7 @@ template QuaternaryInsertLevel() {
     signal output cur_next;
     signal output frontier_out[3];
 
-    // Selectors: s[k] = 1 iff idx_digit == k. Also range-checks idx_digit.
+    // s[k] = 1 iff idx_digit == k (also range-checks idx_digit).
     component sel = PathIndexSelectors();
     sel.path_index <== idx_digit;
     signal s0; signal s1; signal s2; signal s3;
@@ -84,7 +74,6 @@ template QuaternaryInsertLevel() {
     signal c3;
     c3 <== c3_z + c3_cur;
 
-    // Parent hash.
     component h = Poseidon(5);
     h.inputs[0] <== TAG_MERKLE();
     h.inputs[1] <== c0;
@@ -93,7 +82,7 @@ template QuaternaryInsertLevel() {
     h.inputs[4] <== c3;
     cur_next <== h.out;
 
-    // Frontier writes (slots 0..2):  out[k] = s[k]·cur + (1-s[k])·f[k].
+    // Frontier writes (slots 0..2): out[k] = s[k]·cur + (1-s[k])·f[k].
     signal sk[3];
     sk[0] <== s0;
     sk[1] <== s1;
@@ -115,7 +104,6 @@ template QuaternaryInsert(DEPTH) {
     signal output root;
     signal output frontier_out[DEPTH][3];
 
-    // Empty-subtree precompute shared with FrontierRoot.
     component zh = EmptySubtreeHashes(DEPTH);
 
     component lvl[DEPTH];

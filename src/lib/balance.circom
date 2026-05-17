@@ -6,12 +6,9 @@ include "value_commit.circom";
 
 // Range checks, dummy bookkeeping, and per-asset point-balance check.
 
-// 64-bit range check on a private value. Required to prevent field-overflow
-// attacks on private value signals (Σ value_in − Σ value_out could otherwise
-// wrap modulo p and validate a non-conservative balance).
-//
-// Exposes the 64 bits LSB-first so callers can pass them directly into
-// `ValueScalarMul` / `ValueCommit`, avoiding a duplicate Num2Bits(64).
+// 64-bit range check on a private value. Prevents field-wrap attacks on
+// Σ value_in − Σ value_out. Exposes bits LSB-first so callers can thread
+// them into ValueScalarMul / ValueCommit without a second Num2Bits(64).
 template RangeCheck64() {
     signal input v;
     signal output bits[64];
@@ -22,9 +19,7 @@ template RangeCheck64() {
     }
 }
 
-// Dummy bookkeeping. Single chokepoint that enforces:
-//   1. dummy[i] is boolean: dummy[i] * (dummy[i] - 1) === 0.
-//   2. dummy[i] == 1 ⇒ value[i] == 0: dummy[i] * value[i] === 0.
+// Dummy bookkeeping: dummy[i] ∈ {0,1} and dummy[i] = 1 ⇒ value[i] = 0.
 template DummyZeroValue(N) {
     signal input dummy[N];
     signal input value[N];
@@ -34,28 +29,12 @@ template DummyZeroValue(N) {
     }
 }
 
-// Per-asset value-balance check via Edwards point equality.
+// Per-asset value-balance via Edwards point equality:
+//   Σ in_cv + public_in·V^pub + Σ out_rH  ==  Σ out_cv + public_out·V^pub + Σ in_rH
 //
-// Substitute cv_in_i = value_in_i·V_i + rcv_in_i·H and rearrange so the
-// rcv·H components cancel:
-//
-//   Σ in_cv  + public_in · V^pub  + Σ out_rH
-//      ==
-//   Σ out_cv + public_out · V^pub + Σ in_rH
-//
-// Equivalent to per-asset value conservation:
-//   Σ value_in_i · V_i + public_in · V^pub
-//      == Σ value_out_j · V_j + public_out · V^pub
-//
-// Summing rH points (computed inside ValueCommit) avoids representing
-// `Σrcv_in − Σrcv_out` as a single field scalar; that difference can wrap
-// into a 254-bit field element when out_rcv > in_rcv, breaking the 253-bit
-// Num2Bits decomposition that a fixed scalar mul would need.
-//
-// Inputs:
-//   in_cv[N_IN][2], out_cv[N_OUT][2]    — per-note value commitments
-//   in_rH[N_IN][2], out_rH[N_OUT][2]    — per-note rcv·H components
-//   pub_in_pt[2], pub_out_pt[2]         — public_in / out · V^pub
+// Substituting cv = value·V + rcv·H makes rcv·H cancel, leaving per-asset
+// value conservation. Summing rH points instead of representing
+// Σrcv_in − Σrcv_out as a scalar avoids 254-bit field wrap when out_rcv > in_rcv.
 template PerAssetPointBalance(N_IN, N_OUT) {
     signal input in_cv[N_IN][2];
     signal input out_cv[N_OUT][2];
