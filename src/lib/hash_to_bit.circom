@@ -6,8 +6,7 @@ pragma circom 2.2.3;
 //   bit = 1  ⟺  hash = y²        (quadratic residue)
 //   bit = 0  ⟺  hash = y² · Z    (non-residue; Z = 5 is a fixed QNR in 𝔽_r)
 //
-// Z must match FMD_LEGENDRE_QNR in sdk/src/crypto/tags.ts. Witnesses (bit, y)
-// computed by fmdLegendreWitness in sdk/src/crypto/sqrt.ts.
+// Z must match FMD_LEGENDRE_QNR in sdk/src/crypto/tags.ts.
 //
 // Soundness: exactly one of {hash, hash·Z⁻¹} is a QR for nonzero hash, so a
 // valid (bit, y) exists for only one bit value. Cost: 4 mul constraints.

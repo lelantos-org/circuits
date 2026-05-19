@@ -4,11 +4,9 @@ include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "../../node_modules/circomlib/circuits/bitify.circom";
 include "tags.circom";
 
-// 2-bit quaternary digit decomposition + one-hot selectors.
-//   path_index ∈ {0..3} → bits[0..1] (LSB-first) + s[k] = 1 iff path_index == k.
+// path_index ∈ {0..3} → bits[0..1] (LSB-first) + one-hot s[k] = 1 iff path_index == k.
 //   s[0]=(1-b0)(1-b1), s[1]=b0(1-b1), s[2]=(1-b0)b1, s[3]=b0·b1.
-// Cost: 1 quadratic (bb = b0·b1); rest linear. Used by MerkleLevel4 and
-// QuaternaryInsertLevel.
+// Cost: 1 quadratic; rest linear.
 template PathIndexSelectors() {
     signal input path_index;
     signal output bits[2];
@@ -27,11 +25,10 @@ template PathIndexSelectors() {
     s[3] <== bb;
 }
 
-// Empty-subtree hash ladder (quaternary, TAG_MERKLE).
+// Empty-subtree hash ladder:
 //   zeros[0]   = 0
 //   zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d]×4)
-// Used by QuaternaryInsert (empty siblings) and FrontierRoot (right-of-cursor
-// branches). MUST share TAG_MERKLE with MerkleLevel4 to prevent collisions.
+// MUST share TAG_MERKLE with MerkleLevel4.
 template EmptySubtreeHashes(DEPTH) {
     signal output zeros[DEPTH + 1];
 

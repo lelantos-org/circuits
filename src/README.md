@@ -4,13 +4,12 @@ Multi-Asset Shielded Pool circuits implemented in Circom 2.2.3 over the
 BN254 scalar field, with Baby-Jubjub used for the value-commitment
 subgroup. The package exports two Groth16-friendly entry points:
 
-- [`Transact(DEPTH, N_IN, N_OUT, GAMMA)`](2x2.circom), instantiated as
-  `Transact(10, 2, 2, 5)` — the on-chain pool transact circuit: a
+- [`Transact(DEPTH, N_IN, N_OUT)`](2x2.circom), instantiated as
+  `Transact(10, 2, 2)` — the on-chain pool transact circuit: a
   quaternary Merkle tree of depth 10 (`4^10 = 1,048,576` leaves)
   consuming up to two shielded inputs and producing up to two shielded
-  outputs per proof. `GAMMA` is the FMD2 clue width (default 5,
-  matches `FMD_DEFAULT_GAMMA` in `sdk/src/fmd/fmd.ts`); each output carries
-  an in-circuit FMD clue derivation (§7a).
+  outputs per proof. Each output carries an off-circuit FMD clue
+  `(R, clue_bits)` supplied by the sender and bound via PolyEval (§7a).
 - [`TreeUpdateBatch(DEPTH, MAX_N)`](tree_update_batch.circom),
   instantiated as `TreeUpdateBatch(10, 8)` — a relayer-side proof that
   the canonical commitment tree advances `old_root → new_root` by
@@ -61,11 +60,12 @@ enforces the following properties for every accepted transaction:
   leaves later recomputes the same `cv_dep` from `(asset, value,
   rcv_dep)`, so substituting `(asset, value)` at spend time is
   infeasible.
-- **FMD clue honesty.** Each output proves a fresh FMD2 clue
-  `(R, clue_bits)` derived honestly from the recipient's flag-key
-  (§7a). A malicious sender cannot inflate the false-positive rate by
-  flipping bits — `clue_bits[i] === 1 - legendre_bit(Poseidon(...))`
-  is enforced inside the proof.
+- **FMD clue binding.** Each output carries a sender-computed FMD2
+  clue `(R, clue_bits)` passed as off-circuit witnesses and bound into
+  the proof via PolyEval (§7a). A relayer cannot corrupt `R` or
+  `clue_bits` after proof generation without invalidating `y`. Honest
+  derivation from the recipient's flag-key is a sender obligation, not
+  an in-circuit constraint.
 
 Out of scope: EdDSA spend authorization and encrypted memo layout.
 The public-bucket generator is derived in-circuit from
@@ -78,8 +78,8 @@ The public-bucket generator is derived in-circuit from
 The verifier sees only **two** field elements — `z` (Fiat-Shamir
 challenge) and `y` (Horner evaluation). The `24 + 3·N_OUT` logical PIs
 below are private witnesses bound into `(z, y)` by the
-[`TransactCompress(N_OUT)`](lib/poly_eval.circom) gadget (§2a). At
-`N_OUT = 2` that is 30 logical PIs (24 base + 6 clue).
+[`TransactCompressN(N_IN, N_OUT)`](lib/poly_eval.circom) gadget (§2a). At
+`N_IN = N_OUT = 2` that is 30 logical PIs (24 base + 6 clue).
 
 Verifier-visible public signals:
 
@@ -109,7 +109,7 @@ Logical "public" inputs (private witnesses, bound through `PolyEval`):
 ### 2a. SnarkCompression (PolyEval binding)
 
 Logical PIs are packed in a fixed slot order and fed to
-[`TransactCompress(N_OUT)`](lib/poly_eval.circom) as Horner-form
+[`TransactCompressN(N_IN, N_OUT)`](lib/poly_eval.circom) as Horner-form
 coefficients:
 
 ```
@@ -159,11 +159,6 @@ Private inputs (per slot):
   path_elements[DEPTH][3], path_indices[DEPTH], is_dummy`.
 - Output: `asset_id, value, pk, rho, rcm, rcv, rcv_dep`. No
   `is_dummy` — padding outputs are real `value = 0` notes.
-- FMD clue (per output): `r` (254-bit blinding scalar),
-  `fk[GAMMA][2]` (recipient flag-key points), `legendre_bit[GAMMA]`,
-  `legendre_y[GAMMA]` (Legendre witness pair, see §7a). Padding
-  outputs also produce a clue (sender supplies their own `fk` + a
-  fresh `r`).
 
 Relayer compensation is **not** a public input. Fees are paid as a
 shielded output addressed to the relayer's zk-pk (Railgun-style).
@@ -178,16 +173,17 @@ flowchart LR
         IN["Input notes<br/>(asset, value, pk, rho, rcm, nsk, rcv, rcv_dep)"]
         OUT["Output notes<br/>(asset, value, pk, rho, rcm, rcv, rcv_dep)"]
         MP["Quaternary Merkle paths"]
-        FMD["FMD witnesses<br/>(r, fk[γ], legendre_bit, legendre_y)"]
     end
-    subgraph Circuit["Transact(10, 2, 2, 5)"]
+    subgraph OffChain["Off-circuit (sender SDK)"]
+        FMD["FMD clue<br/>(R = r·G_8, clue_bits via legendre)"]
+    end
+    subgraph Circuit["Transact(10, 2, 2)"]
         K["Key hierarchy<br/>nsk → ivk → pk"]
         NF["Nullifiers"]
         MT["Merkle membership<br/>(leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y))"]
         CV["Value commitments<br/>cv, cv_dep = v · V^t + rcv · H"]
         BAL["Per-asset point balance"]
         CM["Output commitments"]
-        CL["ClueCheck(γ)<br/>R = r·G_8, bits = legendre(...)"]
     end
     subgraph Logical["Logical PIs (private witnesses, PolyEval-bound)"]
         ROOT["merkle_root"]
@@ -212,9 +208,8 @@ flowchart LR
     CV --> CVD
     CV --> BAL --> PB
     OUT --> CM --> CMS
-    OUT --> CL
-    FMD --> CL --> CLS
-    ROOT --> PE["TransactCompress(N_OUT)"]
+    FMD --> CLS
+    ROOT --> PE["TransactCompressN(N_IN, N_OUT)"]
     NFS --> PE
     CMS --> PE
     PB --> PE
@@ -378,45 +373,39 @@ unconditionally (no sentinel skip).
 
 ---
 
-## 7a. FMD2 clue derivation (in-circuit)
+## 7a. FMD2 clue — off-circuit
 
-Files: [`lib/clue.circom`](lib/clue.circom),
-[`lib/hash_to_bit.circom`](lib/hash_to_bit.circom).
+File: [`lib/hash_to_bit.circom`](lib/hash_to_bit.circom) (SDK test helper only).
 
-Each output proves a fresh Fuzzy Message Detection clue
-`(R, clue_bits)` was derived honestly from the recipient's flag-key
-`fk` (γ Baby-Jubjub points). Mirrors `shared_bit` in
-`backend/crates/fmd-crypto/src/clue/detect.rs` and `sdk/src/fmd/fmd.ts`
-byte-for-byte.
+Each output carries an FMD2 clue `(R, clue_bits)` computed by the
+sender SDK off-circuit and passed as plain witnesses. The circuit
+imposes **no constraints** on `out_clue_Rx`, `out_clue_Ry`, or
+`out_clue_bits` beyond including them as PolyEval coefficients — a
+relayer cannot alter them after proof generation without invalidating
+`y`, but the circuit does not verify honest derivation from the
+recipient flag-key.
+
+The sender SDK derives clues as:
 
 ```
-R       = r · G_8                              (Baby-Jubjub fixed base)
-S_i     = r · fk_i                             for i ∈ [γ]
-bit_i   = legendre_bit(Poseidon(TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y))
-clue_bits[i] === 1 - bit_i                     (sender flips so receiver test ⊕ == 1)
+R         = r · G_8                              (Baby-Jubjub fixed base)
+S_i       = r · fk_i                             for i ∈ [GAMMA]
+bit_i     = legendre_bit(Poseidon(TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y))
+clue_bits = pack(1 - bit_i for i in [GAMMA])     (sender flips; receiver ⊕ == 1)
 ```
 
-`legendre_bit(h) = 1` iff `h` is a quadratic residue in 𝔽_r.
-[`HashToBit()`](lib/hash_to_bit.circom) verifies this in **4
-multiplicative constraints** by witnessing `(bit, y)` such that
-`hash = y² · m` where `m = 1` (QR branch) or `m = Z` (QNR branch,
-`Z = 5` is a fixed QNR). Witnesses come from `fmdLegendreWitness` in
-`sdk/src/crypto/sqrt.ts`; `Z` MUST stay in sync with
-`FMD_LEGENDRE_QNR` in `sdk/src/crypto/tags.ts`.
+`legendre_bit(h)` is computed off-circuit via `fmdLegendreWitness` in
+`sdk/src/crypto/sqrt.ts`, using the 4-constraint
+[`HashToBit()`](lib/hash_to_bit.circom) structure as a reference
+(`Z = 5` QNR, synced with `FMD_LEGENDRE_QNR` in
+`sdk/src/crypto/tags.ts`).
 
-Honesty constraint: `clue_bits[i] === 1 - legendre_bit[i]` forces the
-sender to derive bits from a real `(r, fk)` — they cannot inflate
-false-positive rate by setting `clue_bits = all-ones` without
-producing a valid `(r, fk)` whose Poseidon outputs are all
-non-residues.
+`clue_bits` is a single field element; the contract masks upper bits
+via `CLUE_BITS_MASK = 0x3FFF`. `GAMMA` is a subscription-time
+parameter chosen by the client, not a circuit parameter.
 
-`R = r·G_8` and `clue_bits` are exposed as logical PIs so the contract
-and wallets index the same `R` the prover used. `clue_bits` is packed
-into a 14-bit field; the first `GAMMA` bits are constrained, higher
-bits are masked off-chain via `CLUE_BITS_MASK = 0x3FFF`.
-
-Cost (γ=5): ≈24k constraints per output (1× `EscalarMulFix(254)` + γ×
-`EscalarMulAny(254)` + γ× `Poseidon(6)` + γ× `HashToBit`). γ=14 ≈62k.
+Constraint cost: **0 additional** (clue signals are leaf coefficients
+in `PolyEval(30)` only).
 
 ---
 
@@ -575,17 +564,15 @@ Combined arity + tag prevents Poseidon collisions across hash sites.
 
 ## 13. Constraint budget
 
-R1CS totals from `snarkjs r1cs info` after the current refactor pass:
+R1CS totals from `snarkjs r1cs info`. **Note:** the build artefacts in
+`build/` were compiled before the FMD clue was moved off-circuit and
+do not reflect the current source. Recompile with `just compile` /
+`just compile-batch` to get the current counts.
 
-### `Transact(10, 2, 2, 5)`
+### `Transact(10, 2, 2)` — current source (pending recompile)
 
 ```
-constraints:     111,728
-wires:           111,805
-public inputs:   1     (z)
-public outputs:  1     (y)
-private inputs:  180
-labels:          273,709
+constraints:     ~68k (estimated; build/ artefact is stale at 111,728)
 ```
 
 Approximate component breakdown:
@@ -593,11 +580,11 @@ Approximate component breakdown:
 | Component | Cost |
 |---|---|
 | 4 × `HashToAssetGen` (Pedersen 72) | ~8.4k |
-| 4 × `ValueCommit` for `cv` + 4 × `ValueCommit` for `cv_dep` | ~40k |
-| 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4k |
+| 4 × `ValueCommit` for `cv` + 4 × `ValueCommit` for `cv_dep` | ~38k |
+| 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4.5k |
 | `PerAssetPointBalance` point sums | ~70 |
 | Note commitments + Merkle + nullifiers + leaf hashes | ~17k |
-| 2 × `ClueCheck(5)` (FMD2, §7a) | ~48k |
+| FMD clue `out_clue_Rx/Ry/bits` | 0 (off-circuit, §7a) |
 | `PolyEval(30)` Horner chain | ~30 |
 
 ### `TreeUpdateBatch(10, 8)`
@@ -644,18 +631,17 @@ Dominated by MAX_N pairs × 2 inserts × 10 Merkle levels of
 | [`lib/output.circom`](lib/output.circom) | `OutputNote` — per-slot cm / range / cv / cv_dep binding. |
 | [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsertLevel` + `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO. |
 | [`lib/frontier_root.circom`](lib/frontier_root.circom) | `FrontierRoot(DEPTH)` — rebuild `old_root` from frontier + leaf count (SOUNDNESS-CRITICAL). |
-| [`lib/clue.circom`](lib/clue.circom) | `ClueCheck(GAMMA)` — in-circuit FMD2 clue derivation. See §7a. |
-| [`lib/hash_to_bit.circom`](lib/hash_to_bit.circom) | `HashToBit()` — 4-constraint Legendre-symbol bit extractor. |
-| [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)`, `TransactCompress(N_OUT)`, `BatchCompress(MAX_N)`. |
+| [`lib/hash_to_bit.circom`](lib/hash_to_bit.circom) | `HashToBit()` — 4-constraint Legendre-symbol bit extractor (used by SDK tests; not wired into main circuit). |
+| [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)`, `TransactCompressN(N_IN, N_OUT)`, `BatchCompress(MAX_N)`. |
 | [`test/helpers.ts`](test/helpers.ts) | Test witness builders, Pedersen hash-to-curve, value-commit helpers. |
 | [`test/transact.test.ts`](test/transact.test.ts) | Transact circuit test suite. |
 | [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library test suite. |
 | [`test/tree_update_batch.test.ts`](test/tree_update_batch.test.ts) | TreeUpdateBatch test suite (deposit binding + frontier binding + padding). |
 | [`test/frontier_root.test.ts`](test/frontier_root.test.ts) | FrontierRoot fuzz / corruption tests. |
-| [`test/clue.test.ts`](test/clue.test.ts) | ClueCheck test suite. |
+| [`test/clue.test.ts`](test/clue.test.ts) | FMD clue SDK helpers test suite (`HashToBit`, off-circuit derivation). |
 | [`test/poly_eval.test.ts`](test/poly_eval.test.ts) | PolyEval test suite. |
 | [`test/hash_to_bit.test.ts`](test/hash_to_bit.test.ts) | HashToBit test suite. |
-| [`test/fixtures/`](test/fixtures/) | Small-parameter test-wrapper circoms (`test_clue.circom`, `test_frontier_root_d3.circom`, `test_hash_to_bit.circom`, `test_merkle_d2.circom`, `test_poly_eval.circom`) instantiating library templates at compact sizes for unit testing. |
+| [`test/fixtures/`](test/fixtures/) | Small-parameter test-wrapper circoms (`test_frontier_root_d3.circom`, `test_hash_to_bit.circom`, `test_merkle_d2.circom`, `test_poly_eval.circom`) instantiating library templates at compact sizes for unit testing. `test_clue.circom` is stale (references removed `lib/clue.circom`) and should be deleted. |
 | [`test/fuzz/`](test/fuzz/) | Property-based fuzz suites (fast-check) covering Transact, Merkle, ClueCheck, FrontierRoot, HashToBit, PolyEval, and Transact variant flows. |
 
 ---

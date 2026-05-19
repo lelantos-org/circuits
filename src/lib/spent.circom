@@ -7,28 +7,18 @@ include "asset_gen.circom";
 include "value_commit.circom";
 include "../../node_modules/circomlib/circuits/comparators.circom";
 
-// SpentNote: constraints for ONE spent-note slot.
+// Constraints for one spent-note slot.
 //
-// is_dummy == 0 (real):
-//   - pk = Poseidon(TAG_PK, Poseidon(TAG_IVK, nsk)).
-//   - Merkle membership of leaf at root.
-//   - asset_id != 0 (ghost-note defense).
-//
-// is_dummy == 1 (dummy):
-//   - pk / Merkle / asset_nz bypassed; prover picks fresh nsk, rho so nf
-//     looks real. Caller enforces is_dummy · value === 0 (DummyZeroValue)
-//     so the slot adds identity to per-asset balance.
+// is_dummy == 0: pk check, Merkle membership, asset_id != 0.
+// is_dummy == 1: above checks bypassed; DummyZeroValue enforces value == 0.
 //
 // Always:
-//   - nullifier === Poseidon(TAG_NF, nk, rho), nk = Poseidon(TAG_NK, nsk).
+//   - nf    == Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho).
 //   - value < 2^64.
-//   - cv     === ValueCommit(value, HashToAssetGen(asset_id), rcv).
-//   - cv_dep === ValueCommit(value, HashToAssetGen(asset_id), rcv_dep).
-//   - leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y); pins
-//     (asset, value) so the deposit path cannot reopen under different values.
-//
-// rH exposed for PerAssetPointBalance (point-sum avoids Σrcv_in − Σrcv_out
-// field wrap — see balance.circom).
+//   - cv    == ValueCommit(value, HashToAssetGen(asset_id), rcv).
+//   - cv_dep == ValueCommit(value, HashToAssetGen(asset_id), rcv_dep).
+//   - leaf  == Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
+// rH exposed for PerAssetPointBalance.
 template SpentNote(DEPTH) {
     // ---- private witness ----
     signal input asset_id;
@@ -71,8 +61,7 @@ template SpentNote(DEPTH) {
     component rng_in = RangeCheck64();
     rng_in.v <== value;
 
-    // 4. cv_dep = ValueCommit(value, V^asset, rcv_dep). Must match the value
-    //    originally committed at deposit (or by the prior spend).
+    // 4. cv_dep = ValueCommit(value, V^asset, rcv_dep).
     component gen_in = HashToAssetGen();
     gen_in.asset_id <== asset_id;
 
@@ -103,8 +92,7 @@ template SpentNote(DEPTH) {
         mp.path_indices[d]     <== path_indices[d];
     }
 
-    // 7. Nullifier always enforced: nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho).
-    //    Dummy slots use fresh (nsk, rho) so nf is on-chain indistinguishable.
+    // 7. nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho).
     component nk_d = DeriveNk();
     nk_d.nsk <== nsk;
 
@@ -118,8 +106,7 @@ template SpentNote(DEPTH) {
     asset_nz.in <== asset_id;
     (1 - is_dummy) * asset_nz.out === 0;
 
-    // 9. Bind cv to (asset_id, value, rcv). Forces cv on-curve; without it an
-    //    off-curve cv could break the balance check.
+    // 9. Bind cv to (asset_id, value, rcv).
     component vc = ValueCommit();
     for (var i = 0; i < 64; i++) {
         vc.bits[i] <== rng_in.bits[i];

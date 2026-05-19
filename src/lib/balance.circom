@@ -4,11 +4,9 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 include "../../node_modules/circomlib/circuits/babyjub.circom";
 include "value_commit.circom";
 
-// Range checks, dummy bookkeeping, and per-asset point-balance check.
+// Range checks, dummy bookkeeping, and per-asset point balance.
 
-// 64-bit range check on a private value. Prevents field-wrap attacks on
-// Σ value_in − Σ value_out. Exposes bits LSB-first so callers can thread
-// them into ValueScalarMul / ValueCommit without a second Num2Bits(64).
+// 64-bit range check; bits LSB-first for ValueScalarMul / ValueCommit.
 template RangeCheck64() {
     signal input v;
     signal output bits[64];
@@ -29,12 +27,9 @@ template DummyZeroValue(N) {
     }
 }
 
-// Per-asset value-balance via Edwards point equality:
-//   Σ in_cv + public_in·V^pub + Σ out_rH  ==  Σ out_cv + public_out·V^pub + Σ in_rH
-//
-// Substituting cv = value·V + rcv·H makes rcv·H cancel, leaving per-asset
-// value conservation. Summing rH points instead of representing
-// Σrcv_in − Σrcv_out as a scalar avoids 254-bit field wrap when out_rcv > in_rcv.
+// Per-asset value balance via Edwards point equality:
+//   Σ in_cv + pub_in·V^pub + Σ out_rH  ==  Σ out_cv + pub_out·V^pub + Σ in_rH
+// Summing rH points avoids Σrcv_in − Σrcv_out field wrap.
 template PerAssetPointBalance(N_IN, N_OUT) {
     signal input in_cv[N_IN][2];
     signal input out_cv[N_OUT][2];

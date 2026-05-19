@@ -110,7 +110,7 @@ Both circuits use SnarkCompression: the logical PIs are folded into
 `(z, y)` via [`PolyEval`](src/lib/poly_eval.circom), so the Solidity
 verifier sees only two field elements per proof. Coefficient layouts
 are defined inside [`src/lib/poly_eval.circom`](src/lib/poly_eval.circom)
-(`TransactCompress` / `BatchCompress`) and MUST match
+(`TransactCompressN` / `BatchCompress`) and MUST match
 [`contracts/src/lib/PubInputs.sol`](../contracts/src/lib/PubInputs.sol).
 
 See [src/README.md](src/README.md) for the full design write-up.
@@ -135,7 +135,7 @@ src/
     output.circom           # OutputNote — per-output slot constraints
     clue.circom             # ClueCheck — FMD2 in-circuit clue derivation
     hash_to_bit.circom      # 4-constraint Legendre-symbol bit extractor
-    poly_eval.circom        # PolyEval, TransactCompress, BatchCompress
+    poly_eval.circom        # PolyEval, TransactCompressN, BatchCompress
   test/
     *.test.ts               # mocha + circom_tester suites (144 tests)
     helpers.ts              # witness builders + JS-side hashes
@@ -273,9 +273,8 @@ Public-bucket / balance:
   `Σ in_cv + pub_in·V^pub + Σ out_rH  ==  Σ out_cv + pub_out·V^pub + Σ in_rH`.
 
 PI compression:
-- `TransactCompress(N_OUT)` (lib/poly_eval.circom) emits `y = Σ coeffs[k]·z^k`.
-  Slots [0..23] = base PIs; slots [24..24+3·N_OUT) = clue triples per
-  output. Total = 24 + 3·N_OUT = 30 for N_OUT=2.
+- `TransactCompressN(N_IN, N_OUT)` (lib/poly_eval.circom) emits `y = Σ coeffs[k]·z^k`.
+  Total = 8 + 3·N_IN + 8·N_OUT coefficients. For N_IN=N_OUT=2: 30 (24 base + 6 clue).
 
 ### `tree_update_batch.circom` — TreeUpdateBatch(DEPTH=10, MAX_N=8)
 

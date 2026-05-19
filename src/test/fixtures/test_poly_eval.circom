@@ -1,7 +1,6 @@
 pragma circom 2.2.3;
 
-// Test wrapper: PolyEval(26) matching Transact(_, _, 2, _) (PI_BASE=20 +
-// 3·N_OUT=6). NB: TransactCompress now uses PI_BASE=24; update if extending.
+// Test wrapper: PolyEval(26). See TransactCompressN for current PI layout.
 
 include "../../lib/poly_eval.circom";
 

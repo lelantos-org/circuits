@@ -5,8 +5,6 @@ include "lib/output.circom";
 include "lib/balance.circom";
 include "lib/value_commit.circom";
 include "lib/poly_eval.circom";
-include "lib/clue.circom";
-
 // MASP Pool: N_IN-input × N_OUT-output transact circuit (multi-asset).
 //
 // Params:
@@ -38,6 +36,9 @@ include "lib/clue.circom";
 //   Slots [24 .. 24 + 3·N_OUT): per-output (clueRx, clueRy, clueBits).
 //   Total = 24 + 3·N_OUT = 30 for N_OUT=2.
 //
+// FMD clue: client-computed off-circuit; PolyEval-bound (relayer cannot alter).
+// GAMMA is a subscription parameter, not a circuit parameter.
+//
 // Per-slot logic in SpentNote / OutputNote; this file is wiring.
 //
 // Contract MUST check (not enforced here):
@@ -48,7 +49,7 @@ include "lib/clue.circom";
 //
 // Enforced here: in_asset[i], out_asset[j] < 2^64.
 
-template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
+template Transact(DEPTH, N_IN, N_OUT) {
     // ===== PUBLIC (verifier-visible) =====
     signal input  z;   // Fiat-Shamir challenge.
     signal output y;   // PolyEval(coeffs, z).
@@ -93,20 +94,11 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     signal input out_rcv[N_OUT];
     signal input out_rcv_dep[N_OUT];
 
-    // ===== PRIVATE: FMD clue witnesses (per output) =====
-    // out_r: FMD blinding scalar, fresh per output. out_fk: recipient flag-key.
-    // Padding outputs supply (r, fk) too; sender typically uses own fk.
-    signal input out_r[N_OUT];
-    signal input out_fk[N_OUT][GAMMA][2];
-
-    // 14-bit packed clueBits; first GAMMA constrained, upper bits masked by contract.
+    // ===== LOGICAL PIs: FMD clue (PolyEval-bound, no circuit constraints) =====
+    // GAMMA is a subscription parameter; upper bits masked by contract.
     signal input out_clue_bits[N_OUT];
-    // Legendre witnesses (from sdk/src/crypto/sqrt.ts fmdLegendreWitness).
-    signal input out_legendre_bit[N_OUT][GAMMA];
-    signal input out_legendre_y[N_OUT][GAMMA];
-    // Exposed for PolyEval binding.
-    signal out_clue_Rx[N_OUT];
-    signal out_clue_Ry[N_OUT];
+    signal input out_clue_Rx[N_OUT];
+    signal input out_clue_Ry[N_OUT];
 
     // -------------------------------------------------------------------------
     // Spent-note slots
@@ -136,7 +128,7 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
         spent[i].cv[0]     <== in_cv[i][0];
         spent[i].cv[1]     <== in_cv[i][1];
 
-        // dummy ⇒ value == 0 (additive identity in balance).
+        // dummy ⇒ value == 0.
         in_dz.dummy[i] <== in_is_dummy[i];
         in_dz.value[i] <== in_value[i];
     }
@@ -145,7 +137,6 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     // Output-note slots
     // -------------------------------------------------------------------------
     component out_note[N_OUT];
-    component clue[N_OUT];
 
     for (var j = 0; j < N_OUT; j++) {
         out_note[j] = OutputNote();
@@ -163,25 +154,9 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
         // Bind public out_cv_dep to OutputNote.cv_dep.
         out_cv_dep[j][0] === out_note[j].cv_dep[0];
         out_cv_dep[j][1] === out_note[j].cv_dep[1];
-
-        // FMD clue.
-        clue[j] = ClueCheck(GAMMA);
-        clue[j].r <== out_r[j];
-        for (var gi = 0; gi < GAMMA; gi++) {
-            clue[j].fk[gi][0] <== out_fk[j][gi][0];
-            clue[j].fk[gi][1] <== out_fk[j][gi][1];
-            clue[j].legendre_bit[gi] <== out_legendre_bit[j][gi];
-            clue[j].legendre_y[gi]   <== out_legendre_y[j][gi];
-        }
-        clue[j].clue_bits <== out_clue_bits[j];
-        out_clue_Rx[j] <== clue[j].Rx;
-        out_clue_Ry[j] <== clue[j].Ry;
     }
 
-    // Public-bucket scalar mults.
-    // V^pub = HashToAssetGen(public_asset_id); image is on prime-order
-    // subgroup, no SafePoint needed. RangeCheck64 on public_in/out is
-    // defense-in-depth.
+    // Public-bucket scalar mults: V^pub = HashToAssetGen(public_asset_id).
     component pub_gen = HashToAssetGen();
     pub_gen.asset_id <== public_asset_id;
 
@@ -205,7 +180,6 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     pub_out_mul.gen[0] <== pub_gen.gen[0];
     pub_out_mul.gen[1] <== pub_gen.gen[1];
 
-    // Per-asset point balance (see PerAssetPointBalance).
     component bal = PerAssetPointBalance(N_IN, N_OUT);
     for (var i = 0; i < N_IN; i++) {
         bal.in_cv[i][0] <== in_cv[i][0];
@@ -224,8 +198,8 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     bal.pub_out_pt[0] <== pub_out_mul.out[0];
     bal.pub_out_pt[1] <== pub_out_mul.out[1];
 
-    // PI compression: bind logical PIs to (z, y). Layout in TransactCompress.
-    component pe = TransactCompress(N_OUT);
+    // PI compression: bind logical PIs to (z, y). Layout in TransactCompressN.
+    component pe = TransactCompressN(N_IN, N_OUT);
     pe.z <== z;
     pe.merkle_root <== merkle_root;
     pe.nullifier[0] <== nullifier[0];
@@ -254,13 +228,8 @@ template Transact(DEPTH, N_IN, N_OUT, GAMMA) {
     y <== pe.y;
 }
 
-// Verifier sees IC0 (const), IC1·z, IC2·y.
-//
-// Transact(DEPTH=10, N_IN=2, N_OUT=2, GAMMA=5):
-//   DEPTH=10  → 4^10 = 1,048,576 leaves; must match on-chain CommitmentTree.
-//   N_IN=2    → spent slots (dummies allowed).
-//   N_OUT=2   → output slots (padding = value=0 to self).
-//   GAMMA=5   → FMD2 slots;
+// Verifier sees only (z, y). Params must match on-chain CommitmentTree.
+// DEPTH=10 → 4^10 = 1,048,576 leaves; N_IN=2 spent; N_OUT=2 output.
 component main {
     public [ z ]
-} = Transact(10, 2, 2, 5);
+} = Transact(10, 2, 2);

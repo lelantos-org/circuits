@@ -6,18 +6,13 @@ include "asset_gen.circom";
 include "value_commit.circom";
 include "../../node_modules/circomlib/circuits/comparators.circom";
 
-// OutputNote: constraints for ONE output-note slot.
-//   - cm == NoteCommitment(asset_id, value, pk, rho, rcm)  (always real;
-//     padding = value=0 notes to self).
-//   - value < 2^64.
-//   - asset_id != 0 (ghost-note defense, no dummy bypass).
-//   - cv     == ValueCommit(value, HashToAssetGen(asset_id), rcv).
+// Constraints for one output-note slot.
+//   - cm    == NoteCommitment(asset_id, value, pk, rho, rcm).
+//   - value < 2^64; asset_id != 0.
+//   - cv    == ValueCommit(value, HashToAssetGen(asset_id), rcv).
 //   - cv_dep == ValueCommit(value, HashToAssetGen(asset_id), rcv_dep).
-//     Anchored into leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y), so a
-//     future spend cannot reopen under different (asset_id, value).
-//
-// rH exposed for PerAssetPointBalance. cv_dep exposed so caller can pin it via
-// PolyEval and forward to tree_update_batch for leaf-format binding.
+//     Anchored into leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
+// rH and cv_dep exposed for caller.
 template OutputNote() {
     // ---- private witness ----
     signal input asset_id;
@@ -72,8 +67,7 @@ template OutputNote() {
     rH[0] <== vc.rH[0];
     rH[1] <== vc.rH[1];
 
-    // 5. Bind cv_dep to (asset_id, value, rcv_dep). Fresh rcv_dep ≠ rcv lets
-    //    cv re-randomize while cv_dep stays pinned to the leaf.
+    // 5. Bind cv_dep to (asset_id, value, rcv_dep).
     component vc_dep = ValueCommit();
     for (var i = 0; i < 64; i++) {
         vc_dep.bits[i] <== rng.bits[i];

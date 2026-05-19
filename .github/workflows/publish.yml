@@ -130,6 +130,8 @@ jobs:
           just compile-batch setup-batch
           # Stage flat wasm next to its r1cs for release upload.
           cp build/tree_update_batch_js/tree_update_batch.wasm build/tree_update_batch.wasm
+          # Rename patched verifier to a clean release asset name.
+          cp build/TreeUpdateBatchVerifier.patched.sol build/TreeUpdateBatchVerifier.sol
           # Compute SHA-256 for every release asset (used in the body).
           {
               echo 'release_shas<<EOF'
@@ -137,9 +139,11 @@ jobs:
                 build/2x2.r1cs \
                 build/2x2.wasm \
                 build/2x2_final.zkey \
+                build/Verifier.sol \
                 build/tree_update_batch.r1cs \
                 build/tree_update_batch.wasm \
-                build/tree_update_batch_final.zkey
+                build/tree_update_batch_final.zkey \
+                build/TreeUpdateBatchVerifier.sol
               echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -155,9 +159,11 @@ jobs:
             build/2x2.r1cs
             build/2x2.wasm
             build/2x2_final.zkey
+            build/Verifier.sol
             build/tree_update_batch.r1cs
             build/tree_update_batch.wasm
             build/tree_update_batch_final.zkey
+            build/TreeUpdateBatchVerifier.sol
           body: |
             Published `@lelantos-org/circuits@${{ github.ref_name }}` to GitHub Packages.
 
@@ -171,8 +177,9 @@ jobs:
 
             Verify a downloaded asset locally:
             ```
-            shasum -a 256 2x2.r1cs 2x2.wasm 2x2_final.zkey \
-                          tree_update_batch.r1cs tree_update_batch.wasm tree_update_batch_final.zkey
+            shasum -a 256 2x2.r1cs 2x2.wasm 2x2_final.zkey Verifier.sol \
+                          tree_update_batch.r1cs tree_update_batch.wasm tree_update_batch_final.zkey \
+                          TreeUpdateBatchVerifier.sol
             ```
 
             The `*_final.zkey` (and the npm tarball's `verification_key.json`)

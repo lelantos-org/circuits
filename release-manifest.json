@@ -1,4 +1,0 @@
-{
-  "_note": "Historical record of per-release artifact SHA-256 hashes. The current single-contributor ceremony is non-deterministic (snarkjs zkey contribute mixes fresh randomness regardless of -e), so the SHA-256 of `2x2_final.zkey` + `verification_key.json` differs on every CI rebuild. This file is INFORMATIONAL — CI does not gate on hashes here. For a downloaded tarball, verify the hashes recorded in the matching release notes on https://github.com/lelantos-org/circuits/releases. Pinning will be reintroduced when the package switches to the post-MPC ceremony output committed to git.",
-  "releases": []
-}

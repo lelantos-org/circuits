@@ -6,12 +6,10 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 include "../../node_modules/circomlib/circuits/escalarmulany.circom";
 include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 
-// Sapling-style Baby-Jubjub value commitment: cv = value · AssetGen + rcv · H.
-//   value: ≤ 2^64 (range-checked by caller).
-//   gen:   AssetGen (HashToAssetGen output or public-bucket point).
-//   rcv:   253-bit blinder.
-// H = circomlib Pedersen BASE[2]; HashToAssetGen uses BASE[0], so H is
-// outside its image.
+// Baby-Jubjub value commitment: cv = value · gen + rcv · H.
+//   gen: HashToAssetGen output or public-bucket point.
+//   rcv: 253-bit blinder.
+// H = circomlib Pedersen BASE[2]; gen uses BASE[0] (disjoint images).
 
 function H_BASE_X() {
     return 5802099305472655231388284418920769829666717045250560929368476121199858275951;
@@ -20,9 +18,8 @@ function H_BASE_Y() {
     return 5980429700218124965372158798884772646841287887664001482443826541541529227896;
 }
 
-// Variable-base scalar mul: value · gen. Bits pre-decomposed (LSB-first 64);
-// caller passes RangeCheck64.bits. scalar=0 → identity (0,1), so dummy notes
-// add identity to point sums. Cost ≈ 2k constraints.
+// Variable-base scalar mul: value · gen. Bits LSB-first from RangeCheck64.
+// scalar=0 → identity (0,1). Cost ≈ 2k constraints.
 template ValueScalarMul() {
     signal input bits[64];
     signal input gen[2];
@@ -59,8 +56,7 @@ template MulH() {
     out[1] <== mul.out[1];
 }
 
-// cv = value · gen + rcv · H. rH exposed so the balance check sums points
-// across notes (avoids Σrcv_in − Σrcv_out field-wrap).
+// cv = value · gen + rcv · H. rH exposed for PerAssetPointBalance.
 template ValueCommit() {
     signal input bits[64];
     signal input gen[2];
@@ -90,8 +86,7 @@ template ValueCommit() {
     rH[1] <== rHmul.out[1];
 }
 
-// Chained Edwards point sum. PointSum(0) = identity (0,1). BabyAdd is
-// complete on the prime-order subgroup.
+// Chained Edwards point sum. PointSum(0) = identity (0,1).
 template PointSum(N) {
     signal input pts[N][2];
     signal output out[2];

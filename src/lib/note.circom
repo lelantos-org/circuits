@@ -3,15 +3,10 @@ pragma circom 2.2.3;
 include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "tags.circom";
 
-// Note primitives: key derivation, commitment, nullifier.
-//
 // Key hierarchy:
-//   nsk (spend authority)
-//    ├─ ivk = Poseidon(TAG_IVK, nsk)   incoming view key
-//    │    └─ pk = Poseidon(TAG_PK, ivk)
-//    └─ nk  = Poseidon(TAG_NK, nsk)    nullifier-deriving key (FVK)
-// nf = Poseidon(TAG_NF, nk, rho). Auditor with nk recomputes nf for known rho.
-// Poseidon one-wayness keeps spend auth gated by nsk (pk_check in spent.circom).
+//   nsk → ivk = Poseidon(TAG_IVK, nsk) → pk = Poseidon(TAG_PK, ivk)
+//       → nk  = Poseidon(TAG_NK, nsk)
+// nf = Poseidon(TAG_NF, nk, rho).
 
 // ivk = Poseidon(TAG_IVK, nsk)
 template DeriveIvk() {
@@ -46,10 +41,8 @@ template DerivePk() {
     pk <== h.out;
 }
 
-// cm = Poseidon(packed_av, owner_pk, rho, rcm) where
-//   packed_av = asset_id · 2^64 + value.
-// packed_av ≥ 2^64 (asset_id ≠ 0) separates this from TAG_MERKLE and TAG_LEAF
-// arity-4 hashes. Requires asset_id, value < 2^64 (enforced by caller).
+// cm = Poseidon(packed_av, owner_pk, rho, rcm), packed_av = asset_id·2^64 + value.
+// packed_av ≥ 2^64 (asset_id ≠ 0) provides domain separation from TAG_MERKLE / TAG_LEAF.
 template NoteCommitment() {
     signal input asset_id;
     signal input value;

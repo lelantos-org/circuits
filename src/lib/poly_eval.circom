@@ -1,9 +1,8 @@
 pragma circom 2.2.3;
 
 // Horner-form polynomial evaluation: y = Σ c[k]·z^k for k ∈ [0, N).
-// Compresses N logical PIs into a single (z, y) pair. Schwartz–Zippel:
-// collision prob ≤ (N-1)/p over BN254 scalar — negligible.
-// Coefficient ordering MUST match contracts/src/lib/PubInputs.sol byte-for-byte.
+// Compresses N logical PIs into (z, y); collision prob ≤ (N-1)/p.
+// Coefficient ordering MUST match contracts/src/lib/PubInputs.sol.
 template PolyEval(N) {
     signal input coeffs[N];
     signal input z;
@@ -17,32 +16,37 @@ template PolyEval(N) {
     y <== acc[N];
 }
 
-// Transact PI compressor: 24 base + 3·N_OUT clue coeffs → (z, y).
-// Layout MUST match PubInputs.sol :: compress(Transact, aux). Slot layout
-// documented in src/2x2.circom header.
-template TransactCompress(N_OUT) {
-    var PI_BASE = 24;          // 20 base + 4 cv_dep coords
-    var PI_PER_OUT = 3;        // (clueRx, clueRy, clueBits)
+// Transact PI compressor for arbitrary (N_IN, N_OUT).
+// Layout (must match a corresponding PubInputs.sol :: compress overload):
+//   [0]                                merkle_root
+//   [1 .. 1+N_IN)                      nullifier[N_IN]
+//   [1+N_IN .. 1+N_IN+N_OUT)           out_cm[N_OUT]
+//   [+0,+1,+2]                         public_asset_id, public_in, public_out
+//   next 2·N_IN                        in_cv[N_IN][2]  (row-major)
+//   next 2·N_OUT                       out_cv[N_OUT][2]
+//   next 4                             recipient, chain_id, payer, relayer
+//   next 2·N_OUT                       out_cv_dep[N_OUT][2]
+//   next 3·N_OUT                       (clueRx, clueRy, clueBits) per out
+// Total = 8 + 3·N_IN + 8·N_OUT.
+template TransactCompressN(N_IN, N_OUT) {
+    var PI_BASE = 8 + 3 * N_IN + 5 * N_OUT;
+    var PI_PER_OUT = 3;
     var N = PI_BASE + PI_PER_OUT * N_OUT;
 
     signal input z;
-
-    // Base 24 logical PIs.
     signal input merkle_root;
-    signal input nullifier[2];
-    signal input out_cm[2];
+    signal input nullifier[N_IN];
+    signal input out_cm[N_OUT];
     signal input public_asset_id;
     signal input public_in;
     signal input public_out;
-    signal input in_cv[2][2];
-    signal input out_cv[2][2];
+    signal input in_cv[N_IN][2];
+    signal input out_cv[N_OUT][2];
     signal input recipient_address;
     signal input chain_id;
     signal input payer_address;
     signal input relayer_address;
-    signal input out_cv_dep[2][2];
-
-    // Per-output clue PIs.
+    signal input out_cv_dep[N_OUT][2];
     signal input out_clue_Rx[N_OUT];
     signal input out_clue_Ry[N_OUT];
     signal input out_clue_bits[N_OUT];
@@ -50,42 +54,52 @@ template TransactCompress(N_OUT) {
     signal output y;
 
     component pe = PolyEval(N);
-    pe.coeffs[ 0] <== merkle_root;
-    pe.coeffs[ 1] <== nullifier[0];
-    pe.coeffs[ 2] <== nullifier[1];
-    pe.coeffs[ 3] <== out_cm[0];
-    pe.coeffs[ 4] <== out_cm[1];
-    pe.coeffs[ 5] <== public_asset_id;
-    pe.coeffs[ 6] <== public_in;
-    pe.coeffs[ 7] <== public_out;
-    pe.coeffs[ 8] <== in_cv[0][0];
-    pe.coeffs[ 9] <== in_cv[0][1];
-    pe.coeffs[10] <== in_cv[1][0];
-    pe.coeffs[11] <== in_cv[1][1];
-    pe.coeffs[12] <== out_cv[0][0];
-    pe.coeffs[13] <== out_cv[0][1];
-    pe.coeffs[14] <== out_cv[1][0];
-    pe.coeffs[15] <== out_cv[1][1];
-    pe.coeffs[16] <== recipient_address;
-    pe.coeffs[17] <== chain_id;
-    pe.coeffs[18] <== payer_address;
-    pe.coeffs[19] <== relayer_address;
-    pe.coeffs[20] <== out_cv_dep[0][0];
-    pe.coeffs[21] <== out_cv_dep[0][1];
-    pe.coeffs[22] <== out_cv_dep[1][0];
-    pe.coeffs[23] <== out_cv_dep[1][1];
+    pe.coeffs[0] <== merkle_root;
+
+    var off = 1;
+    for (var i = 0; i < N_IN; i++) {
+        pe.coeffs[off + i] <== nullifier[i];
+    }
+    off = off + N_IN;
     for (var j = 0; j < N_OUT; j++) {
-        pe.coeffs[PI_BASE + PI_PER_OUT * j + 0] <== out_clue_Rx[j];
-        pe.coeffs[PI_BASE + PI_PER_OUT * j + 1] <== out_clue_Ry[j];
-        pe.coeffs[PI_BASE + PI_PER_OUT * j + 2] <== out_clue_bits[j];
+        pe.coeffs[off + j] <== out_cm[j];
+    }
+    off = off + N_OUT;
+    pe.coeffs[off + 0] <== public_asset_id;
+    pe.coeffs[off + 1] <== public_in;
+    pe.coeffs[off + 2] <== public_out;
+    off = off + 3;
+    for (var i = 0; i < N_IN; i++) {
+        pe.coeffs[off + 2 * i + 0] <== in_cv[i][0];
+        pe.coeffs[off + 2 * i + 1] <== in_cv[i][1];
+    }
+    off = off + 2 * N_IN;
+    for (var j = 0; j < N_OUT; j++) {
+        pe.coeffs[off + 2 * j + 0] <== out_cv[j][0];
+        pe.coeffs[off + 2 * j + 1] <== out_cv[j][1];
+    }
+    off = off + 2 * N_OUT;
+    pe.coeffs[off + 0] <== recipient_address;
+    pe.coeffs[off + 1] <== chain_id;
+    pe.coeffs[off + 2] <== payer_address;
+    pe.coeffs[off + 3] <== relayer_address;
+    off = off + 4;
+    for (var j = 0; j < N_OUT; j++) {
+        pe.coeffs[off + 2 * j + 0] <== out_cv_dep[j][0];
+        pe.coeffs[off + 2 * j + 1] <== out_cv_dep[j][1];
+    }
+    off = off + 2 * N_OUT;
+    for (var j = 0; j < N_OUT; j++) {
+        pe.coeffs[off + PI_PER_OUT * j + 0] <== out_clue_Rx[j];
+        pe.coeffs[off + PI_PER_OUT * j + 1] <== out_clue_Ry[j];
+        pe.coeffs[off + PI_PER_OUT * j + 2] <== out_clue_bits[j];
     }
     pe.z <== z;
     y <== pe.y;
 }
 
 // TreeUpdateBatch PI compressor: 4 + 9·MAX_N coeffs → (z, y).
-// Layout MUST match PubInputs.sol :: compress(TreeUpdateBatch); slot layout
-// in tree_update_batch.circom header.
+// Layout MUST match PubInputs.sol :: compress(TreeUpdateBatch).
 template BatchCompress(MAX_N) {
     var N = 4 + 9 * MAX_N;
 

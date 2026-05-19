@@ -16,9 +16,8 @@ pragma circom 2.2.3;
 // | TAG_NK      | 9     | nk  = Poseidon(TAG_NK, nsk)                               |
 // | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)         |
 //
-// TAG_LEAF separates leaf hash from NoteCommitment: both are Poseidon(4) but
-// NoteCommitment's first input is packed_av ≥ 2^64 (asset_id ≠ 0 enforced),
-// while TAG_LEAF = 10. POW_2_64 packs (asset_id, value) and bounds RangeCheck64.
+// TAG_LEAF separates leaf from NoteCommitment: TAG_LEAF=10 vs packed_av≥2^64.
+// POW_2_64 = 2^64; packs asset_id||value and bounds RangeCheck64.
 function TAG_CM()     { return 1; }
 function TAG_NF()     { return 2; }
 function TAG_PK()     { return 3; }

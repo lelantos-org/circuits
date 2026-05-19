@@ -5,11 +5,8 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 include "tags.circom";
 include "common.circom";
 
-// FrontierRoot: rebuild lazy-root from frontier + start_index.
-//
-// Binds prover-supplied frontier_in to public old_root. Without this binding
-// a relayer could pair any frontier with oldRoot == currentRoot() and produce
-// a new_root from forged state (permanent pool DoS).
+// Rebuild lazy Merkle root from frontier + start_index.
+// Binds frontier_in to public old_root.
 //
 // Per level d, digit = (start_index >> 2d) % 4:
 //   k <  digit : frontier_in[d][k]   (filled left sibling)
@@ -18,7 +15,6 @@ include "common.circom";
 // cur[0] = 0; cur[d+1] = Poseidon(TAG_MERKLE, c0..c3); root = cur[DEPTH].
 // Cost ≈ 8.7k constraints @ DEPTH=10.
 template FrontierRoot(DEPTH) {
-    // Bit decomposition supplied by caller (reuses parent's Num2Bits).
     signal input start_index_bits[2 * DEPTH];
     signal input frontier_in[DEPTH][3];
     signal output root;
@@ -31,8 +27,7 @@ template FrontierRoot(DEPTH) {
     signal bb[DEPTH];
     signal s[DEPTH][4];
 
-    // Children split into pre (frontier), eq (cur), post (zeros) subterms.
-    // Slot 0 has no pre; slot 3 has no post.
+    // Children: pre (frontier), eq (cur), post (zeros).
     signal c[DEPTH][4];
     signal c_pre[DEPTH][4];
     signal c_eq[DEPTH][4];

@@ -23,7 +23,6 @@ template MerkleLevel4() {
     signal input path_index;
     signal output out;
 
-    // Range-check + one-hot selectors (shared with QuaternaryInsert).
     component sel = PathIndexSelectors();
     sel.path_index <== path_index;
     signal s0;
