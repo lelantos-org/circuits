@@ -1,4 +1,4 @@
-pragma circom 2.1.0;
+pragma circom 2.2.3;
 
 // Test wrapper: MerkleRoot at depth 2 (16 leaves).
 

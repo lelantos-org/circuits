@@ -89,11 +89,9 @@ function swapOutputs(input: any): any {
     out.out_rcm = swap2(input.out_rcm);
     out.out_rcv = swap2(input.out_rcv);
     out.out_rcv_dep = swap2(input.out_rcv_dep);
-    out.out_r = swap2(input.out_r);
-    out.out_fk = swap2(input.out_fk);
     out.out_clue_bits = swap2(input.out_clue_bits);
-    out.out_legendre_bit = swap2(input.out_legendre_bit);
-    out.out_legendre_y = swap2(input.out_legendre_y);
+    out.out_clue_Rx = swap2(input.out_clue_Rx);
+    out.out_clue_Ry = swap2(input.out_clue_Ry);
     return out;
 }
 
