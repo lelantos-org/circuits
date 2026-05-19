@@ -25,8 +25,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BUILD = resolve(ROOT, "build");
 
 /// Size bands are intentionally wide. The 2x2 circuit produces:
-///   - 2x2.wasm           ~5 MB (deterministic from circom)
-///   - 2x2_final.zkey   ~45–55 MB (depends on ceremony randomness)
+///   - 2x2.wasm           ~4 MB (deterministic from circom; ClueCheck removed)
+///   - 2x2_final.zkey   ~35–45 MB (depends on ceremony randomness)
 ///   - verification_key.json ~3 KB (vkey JSON, derived from zkey)
 /// Sizes that fall outside these bands indicate a broken build, not a
 /// new ceremony output.
@@ -34,14 +34,14 @@ const FILES = [
     {
         name: "2x2.wasm",
         path: resolve(BUILD, "2x2.wasm"),
-        minBytes: 4_000_000,
-        maxBytes: 7_000_000,
+        minBytes: 3_000_000,
+        maxBytes: 5_000_000,
     },
     {
         name: "2x2_final.zkey",
         path: resolve(BUILD, "2x2_final.zkey"),
-        minBytes: 40_000_000,
-        maxBytes: 60_000_000,
+        minBytes: 30_000_000,
+        maxBytes: 50_000_000,
     },
     {
         name: "verification_key.json",
