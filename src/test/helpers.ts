@@ -29,10 +29,8 @@ export {
     dummyOutput,
     dummyInputAt,
     type BuildOpts,
-    type Note,
-    type SpentNote,
-    type OutputClueWitness,
-} from "@lelantos-org/sdk";
+} from "@lelantos-org/sdk/bundle";
+export type { Note, SpentNote } from "@lelantos-org/sdk";
 
 export {
     FMD_DEFAULT_GAMMA,

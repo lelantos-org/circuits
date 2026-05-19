@@ -18,9 +18,10 @@ import {
     BABYJUB_SUBGROUP_ORDER,
     type Field,
     type Note,
-    type OutputClueWitness,
     type SpentNote,
 } from "../helpers";
+
+type ClueInputs = { clueBits: Field; clueRx: Field; clueRy: Field };
 
 // Default asset id used by tests that don't care which asset they're on.
 export const DEFAULT_ASSET: Field = 7n;
@@ -32,34 +33,31 @@ export interface TxBuildArgs {
     inputs: SpentNote[];
     outputs: Note[];
     merkleRoot: Field;
-    /// Per-output FMD clue witnesses. When omitted, deterministic Poseidon-v2
-    /// clues are synthesized so ClueCheck constraints are satisfied.
-    outputClues?: OutputClueWitness[];
+    outputClues?: ClueInputs[];
 }
 
-// Deterministic clue synth: tests don't care about clue contents, only that
-// the witness satisfies ClueCheck. Build (dk, fk) once per builder, derive
-// per-output r from a counter, and run `fmdFlag` so clue_bits[i] = 1 - bit_i
-// holds by construction.
+// Deterministic clue synth: no circuit constraints on clue signals; just
+// produce valid Baby-Jubjub R and honest bits so downstream tooling is correct.
 function makeClueGen(P: Poseidon, J: Jubjub) {
     const dk = fmdGenDetectionKey(() => 1n, FMD_DEFAULT_GAMMA);
     const fk = fmdFlagKeyFromDetection(J, dk);
     let counter = 0n;
-    return (): OutputClueWitness => {
+    return (): ClueInputs => {
         counter += 1n;
         const r = (counter * 1234567n + 89n) % BABYJUB_SUBGROUP_ORDER;
-        const clue = fmdFlag(J, P, fk, r === 0n ? 1n : r);
-        // gamma=5 ⇒ clue.bits is 1 byte; pack to single Field (LSB-first).
+        const rSafe = r === 0n ? 1n : r;
+        const clue = fmdFlag(J, P, fk, rSafe);
         let packed = 0n;
         for (let i = 0; i < clue.bits.length; i++) {
             packed |= BigInt(clue.bits[i]) << BigInt(8 * i);
         }
-        return { r, fk: fk.X, clueBits: packed };
+        const R = J.mulPointEscalar(J.base8, rSafe);
+        return { clueBits: packed, clueRx: R[0], clueRy: R[1] };
     };
 }
 
 export class TxBuilder {
-    private readonly nextClue: () => OutputClueWitness;
+    private readonly nextClue: () => ClueInputs;
     constructor(public readonly P: Poseidon, public readonly J: Jubjub, public readonly depth: number) {
         this.nextClue = makeClueGen(P, J);
     }
