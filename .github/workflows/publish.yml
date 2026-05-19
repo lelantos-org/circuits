@@ -130,7 +130,9 @@ jobs:
           just compile-batch setup-batch
           # Stage flat wasm next to its r1cs for release upload.
           cp build/tree_update_batch_js/tree_update_batch.wasm build/tree_update_batch.wasm
-          # Rename patched verifier to a clean release asset name.
+          # Patch contract name then rename to clean release asset name.
+          sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' \
+            build/TreeUpdateBatchVerifier.sol > build/TreeUpdateBatchVerifier.patched.sol
           cp build/TreeUpdateBatchVerifier.patched.sol build/TreeUpdateBatchVerifier.sol
           # Compute SHA-256 for every release asset (used in the body).
           {
