@@ -1,0 +1,76 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  circomspect:
+    runs-on: [self-hosted]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      # Pinned: floating versions would shift the reviewed suppression
+      # baseline documented in the justfile `lint` recipe under our feet.
+      CIRCOMSPECT_VERSION: 0.9.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-circomspect-${{ env.CIRCOMSPECT_VERSION }}
+
+      - name: Cache cargo bin
+        id: cache-cargo
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/circomspect
+          key: circomspect-${{ env.CIRCOMSPECT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install build toolchain (cc/linker for cargo)
+        if: steps.cache-cargo.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Install Rust toolchain
+        if: steps.cache-cargo.outputs.cache-hit != 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install circomspect
+        if: steps.cache-cargo.outputs.cache-hit != 'true'
+        run: cargo install circomspect --locked --version "${CIRCOMSPECT_VERSION}"
+
+      - name: Install npm dependencies
+        run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # circomspect exits non-zero on any warning. Known-safe analysis
+      # passes are suppressed via --allow flags, with rationale documented
+      # in the justfile `lint` recipe. Advisory-only — does not block PRs.
+      # Reviewers MUST inspect this job's log and ensure any new findings
+      # are either fixed or added to the justfile baseline before merging.
+      - name: Run circomspect
+        run: just lint
+        continue-on-error: true

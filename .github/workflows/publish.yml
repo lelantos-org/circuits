@@ -1,0 +1,190 @@
+name: publish
+
+# Tag-driven release. Push a tag matching `v*` (e.g. `v0.1.0`) and CI
+# rebuilds artifacts from circom + ptau, runs sanity checks, publishes
+# to GitHub Packages, and writes per-release SHA-256 hashes into the
+# release body for downstream verification.
+#
+# The trusted-setup ceremony is non-deterministic (snarkjs mixes fresh
+# randomness into the contribution regardless of `-e`), so the zkey +
+# vkey SHA-256 are recorded per-release, not pinned in advance.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: [self-hosted]
+    timeout-minutes: 60
+    permissions:
+      contents: write   # required to attach SHAs to the release body
+      packages: write
+    env:
+      CIRCOM_VERSION: v2.2.3
+      PTAU_FILE: powersOfTau28_hez_final_17.ptau
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://npm.pkg.github.com
+          scope: "@lelantos-org"
+          always-auth: true
+          cache: npm
+
+      - name: Confirm tag version matches package.json
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json version $pkg"
+            exit 1
+          fi
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-circom-${{ env.CIRCOM_VERSION }}
+
+      - name: Cache circom binary
+        id: cache-circom
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/circom
+          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install circom
+        if: steps.cache-circom.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          os=$(uname -s)
+          arch=$(uname -m)
+          case "$os-$arch" in
+            Linux-x86_64)  asset=circom-linux-amd64 ;;
+            Darwin-x86_64) asset=circom-macos-amd64 ;;
+            *)             asset="" ;;
+          esac
+          if [ -n "$asset" ]; then
+            curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/${asset}" \
+              -o "$HOME/.local/bin/circom"
+            chmod +x "$HOME/.local/bin/circom"
+          else
+            cargo install --git https://github.com/iden3/circom --tag "${CIRCOM_VERSION}" --root "$HOME/.local" circom
+          fi
+
+      - name: Add circom to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache ptau
+        uses: actions/cache@v4
+        with:
+          path: ptau/${{ env.PTAU_FILE }}
+          key: ptau-17
+
+      - name: Install npm dependencies
+        run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + verify 2x2 artifacts
+        id: build
+        run: |
+          # Tee stdout so we keep the human-readable lines AND capture
+          # the structured SHA output for the release body.
+          just package | tee /tmp/check-artifacts.log
+          # Extract the per-file SHA lines and the single-line JSON
+          # summary into step outputs.
+          grep -E '^(2x2\.wasm|2x2_final\.zkey|verification_key\.json)=' /tmp/check-artifacts.log > /tmp/shas.txt
+          {
+              echo 'shas<<EOF'
+              cat /tmp/shas.txt
+              echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          grep '^circuits-shas=' /tmp/check-artifacts.log >> "$GITHUB_OUTPUT"
+
+      - name: Cache ptau_20 (tree_update_batch)
+        uses: actions/cache@v4
+        with:
+          path: ptau/powersOfTau28_hez_final_20.ptau
+          key: ptau-20
+
+      - name: Build tree_update_batch artifacts
+        id: build_batch
+        run: |
+          just compile-batch setup-batch
+          # Stage flat wasm next to its r1cs for release upload.
+          cp build/tree_update_batch_js/tree_update_batch.wasm build/tree_update_batch.wasm
+          # Patch contract name then rename to clean release asset name.
+          sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' \
+            build/TreeUpdateBatchVerifier.sol > build/TreeUpdateBatchVerifier.patched.sol
+          cp build/TreeUpdateBatchVerifier.patched.sol build/TreeUpdateBatchVerifier.sol
+          # Compute SHA-256 for every release asset (used in the body).
+          {
+              echo 'release_shas<<EOF'
+              sha256sum \
+                build/2x2.r1cs \
+                build/2x2.wasm \
+                build/2x2_final.zkey \
+                build/Verifier.sol \
+                build/tree_update_batch.r1cs \
+                build/tree_update_batch.wasm \
+                build/tree_update_batch_final.zkey \
+                build/TreeUpdateBatchVerifier.sol
+              echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attach artifacts + release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/2x2.r1cs
+            build/2x2.wasm
+            build/2x2_final.zkey
+            build/Verifier.sol
+            build/tree_update_batch.r1cs
+            build/tree_update_batch.wasm
+            build/tree_update_batch_final.zkey
+            build/TreeUpdateBatchVerifier.sol
+          body: |
+            Published `@lelantos-org/circuits@${{ github.ref_name }}` to GitHub Packages.
+
+            **PROTOTYPE — single-contributor trusted setup. NOT mainnet-safe.**
+
+            ### Release asset SHA-256
+
+            ```
+            ${{ steps.build_batch.outputs.release_shas }}
+            ```
+
+            Verify a downloaded asset locally:
+            ```
+            shasum -a 256 2x2.r1cs 2x2.wasm 2x2_final.zkey Verifier.sol \
+                          tree_update_batch.r1cs tree_update_batch.wasm tree_update_batch_final.zkey \
+                          TreeUpdateBatchVerifier.sol
+            ```
+
+            The `*_final.zkey` (and the npm tarball's `verification_key.json`)
+            SHAs differ across builds because the contribution step is non-
+            deterministic. Hashes recorded above are the canonical values
+            for this exact release.
