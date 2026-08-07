@@ -56,19 +56,19 @@ reason as `SpentNoteSat`: the fidelity table is checked against them row by row.
 structure OutputNoteSat (o : OutputSlot) : Prop where
   /-- `src/lib/output.circom:36-42` — `cm` binds the note. -/
   cm_def : noteCommitment o.assetId o.value o.pk o.rho o.rcm = o.cm
-  /-- `:44` — value range. -/
+  /-- `:45-46` — value range. -/
   value_range : RangeCheck64Sat o.value o.valueBits
-  /-- `:48-49` — `IsZero(asset_id)`. -/
+  /-- `:49-50` — `IsZero(asset_id)`. -/
   asset_isZero : IsZeroSat o.assetId o.assetInv o.assetIsZero
-  /-- `:50` — unconditional non-zero asset id, unlike `SpentNote`'s gated check. -/
+  /-- `:51` — unconditional non-zero asset id, unlike `SpentNote`'s gated check. -/
   asset_nonzero : o.assetIsZero = 0
-  /-- `:53-56` — `HashToAssetGen`, which also enforces `asset_id < 2^64`. -/
+  /-- `:54-55` — `HashToAssetGen`, which also enforces `asset_id < 2^64`. -/
   asset_bits : Num2BitsSat 64 o.assetId o.assetBits
-  /-- `:53-56` — …and its output point. -/
+  /-- `:54-55` — …and its output point. -/
   gen_def : o.gen = coords (assetGen o.assetId)
-  /-- `:57-65` — value commitment. -/
+  /-- `:57-66` — value commitment. -/
   cv_sat : ValueCommitSat o.valueBits o.gen o.rcv o.rcvBits o.vT o.rH o.cv
-  /-- `:71-80` — deposit value commitment, sharing the same bits and generator. -/
+  /-- `:73-82` — deposit value commitment, sharing the same bits and generator. -/
   cv_dep_sat : ValueCommitSat o.valueBits o.gen o.rcvDep o.rcvDepBits o.vTDep o.rHDep o.cvDep
 
 /-- What an output slot establishes. -/

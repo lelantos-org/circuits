@@ -33,19 +33,19 @@ def ValueScalarMulSat (bits : ℕ → F) (gen out : Pt) : Prop :=
 
 /-- `MulH` — `src/lib/value_commit.circom:41-58`: `Num2Bits(253)` then `EscalarMulFix`. -/
 structure MulHSat (scalar : F) (sbits : ℕ → F) (out : Pt) : Prop where
-  /-- `:47-48` — the 253-bit decomposition of the blinding scalar. -/
+  /-- `:49-50` — the 253-bit decomposition of the blinding scalar. -/
   scalar_bits : Num2BitsSat 253 scalar sbits
-  /-- `:50-55` — `EscalarMulFix(253, H)`. -/
+  /-- `:52-57` — `EscalarMulFix(253, H)`. -/
   out_def : out = escalarMul (bitsNat sbits 253) (coords H)
 
 /-- `ValueCommit` — `src/lib/value_commit.circom:61-88`. -/
 structure ValueCommitSat (bits : ℕ → F) (gen : Pt) (rcv : F) (sbits : ℕ → F)
     (vT rH cv : Pt) : Prop where
-  /-- `:66-71` — `vT = value · gen`. -/
+  /-- `:68-73` — `vT = value · gen`. -/
   value_term : ValueScalarMulSat bits gen vT
-  /-- `:73-74` — `rH = rcv · H`. -/
+  /-- `:75-76, 86-87` — `rH = rcv · H`, and the `rH` output it is read from. -/
   blind_term : MulHSat rcv sbits rH
-  /-- `:76-83` — `cv = BabyAdd(vT, rH)`. -/
+  /-- `:78-85` — `cv = BabyAdd(vT, rH)`. -/
   sum_def : cv = babyAdd vT rH
 
 /-- The value a bit array commits to, as a subgroup scalar. -/

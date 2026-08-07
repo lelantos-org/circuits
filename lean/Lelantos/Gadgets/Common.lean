@@ -22,15 +22,15 @@ namespace Lelantos
 /-- The constraint system of `PathIndexSelectors` — `src/lib/common.circom:11-27`.
 `b` is the `Num2Bits(2)` output, `s` the selector vector. -/
 structure PathIndexSelectorsSat (idx : F) (b s : ℕ → F) : Prop where
-  /-- `:14-17` — `Num2Bits(2)` on the index. -/
+  /-- `:16-19` — `Num2Bits(2)` on the index. -/
   index_bits : Num2BitsSat 2 idx b
-  /-- `:21` — `s[0] <== 1 - b0 - b1 + b0·b1`. -/
+  /-- `:22-23` — `s[0] <== 1 - b0 - b1 + bb`, with `bb <== b0·b1` inlined. -/
   s0_def : s 0 = 1 - b 0 - b 1 + b 0 * b 1
-  /-- `:22` — `s[1] <== b0 - b0·b1`. -/
+  /-- `:24` — `s[1] <== b0 - bb`. -/
   s1_def : s 1 = b 0 - b 0 * b 1
-  /-- `:23` — `s[2] <== b1 - b0·b1`. -/
+  /-- `:25` — `s[2] <== b1 - bb`. -/
   s2_def : s 2 = b 1 - b 0 * b 1
-  /-- `:24` — `s[3] <== b0·b1`. -/
+  /-- `:26` — `s[3] <== bb`. -/
   s3_def : s 3 = b 0 * b 1
 
 /-- **Soundness of `PathIndexSelectors`.** The index is a quaternary digit and the selector

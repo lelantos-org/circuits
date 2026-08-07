@@ -1,9 +1,10 @@
 # Fidelity: does the Lean model match the circuit?
 
 The proofs in `lean/` are about `Lelantos.TransactSat`, a hand-written Lean model. They
-are only worth something if that model faithfully mirrors `src/2x2.circom`. This file is
-the argument that it does, and — just as importantly — the honest list of where the
-argument is still thin.
+are only worth something if that model faithfully mirrors the circuit — `Transact` and its
+transitive closure, instantiated by `src/2x2.circom`, `src/2x3.circom` and `src/3x3.circom`.
+This file is the argument that it does, and — just as importantly — the honest list of where
+the argument is still thin.
 
 ## Which direction of error is dangerous
 
@@ -20,6 +21,10 @@ constructing a satisfying assignment for `Transact(10, 2, 2)` that exercises the
 10-level Merkle chain, both value commitments, all five balance candidates and the
 30-coefficient Horner evaluation.
 
+That construction is at the `2x2` shape only. `transact2x3_sound` and `transact3x3_sound`
+have no exhibited witness, so for those two shapes this fourth failure mode is **not** ruled
+out — see `lean/README.md § What is not proved`.
+
 Known deliberate omissions, all in the safe direction:
 
 * `PerAssetPointBalance` **is** modelled (`TransactSat.point_balance`) but nothing is
@@ -34,15 +39,33 @@ Known deliberate omissions, all in the safe direction:
 
 ## Defence 1 — constraint-by-constraint table
 
-Every `===` / `<==` in the transitive closure of `src/2x2.circom` appears exactly once.
-`2x2.circom` itself only instantiates `Transact(10, 2, 2)`; the wiring it used to hold now
-lives in `src/lib/transact.circom`, and the tables below cite that file as `transact:`.
+Every `===` / `<==` written in `src/lib/*.circom` — the transitive closure of `src/2x2.circom`
+minus `node_modules/circomlib` — appears in the tables below. The three top-level files do
+nothing but instantiate `Transact(10, 2, 2)`, `Transact(10, 2, 3)` and `Transact(10, 3, 3)`;
+the wiring they used to hold now lives in `src/lib/transact.circom`, and the tables cite that
+file as `transact:`.
+
+The correspondence is one row to one Lean field, with three documented exceptions:
+
+* **circomlib gadgets are collapsed, not transcribed.** `Poseidon`, `BabyAdd`, `EscalarMulAny`
+  / `EscalarMulFix` and `Pedersen` become opaque Lean functions with axiomatised semantics
+  (`Lelantos.Meta.Assumptions`). Their internal constraints have no Lean counterpart. The two
+  circomlib templates the model *does* transcribe are `Num2Bits` (`Bits.lean`) and `IsZero` /
+  `IsEqual` (`Comparators.lean`), because their soundness is load-bearing.
+* **`ValueTimesGen` is split** across two model fields — see its row below.
+* **`HashToAssetGen`'s Pedersen is collapsed** into `assetGen` — see its own section below.
+
+Line citations in the Lean sources are the same correspondence at finer grain: every `…Sat`
+field's doc comment names the circom lines it mirrors. They are maintained by hand and are
+**not** checked by CI, so a source-line drift shows up here as a stale citation rather than a
+failing build. Verify them when the circom files move.
 
 ### `src/lib/balance.circom`
 
 | circom | Lean |
 |---|---|
 | `:11` `RangeCheck64` → `Num2Bits(64)` | `RangeCheck64Sat` / `Num2BitsSat` (`Bits.lean`) |
+| `:24-40` `ValueTimesGen` = `RangeCheck64` + `ValueScalarMul` | no single definition: the two halves are modelled separately as `TransactSat.pub_in_range` / `pub_in_mul` and `pub_out_range` / `pub_out_mul`. The template has no state of its own, so splitting it is an exact transcription, not a weakening. |
 | `:48` `dummy*(dummy-1) === 0` | `DummyZeroValueSat` (first conjunct) |
 | `:49` `dummy*value === 0` | `DummyZeroValueSat` (second conjunct) |
 | `:109-111` `pub_eq[c] = IsEqual(pa, cand[c])` | `PerAssetValueBalanceSat.pubEq_sat` |
@@ -58,6 +81,27 @@ lives in `src/lib/transact.circom`, and the tables below cite that file as `tran
 | `:92-98` `cand[]` fill | `candAt` |
 | `:186-187` point equality | `PerAssetPointBalanceSat` (`PointBalance.lean`) |
 
+### `src/lib/asset_gen.circom`
+
+`HashToAssetGen` is the one template whose body is **not** transcribed constraint-for-constraint.
+Its `Num2Bits` is; its Pedersen is collapsed into an opaque function plus an axiom.
+
+| circom | Lean |
+|---|---|
+| `:15-16` `Num2Bits(64)(asset_id)` | `Num2BitsSat 64` — `SpentNoteSat.asset_bits`, `OutputNoteSat.asset_bits`, `TransactSat.pub_asset_range`. This is where every `asset_id < 2^64` in the development comes from. |
+| `:20-27` `Pedersen(72)` over `TAG_ASSET ‖ asset_id_LE` | **collapsed**, not transcribed: `Lelantos.assetGen : F → G` (`Jubjub.lean`), an opaque function of the asset id. The 8 constant tag bits and the 64 wired input bits have no Lean counterpart. |
+| `:28-29` `gen[0..1] <== p.out[0..1]` | `gen_def : gen = coords (assetGen asset_id)` — `SpentNoteSat`, `OutputNoteSat`, `TransactSat.pub_gen` |
+
+The collapse is safe in the direction that matters. Modelling `assetGen` as opaque means the
+proofs may assume **nothing** about it beyond being a subgroup element — strictly weaker than
+what the circuit computes, so it is the safe direction of the table above.
+
+The one property the development *does* assume is the axiom `assetMul` (`Jubjub.lean`): every
+`assetGen a` is a known multiple of `BASE0`. That is a **weakness** of the circuit, deliberately
+imported so `pointBalance_not_sound` can exhibit it, and `assetMul_arith` (`assetMul 1 +
+assetMul 3 = 2 · assetMul 2`) is checked against the real gadget at runtime by
+`src/test/transact.test.ts:847`. No positive result depends on either.
+
 ### `src/lib/common.circom` / `src/lib/merkle.circom`
 
 | circom | Lean |
@@ -66,10 +110,10 @@ lives in `src/lib/transact.circom`, and the tables below cite that file as `tran
 | `common:21-26` `bb`, `s[0..3]` | `PathIndexSelectorsSat` remaining conjuncts |
 | `merkle:35-64` four slot equations | `MerkleLevel4Sat` `c 0 … c 3` |
 | `merkle:66-72` `out = Poseidon(TAG_MERKLE, c0..c3)` | `MerkleLevel4Sat` last conjunct / `merkleNode` |
-| `merkle:87-96` level chain | `MerkleRootSat` |
-| `merkle:107` `is_dummy*(is_dummy-1) === 0` | `MerkleProofOrDummySat.1` |
-| `merkle:119` `diff <== root' - root` | `MerkleProofOrDummySat.2.2.1` |
-| `merkle:120` `(1-is_dummy)*diff === 0` | `MerkleProofOrDummySat.2.2.2` |
+| `merkle:84-96` level chain | `MerkleRootSat` |
+| `merkle:107` `is_dummy*(is_dummy-1) === 0` | `MerkleProofOrDummySat.dummy_bit` |
+| `merkle:119` `diff <== root' - root` | `MerkleProofOrDummySat.diff_def` |
+| `merkle:120` `(1-is_dummy)*diff === 0` | `MerkleProofOrDummySat.matches_root` |
 
 ### `src/lib/note.circom`
 
@@ -137,9 +181,13 @@ Checks, each mechanical:
 
 | Link | Check |
 |---|---|
-| Lean → `expected/layout-2x2.txt` | `lean/scripts/dump-layout.sh` |
+| Lean → `expected/layout-{2x2,2x3,3x3}.txt` | `lean/scripts/dump-layout.sh`, one dump per deployed shape |
 | `expected/layout-2x2.txt` → SDK | `src/test/formal/layout_parity.test.ts`, sentinel-per-field so any transposition fails |
 | SDK → circuit | existing PolyEval binding cases, `src/test/transact.test.ts:645-729` |
+
+The second and third links exist for the **2x2 shape only**. For `2x3` and `3x3` the chain
+stops at the first row: the layout is pinned against Lean, so an accidental change fails CI,
+but nothing cross-checks those two against the SDK or the circuit.
 
 The layout is defined once in Lean (`piSlot`) and the value lookup (`slotValue`) is
 separate, so the dumped names are derived from the same definition the proofs use rather

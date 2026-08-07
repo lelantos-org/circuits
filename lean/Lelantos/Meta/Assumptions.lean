@@ -27,7 +27,7 @@ size bound (`2^64`, `2^66`, `2^128`, `2^253 < p`) that the proofs consume.
 
 | Axiom | Content | Status |
 |---|---|---|
-| `coords` / `coords_injective` | distinct subgroup elements have distinct affine coordinates | True of any affine embedding of a curve group |
+| `coords` / `coords_injective` | distinct subgroup elements have distinct affine coordinates | True of any affine embedding of a curve group. Reaches no headline theorem — see below |
 | `babyAdd` / `babyAdd_spec` | circomlib `BabyAdd` computes the group law | Packages the completeness of the twisted Edwards addition law on Baby Jubjub (`a` square, `d` non-square), which is what makes the two `<--` divisions at `babyjub.circom:45,48` well-constrained |
 | `escalarMul` / `escalarMul_spec` | `EscalarMulAny` / `EscalarMulFix` compute `k • P` | circomlib gadget semantics |
 | `H`, `BASE0` | the two Pedersen bases | Constants |
@@ -36,6 +36,14 @@ size bound (`2^64`, `2^66`, `2^128`, `2^253 < p`) that the proofs consume.
 
 `propext`, `Classical.choice` and `Quot.sound` are Lean's own; they are not assumptions
 about the circuit.
+
+`coords_injective` appears in **no** entry of `lean/expected/axioms.txt`, and that is
+informative rather than an oversight. Its only consumer is `perAssetPointBalance_group`, which
+reads the point equation back as a group equality; nothing consumes *that*, because
+`pointBalance_not_sound` proves nothing may be derived from the point equation. So the axiom is
+load-bearing for the negative result and for nothing else. Should it ever surface in a positive
+theorem's axiom set, some proof has begun deriving conservation from the point balance — which
+this development forbids. Treat that diff as a bug report, not a regeneration.
 
 ## Poseidon is deliberately *not* in that table
 
@@ -78,6 +86,8 @@ and `TxBinding` is what keeps it that way.
 
 #print axioms Lelantos.transact_sound
 #print axioms Lelantos.transact2x2_sound
+#print axioms Lelantos.transact2x3_sound
+#print axioms Lelantos.transact3x3_sound
 #print axioms Lelantos.perAssetValueBalance_nat
 #print axioms Lelantos.perAssetValueBalance_all_assets
 #print axioms Lelantos.polyEval_binding

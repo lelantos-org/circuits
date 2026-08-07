@@ -190,6 +190,25 @@ lean-check:
 lean-update:
     cd "{{ROOT}}/lean" && ./scripts/check-axioms.sh --update && ./scripts/dump-layout.sh --update
 
+# Answers a question the Lean proofs cannot: they are about the *modeled* constraint
+# system, while Picus reads the R1CS circom actually emitted. Not part of `lean-check`
+# or CI — it needs Docker and a 4.5 GB image, built once with:
+#
+#   docker build -t picus:local https://github.com/Veridise/Picus.git
+#
+# Picus recommends --O0 input, so this compiles a separate artifact rather than reusing
+# build/2x2.r1cs.
+
+# Check the compiled R1CS for under-constrainedness (needs Docker). STRONG=1 for strong safety.
+picus STRONG="":
+    @command -v docker >/dev/null || { echo "docker not found"; exit 1; }
+    @docker image inspect picus:local >/dev/null 2>&1 || \
+        { echo "picus:local image missing. Build it: docker build -t picus:local https://github.com/Veridise/Picus.git"; exit 1; }
+    mkdir -p "{{BUILD}}/picus"
+    circom "{{ROOT}}/src/2x2.circom" --r1cs --sym --O0 -o "{{BUILD}}/picus" -l "{{ROOT}}/node_modules"
+    docker run --rm -v "{{BUILD}}/picus:/data" picus:local \
+        ./run-picus --solver z3 --timeout 10000 {{ if STRONG != "" { "--strong" } else { "" } }} /data/2x2.r1cs
+
 # === package ===
 
 # Stage and verify the runtime artifact bundle for npm publish.

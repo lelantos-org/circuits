@@ -82,36 +82,36 @@ constraint table is checked against this definition by eye, so it has to be read
 at a time; positional projections into a nested conjunction retarget silently when a
 constraint is inserted. -/
 structure SpentNoteSat {depth : ℕ} (s : SpentSlot depth) : Prop where
-  /-- `:43-45` — `ivk = Poseidon(TAG_IVK, nsk)`. -/
+  /-- `:46-47` — `ivk = Poseidon(TAG_IVK, nsk)`. -/
   ivk_def : s.ivk = deriveIvk s.nsk
-  /-- `:46-47` — `pk_check.pk = Poseidon(TAG_PK, ivk)`. -/
+  /-- `:49-50` — `pk_check.pk = Poseidon(TAG_PK, ivk)`. -/
   pk_derived : s.pkDerived = derivePk s.ivk
-  /-- `:48` — ownership, real notes only. -/
+  /-- `:51` — ownership, real notes only. -/
   owns : (1 - s.isDummy) * (s.pkDerived - s.pk) = 0
-  /-- `:51-55` — note commitment, over the *supplied* pk. -/
+  /-- `:54-59` — note commitment, over the *supplied* pk. -/
   cm_def : s.cm = noteCommitment s.assetId s.value s.pk s.rho s.rcm
-  /-- `:59` — value range. -/
+  /-- `:62-63` — value range. -/
   value_range : RangeCheck64Sat s.value s.valueBits
-  /-- `:63-64` — `HashToAssetGen`, which is also where `asset_id < 2^64` is enforced. -/
+  /-- `:66-67` — `HashToAssetGen`, which is also where `asset_id < 2^64` is enforced. -/
   asset_bits : Num2BitsSat 64 s.assetId s.assetBits
-  /-- `:63-64` — …and its output point. -/
+  /-- `:66-67` — …and its output point. -/
   gen_def : s.gen = coords (assetGen s.assetId)
-  /-- `:66-72` — deposit value commitment, sharing the value bits. -/
+  /-- `:69-75` — deposit value commitment, sharing the value bits. -/
   cv_dep_sat : ValueCommitSat s.valueBits s.gen s.rcvDep s.rcvDepBits s.vTDep s.rHDep s.cvDep
-  /-- `:75-79` — leaf hash. -/
+  /-- `:79-83` — leaf hash. -/
   leaf_def : s.leaf = leafHash s.cm s.cvDep.x s.cvDep.y
-  /-- `:82-91` — membership, bypassed for dummies. -/
+  /-- `:86-95` — membership, bypassed for dummies. -/
   membership : MerkleProofOrDummySat depth s.leaf s.pathElements s.pathIndices s.root
     s.isDummy s.mpDiff s.mpComputed s.mpB s.mpS s.mpC s.mpChain
-  /-- `:95-96` — `nk = Poseidon(TAG_NK, nsk)`. -/
+  /-- `:99-100` — `nk = Poseidon(TAG_NK, nsk)`. -/
   nk_def : s.nk = deriveNk s.nsk
-  /-- `:98-102` — nullifier. -/
+  /-- `:102-106` — nullifier. -/
   nf_def : nullifierOf s.nk s.rho s.cm = s.nullifier
-  /-- `:105-106` — `IsZero(asset_id)`. -/
+  /-- `:109-110` — `IsZero(asset_id)`. -/
   asset_isZero : IsZeroSat s.assetId s.assetInv s.assetIsZero
-  /-- `:107` — real notes have a non-zero asset id. -/
+  /-- `:111` — real notes have a non-zero asset id. -/
   asset_nonzero_real : (1 - s.isDummy) * s.assetIsZero = 0
-  /-- `:110-119` — value commitment, sharing the same value bits as `cv_dep`. -/
+  /-- `:114-123` — value commitment, sharing the same value bits as `cv_dep`. -/
   cv_sat : ValueCommitSat s.valueBits s.gen s.rcv s.rcvBits s.vT s.rH s.cv
 
 /-- What a non-dummy spent slot establishes. -/

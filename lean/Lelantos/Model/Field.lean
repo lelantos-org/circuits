@@ -28,12 +28,19 @@ theorem one_lt_p : 1 < p := by unfold p; norm_num
 
 theorem two_lt_p : 2 < p := by unfold p; norm_num
 
+/-- `3 < p`: the largest output-slot index over the deployed shapes (`N_OUT = 3` in
+`src/2x3.circom` and `src/3x3.circom`) still injects into `F`, which is what makes
+`DeriveRho`'s `index` argument separate output slots. -/
+theorem three_lt_p : 3 < p := by unfold p; norm_num
+
 /-- `2 ^ 64 < p`: this is what makes `RangeCheck64` a genuine range check rather than a
 statement modulo `p`. See `src/lib/balance.circom:11`. -/
 theorem two_pow_64_lt_p : 2 ^ 64 < p := by unfold p; norm_num
 
-/-- `2 ^ 66 < p`: `PerAssetValueBalance` sums at most `N_IN + 1 = 3` terms of size
-`< 2 ^ 64` per side, so neither side can wrap. See `src/lib/balance.circom:75-80`. -/
+/-- `2 ^ 66 < p`: `PerAssetValueBalance` sums at most `N_IN + 1` terms of size `< 2 ^ 64`
+per side. The largest deployed shape is `Transact(10, 3, 3)` (`src/3x3.circom`), giving four
+terms and a bound of `4 · 2^64 = 2^66`, so neither side can wrap. See
+`src/lib/balance.circom:75-80`. -/
 theorem two_pow_66_lt_p : 2 ^ 66 < p := by unfold p; norm_num
 
 /-- `2 ^ 128 < p`: `NoteCommitment` packs `asset_id · 2^64 + value` into one field

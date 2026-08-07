@@ -1,5 +1,7 @@
 'Lelantos.transact_sound' depends on axioms: [propext, Classical.choice, Lelantos.BASE0, Lelantos.H, Lelantos.assetMul, Lelantos.babyAdd, Lelantos.babyAdd_spec, Lelantos.ell_prime, Lelantos.escalarMul, Lelantos.escalarMul_spec, Lelantos.p_prime, Quot.sound]
 'Lelantos.transact2x2_sound' depends on axioms: [propext, Classical.choice, Lelantos.BASE0, Lelantos.H, Lelantos.assetMul, Lelantos.babyAdd, Lelantos.babyAdd_spec, Lelantos.ell_prime, Lelantos.escalarMul, Lelantos.escalarMul_spec, Lelantos.p_prime, Quot.sound]
+'Lelantos.transact2x3_sound' depends on axioms: [propext, Classical.choice, Lelantos.BASE0, Lelantos.H, Lelantos.assetMul, Lelantos.babyAdd, Lelantos.babyAdd_spec, Lelantos.ell_prime, Lelantos.escalarMul, Lelantos.escalarMul_spec, Lelantos.p_prime, Quot.sound]
+'Lelantos.transact3x3_sound' depends on axioms: [propext, Classical.choice, Lelantos.BASE0, Lelantos.H, Lelantos.assetMul, Lelantos.babyAdd, Lelantos.babyAdd_spec, Lelantos.ell_prime, Lelantos.escalarMul, Lelantos.escalarMul_spec, Lelantos.p_prime, Quot.sound]
 'Lelantos.perAssetValueBalance_nat' depends on axioms: [propext, Classical.choice, Lelantos.p_prime, Quot.sound]
 'Lelantos.perAssetValueBalance_all_assets' depends on axioms: [propext, Classical.choice, Lelantos.p_prime, Quot.sound]
 'Lelantos.polyEval_binding' depends on axioms: [propext, Classical.choice, Lelantos.p_prime, Quot.sound]

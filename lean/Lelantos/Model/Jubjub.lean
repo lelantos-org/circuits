@@ -18,11 +18,20 @@ Constraints in circom compare *coordinates*, not abstract group elements, so we 
 `coords : G → Pt` embedding and require it to be injective. Coordinate equality is then
 group equality, which is what `PerAssetPointBalance` actually checks.
 
+`coords_injective` reaches **no** headline theorem, and its absence from every entry in
+`lean/expected/axioms.txt` is a fact worth reading rather than a loose end. Its only consumer
+is `perAssetPointBalance_group`, which lifts the point equation into the group — and nothing
+consumes *that*, because `pointBalance_not_sound` proves nothing may be derived from the point
+equation. The axiom is therefore load-bearing for the negative result and for nothing else. If
+it ever starts appearing in the axiom set of a positive theorem, something has begun deriving
+conservation from the point balance, which is exactly what this development forbids.
+
 ## What is axiomatized here
 
 * `ell_prime` — arithmetic, same situation as `Lelantos.p_prime`.
 * `coords_injective` — distinct subgroup elements have distinct affine coordinates. True
-  of any affine embedding of an elliptic curve group.
+  of any affine embedding of an elliptic curve group. See the note above on where it is and
+  is not used.
 * `babyAdd_spec` — circomlib's `BabyAdd` computes the group law. Its two `<--` divisions
   (`babyjub.circom:45,48`) are immediately re-constrained by
   `(1 ± d·τ) * out === …`, which pins `out` **provided** `1 ± d·τ ≠ 0`. On Baby Jubjub
@@ -66,7 +75,10 @@ instance : Inhabited Pt := ⟨⟨0, 0⟩⟩
 opaque coords : G → Pt
 
 /-- Distinct group elements have distinct coordinates, so the coordinate-wise equalities
-that `PerAssetPointBalance` checks really are group equalities. -/
+that `PerAssetPointBalance` checks really are group equalities.
+
+Used by `perAssetPointBalance_group` and by nothing else, which is why it appears in no
+entry of `lean/expected/axioms.txt` — see the module note. -/
 axiom coords_injective : Function.Injective coords
 
 theorem coords_inj {g h : G} (hgh : coords g = coords h) : g = h := coords_injective hgh

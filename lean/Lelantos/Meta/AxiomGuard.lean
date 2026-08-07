@@ -30,7 +30,10 @@ private def arithmeticAxioms : List Name :=
   [``Lelantos.p_prime, ``Lelantos.ell_prime]
 
 /-- Curve and gadget semantics: the Baby Jubjub group law, the scalar-multiplication
-gadgets, the two Pedersen bases, and the known discrete log of the asset generators. -/
+gadgets, the two Pedersen bases, and the known discrete log of the asset generators.
+
+`coords_injective` is permitted but reaches no headline theorem: its only consumer lifts the
+point equation into the group, and nothing consumes that. See `Lelantos.Model.Jubjub`. -/
 private def curveAxioms : List Name :=
   [``Lelantos.coords_injective, ``Lelantos.babyAdd, ``Lelantos.babyAdd_spec,
    ``Lelantos.escalarMul, ``Lelantos.escalarMul_spec, ``Lelantos.H, ``Lelantos.BASE0,

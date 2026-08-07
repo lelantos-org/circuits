@@ -51,15 +51,16 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
   /-- `src/lib/transact.circom:90-110` — each spent slot, bound to the shared root. -/
   spent_sat : ∀ i, i < nIn → SpentNoteSat (w.spent i)
   spent_root : ∀ i, i < nIn → (w.spent i).root = w.merkleRoot
-  /-- `:126-127` — `DummyZeroValue(N_IN)`. -/
+  /-- `:88, 113-114` — `DummyZeroValue(N_IN)`. -/
   dummy_zero : DummyZeroValueSat nIn (fun i => (w.spent i).isDummy) (inValue w)
-  /-- `:141-144` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
+  /-- `:126-129` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
   rho_derived : ∀ j, j < nOut → (w.out j).rho = deriveRho (w.spent 0).nullifier (j : F)
-  /-- `:146-156` — each output slot. -/
+  /-- `:131-141` — each output slot. -/
   out_sat : ∀ j, j < nOut → OutputNoteSat (w.out j)
-  /-- `:159-160` — the forwarded deposit commitments are the ones the outputs computed. -/
+  /-- `:143-144` — the forwarded deposit commitments are the ones the outputs computed. -/
   cv_dep_bound : ∀ j, j < nOut → w.outCvDep j = (w.out j).cvDep
-  /-- `:164-185` — the public bucket: generator, two range checks, two scalar mults. -/
+  /-- `:150-161` — the public bucket: generator, two `ValueTimesGen`s (each a
+  `RangeCheck64` plus a `ValueScalarMul`, `src/lib/balance.circom:24-40`). -/
   pub_gen : w.pubGen = coords (assetGen w.publicAssetId)
   /-- `HashToAssetGen` decomposes its argument with `Num2Bits(64)`
   (`src/lib/asset_gen.circom:15-16`), so the public bucket's asset id is range-checked
@@ -69,11 +70,11 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
   pub_out_range : RangeCheck64Sat w.publicOut w.pubOutBits
   pub_in_mul : ValueScalarMulSat w.pubInBits w.pubGen w.pubInPt
   pub_out_mul : ValueScalarMulSat w.pubOutBits w.pubGen w.pubOutPt
-  /-- `:190-201` — the load-bearing conservation check. -/
+  /-- `:166-177` — the load-bearing conservation check. -/
   value_balance : PerAssetValueBalanceSat nIn nOut (inAsset w) (inValue w) (outAsset w)
     (outValue w) w.publicAssetId w.publicIn w.publicOut w.vbPubInv w.vbPubEq
     w.vbInInv w.vbInEq w.vbOutInv w.vbOutEq w.vbInTerm w.vbOutTerm w.vbLhs w.vbRhs
-  /-- `:203-219` — the point equation. Included for fidelity; nothing is derived from it,
+  /-- `:179-195` — the point equation. Included for fidelity; nothing is derived from it,
   because `pointBalance_not_sound` shows nothing can be. -/
   point_balance : PerAssetPointBalanceSat nIn nOut w.inCvG w.outCvG w.inRHG w.outRHG
     w.pubInG w.pubOutG
@@ -87,7 +88,7 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
   assignment by solving for `pubOutG` — i.e. modelled in name only. -/
   point_pub_in : w.pubInPt = coords w.pubInG
   point_pub_out : w.pubOutPt = coords w.pubOutG
-  /-- `:222-247` — public-input compression. -/
+  /-- `:200-225` — public-input compression. -/
   compress : PolyEvalSat (piCount nIn nOut) (txCoeffs w) w.z w.peAcc w.y
 
 /-- Obligations the circuit cannot discharge, which the contract must.
@@ -161,7 +162,7 @@ structure TxBinding (w : TxWitness depth nIn nOut) : Prop where
 /-- **Soundness of `Transact`.** Any assignment satisfying the constraint system yields a
 well-formed transaction. -/
 theorem transact_sound {w : TxWitness depth nIn nOut}
-    (hnIn : nIn ≤ 2) (hnOut : nOut ≤ 2) (h : TransactSat w) : TxWellFormed w where
+    (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3) (h : TransactSat w) : TxWellFormed w where
   realSlots i hi hreal := spentNote_sound (h.spent_sat i hi) hreal
   dummySlots _i hi hdum := dummyZeroValue_zero h.dummy_zero hi hdum
   sharedRoot := h.spent_root
@@ -184,12 +185,12 @@ The assumption is placed in the statement rather than in an axiom so that it can
 into `transact_sound` or anything else; `Lelantos.Model.Poseidon`'s module note records why the
 alternatives — an axiom, or a `∨ PoseidonCollision` conclusion — are worse. -/
 theorem transact_binding {w : TxWitness depth nIn nOut} (hnc : ¬ PoseidonCollision)
-    (hnOut : nOut ≤ 2) (h : TransactSat w) : TxBinding w where
+    (hnOut : nOut ≤ 3) (h : TransactSat w) : TxBinding w where
   rhoDistinct := by
     intro j j' hj hj' hne heq
     rw [h.rho_derived j hj, h.rho_derived j' hj'] at heq
     have hsmall : ∀ m : ℕ, m < nOut → m < p := fun m hm =>
-      lt_trans (lt_of_lt_of_le hm hnOut) two_lt_p
+      lt_trans (lt_of_lt_of_le hm hnOut) three_lt_p
     exact hne (natCast_inj_of_lt (hsmall j hj) (hsmall j' hj') (deriveRho_inj hnc heq).2)
   membershipBinding := by
     intro i hi hreal leaf' pe' hmem
@@ -210,7 +211,7 @@ bucket's asset, then no output can carry it. Immediate from `conservation`, but 
 stating: it is the "you cannot mint a new asset out of nothing" property, and it holds
 over `ℕ` so no wrap-around escape exists. -/
 theorem no_asset_creation {w : TxWitness depth nIn nOut}
-    (hnIn : nIn ≤ 2) (hnOut : nOut ≤ 2) (h : TransactSat w) (a : F)
+    (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3) (h : TransactSat w) (a : F)
     (hnotIn : ∀ i, i < nIn → inAsset w i ≠ a) (hnotPub : w.publicAssetId ≠ a) :
     ∀ j, j < nOut → outAsset w j = a → outValue w j = 0 := by
   classical
@@ -274,16 +275,45 @@ theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
     ⟨slotIndex nIn nOut s, slotIndex_lt hs, by
       rw [txCoeffs_slotIndex w hs, txCoeffs_slotIndex w' hs]; exact hne⟩
 
-/-- The circuit instance actually deployed: `Transact(10, 2, 2)`,
-`src/2x2.circom:25-27`. -/
+/-! ## The deployed instances
+
+`transact_sound` is stated for `nIn ≤ 3`, `nOut ≤ 3` — the bound comes from
+`perAssetValueBalance_nat`, where it is what keeps each side of the balance equation below
+`p`. The repository ships exactly three shapes, and all three sit inside it. -/
+
+/-- `Transact(10, 2, 2)` — `src/2x2.circom:27`. -/
 abbrev Transact2x2 := TxWitness 10 2 2
 
-/-- **Soundness of the deployed instance.** -/
+/-- `Transact(10, 2, 3)` — `src/2x3.circom:26`. -/
+abbrev Transact2x3 := TxWitness 10 2 3
+
+/-- `Transact(10, 3, 3)` — `src/3x3.circom:26`. -/
+abbrev Transact3x3 := TxWitness 10 3 3
+
+/-- **Soundness of the deployed `2x2` instance.** -/
 theorem transact2x2_sound {w : Transact2x2} (h : TransactSat w) : TxWellFormed w :=
   transact_sound (by norm_num) (by norm_num) h
 
-/-- **The deployed instance's binding layer**, on the same unsatisfiable hypothesis. -/
+/-- **Soundness of the deployed `2x3` instance.** -/
+theorem transact2x3_sound {w : Transact2x3} (h : TransactSat w) : TxWellFormed w :=
+  transact_sound (by norm_num) (by norm_num) h
+
+/-- **Soundness of the deployed `3x3` instance.** -/
+theorem transact3x3_sound {w : Transact3x3} (h : TransactSat w) : TxWellFormed w :=
+  transact_sound (by norm_num) (by norm_num) h
+
+/-- **The `2x2` binding layer**, on the same unsatisfiable hypothesis. -/
 theorem transact2x2_binding {w : Transact2x2} (hnc : ¬ PoseidonCollision)
+    (h : TransactSat w) : TxBinding w :=
+  transact_binding hnc (by norm_num) h
+
+/-- **The `2x3` binding layer.** -/
+theorem transact2x3_binding {w : Transact2x3} (hnc : ¬ PoseidonCollision)
+    (h : TransactSat w) : TxBinding w :=
+  transact_binding hnc (by norm_num) h
+
+/-- **The `3x3` binding layer.** -/
+theorem transact3x3_binding {w : Transact3x3} (hnc : ¬ PoseidonCollision)
     (h : TransactSat w) : TxBinding w :=
   transact_binding hnc (by norm_num) h
 

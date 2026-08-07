@@ -186,10 +186,15 @@ def ConservesAtNat (nIn nOut : ℕ) (inA inV outA outV : ℕ → F) (pa pi po a 
   pi.val * indN (pa = a) + ∑ i ∈ Finset.range nIn, (inV i).val * indN (inA i = a)
     = po.val * indN (pa = a) + ∑ j ∈ Finset.range nOut, (outV j).val * indN (outA j = a)
 
-private theorem side_lt (n : ℕ) (hn : n ≤ 2) (v : ℕ → F) (P : ℕ → Prop) [∀ i, Decidable (P i)]
+/-- One side of the balance equation is at most `(n + 1)` terms below `2 ^ 64`.
+
+Stated for arbitrary `n` rather than for a fixed shape: the slot count enters only through
+this bound, so keeping it symbolic is what lets `perAssetValueBalance_nat` cover every
+deployed shape at once. -/
+private theorem side_le (n : ℕ) (v : ℕ → F) (P : ℕ → Prop) [∀ i, Decidable (P i)]
     (pub : F) (Q : Prop) [Decidable Q]
     (hv : ∀ i, i < n → (v i).val < 2 ^ 64) (hpub : pub.val < 2 ^ 64) :
-    pub.val * indN Q + ∑ i ∈ Finset.range n, (v i).val * indN (P i) < 2 ^ 66 := by
+    pub.val * indN Q + ∑ i ∈ Finset.range n, (v i).val * indN (P i) ≤ (n + 1) * 2 ^ 64 := by
   have hterm : ∀ i ∈ Finset.range n, (v i).val * indN (P i) ≤ 2 ^ 64 := by
     intro i hi
     calc (v i).val * indN (P i) ≤ (v i).val * 1 :=
@@ -204,10 +209,7 @@ private theorem side_lt (n : ℕ) (hn : n ≤ 2) (v : ℕ → F) (P : ℕ → Pr
     calc pub.val * indN Q ≤ pub.val * 1 := Nat.mul_le_mul_left _ (indN_le_one _)
       _ = pub.val := mul_one _
       _ ≤ 2 ^ 64 := le_of_lt hpub
-  have : pub.val * indN Q + ∑ i ∈ Finset.range n, (v i).val * indN (P i) ≤ 2 ^ 64 + 2 * 2 ^ 64 := by
-    have : (n : ℕ) * 2 ^ 64 ≤ 2 * 2 ^ 64 := Nat.mul_le_mul_right _ hn
-    omega
-  have h66 : (2 : ℕ) ^ 64 + 2 * 2 ^ 64 < 2 ^ 66 := by norm_num
+  have hexp : (n + 1) * 2 ^ 64 = 2 ^ 64 + n * 2 ^ 64 := by ring
   omega
 
 private theorem cast_term (x : F) (Q : Prop) [Decidable Q] :
@@ -230,24 +232,37 @@ private theorem cast_side (n : ℕ) (v : ℕ → F) (P : ℕ → Prop) [∀ i, D
   rw [Nat.cast_add, cast_term, cast_sum_terms]
 
 /-- **Per-asset conservation over `ℕ`.** With every value 64-bit range-checked and at most
-two input and two output slots, the field equality is an exact integer equality: no
-wrap-around forgery is possible. -/
+three input and three output slots, the field equality is an exact integer equality: no
+wrap-around forgery is possible.
+
+`≤ 3` is not a property of the circuit — `PerAssetValueBalance` is written for arbitrary
+`N_IN` / `N_OUT`. It is the largest slot count for which the sums provably stay below `p`
+using only `two_pow_66_lt_p`, and it covers every deployed shape: `Transact(10, 2, 2)`,
+`Transact(10, 2, 3)` and `Transact(10, 3, 3)`. A wider shape needs a correspondingly wider
+bound in `Lelantos.Model.Field`, and nothing else. -/
 theorem perAssetValueBalance_nat
     (h : PerAssetValueBalanceSat nIn nOut inA inV outA outV pa pi po
       pubInv pubEq inInv inEq outInv outEq inTerm outTerm lhs rhs)
-    (hnIn : nIn ≤ 2) (hnOut : nOut ≤ 2)
+    (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3)
     (hInV : ∀ i, i < nIn → (inV i).val < 2 ^ 64)
     (hOutV : ∀ j, j < nOut → (outV j).val < 2 ^ 64)
     (hPi : pi.val < 2 ^ 64) (hPo : po.val < 2 ^ 64)
     (a : F) : ConservesAtNat nIn nOut inA inV outA outV pa pi po a := by
   classical
   have hfield := perAssetValueBalance_all_assets h a
-  have hL := side_lt nIn hnIn inV (fun i => inA i = a) pi (pa = a) hInV hPi
-  have hR := side_lt nOut hnOut outV (fun j => outA j = a) po (pa = a) hOutV hPo
+  -- `(n + 1) · 2^64 ≤ 4 · 2^64 = 2^66 < p` for `n ≤ 3`.
+  have hbound : ∀ n : ℕ, n ≤ 3 → (n + 1) * 2 ^ 64 < p := by
+    intro n hn
+    have : (n + 1) * 2 ^ 64 ≤ 2 ^ 66 := by
+      calc (n + 1) * 2 ^ 64 ≤ 4 * 2 ^ 64 := Nat.mul_le_mul_right _ (by omega)
+        _ = 2 ^ 66 := by norm_num
+    exact lt_of_le_of_lt this two_pow_66_lt_p
+  have hL := side_le nIn inV (fun i => inA i = a) pi (pa = a) hInV hPi
+  have hR := side_le nOut outV (fun j => outA j = a) po (pa = a) hOutV hPo
   have hLp : pi.val * indN (pa = a) + ∑ i ∈ Finset.range nIn, (inV i).val * indN (inA i = a) < p :=
-    lt_trans hL two_pow_66_lt_p
+    lt_of_le_of_lt hL (hbound nIn hnIn)
   have hRp : po.val * indN (pa = a) + ∑ j ∈ Finset.range nOut, (outV j).val * indN (outA j = a) < p :=
-    lt_trans hR two_pow_66_lt_p
+    lt_of_le_of_lt hR (hbound nOut hnOut)
   have hcast : ((pi.val * indN (pa = a)
       + ∑ i ∈ Finset.range nIn, (inV i).val * indN (inA i = a) : ℕ) : F)
       = ((po.val * indN (pa = a)

@@ -1,8 +1,9 @@
-# `lean/` — Lean 4 soundness proof for `src/2x2.circom`
+# `lean/` — Lean 4 soundness proof for the transact circuits
 
-A machine-checked development for `Transact(10, 2, 2)`, the 2-in/2-out multi-asset transact
-circuit. The top-level theorem holds for **any** assignment satisfying the modeled constraint
-system, not only those an honest prover produces.
+A machine-checked development for `Transact(DEPTH, N_IN, N_OUT)`, the multi-asset transact
+circuit, covering all three shapes the repository ships — `src/2x2.circom`, `src/2x3.circom`
+and `src/3x3.circom`. The top-level theorem holds for **any** assignment satisfying the
+modeled constraint system, not only those an honest prover produces.
 
 That distinction is the point. The test suite
 ([transact.test.ts](../src/test/transact.test.ts), [fuzz/](../src/test/fuzz/)) exercises the
@@ -43,7 +44,7 @@ Individually:
 |---|---|
 | `lake build` | elaborates and kernel-checks every proof; runs the axiom guard over every declaration |
 | `./scripts/check-axioms.sh` | trusted base still matches `expected/axioms.txt` |
-| `./scripts/dump-layout.sh` | public-input layout still matches `expected/layout-2x2.txt` |
+| `./scripts/dump-layout.sh` | public-input layouts still match `expected/layout-{2x2,2x3,3x3}.txt` |
 | `python3 scripts/check-prime.py` | discharges the two arithmetic axioms externally |
 
 CI runs the same set ([.github/workflows/lean.yml](../.github/workflows/lean.yml)).
@@ -58,9 +59,14 @@ assumptions recorded in a statement, not results — see
 
 | Theorem | Where | Statement |
 |---|---|---|
-| `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w` |
-| `transact2x2_sound` | `Circuit/Transact.lean` | the same for the deployed `Transact(10,2,2)` instance |
+| `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w`, for `N_IN ≤ 3` and `N_OUT ≤ 3` |
+| `transact2x2_sound` / `transact2x3_sound` / `transact3x3_sound` | `Circuit/Transact.lean` | the same for each deployed instance: `Transact(10,2,2)`, `Transact(10,2,3)`, `Transact(10,3,3)` |
 | `transact_binding` † | `Circuit/Transact.lean` | `TransactSat w → TxBinding w` |
+
+The `≤ 3` bound is not a property of the circuit — `PerAssetValueBalance` is written for
+arbitrary `N_IN` / `N_OUT`. It is the largest slot count for which the balance sums provably
+stay below `p` using `two_pow_66_lt_p` (`(3+1) · 2^64 = 2^66`), and it covers every shape the
+repository ships. A wider shape needs a wider bound in `Model/Field.lean` and nothing else.
 
 ### Value conservation
 
@@ -114,6 +120,13 @@ The load-bearing result, and the one with the smallest trusted base.
 | `transactSat_spend_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable by a transaction that actually **moves value** through a non-dummy slot |
 | `transactSat_twoAsset_satisfiable` | `Proofs/Completeness.lean` | …and by one moving **two distinct assets** with a non-zero public input |
 | `spentReal_witness` | `Proofs/Completeness.lean` | `SpentReal` is inhabited, so `spentNote_sound`'s `is_dummy = 0` case is reachable |
+
+All three satisfying assignments are built at the `2x2` shape. `transact2x3_sound` and
+`transact3x3_sound` are therefore proved but **not** shown non-vacuous: nothing here exhibits
+a satisfying assignment of `Transact(10,2,3)` or `Transact(10,3,3)`. Their hypotheses are
+believed satisfiable for the same reasons the `2x2` ones are — the constructions are
+shape-generic apart from the concrete slot arithmetic — but that is an expectation, not a
+theorem. See [What is not proved](#what-is-not-proved).
 
 ### Assignments with no satisfying witness
 
@@ -177,11 +190,16 @@ development may derive conservation from the point equation.
 * **Groth16 knowledge soundness.** The theorems concern R1CS satisfaction, not the on-chain
   verifier. Bridging that gap is a separate, much larger development.
 * **`tree_update_batch.circom`.** The deposit-binding defences C-1′ and C-1″ live there; only
-  the 2x2 half of deposit binding (`outputNote_cvDep_binds`) is covered.
-* **Under-constrainedness of the compiled R1CS.** The proofs concern the *modeled* system and
-  cannot show the 70k-constraint R1CS has no extra degrees of freedom. Running **Picus** or
-  **Ecne** on a fresh `build/2x2.r1cs` answers that question — hours of work, not weeks.
-  Recommended.
+  the transact half of deposit binding (`outputNote_cvDep_binds`) is covered.
+* **Non-vacuity at the `2x3` and `3x3` shapes.** Soundness is proved for all three deployed
+  shapes, but the three satisfying assignments in `Proofs/Completeness.lean` are all built at
+  `2x2`. Read literally, `transact2x3_sound` and `transact3x3_sound` could be vacuous.
+* **Layout parity against the SDK for `2x3` and `3x3`.** `dump-layout.sh` pins all three
+  layouts against Lean, but only `expected/layout-2x2.txt` is cross-checked against
+  `sdk/src/bundle/snark-compression.ts` (by `src/test/formal/layout_parity.test.ts`). The
+  other two links in that chain do not exist yet.
+* **Under-constrainedness of the compiled R1CS**, beyond what Picus establishes — see
+  [Under-constrainedness](#under-constrainedness-of-the-compiled-r1cs) below.
 * **Contract obligations.** Nullifier freshness, `z` being a genuine Fiat-Shamir challenge,
   and the `chain_id` / `recipient_address` checks are recorded in
   `Lelantos.ContractObligations` and assumed by nothing.
@@ -193,6 +211,39 @@ development may derive conservation from the point equation.
   advantage bound, which is a separate and much larger development. The containment is the
   point: `transact_sound`, conservation, the range checks and `PolyEval` are unaffected.
 * **The dangerous direction of transcription error** — see [FIDELITY.md](FIDELITY.md).
+
+## Under-constrainedness of the compiled R1CS
+
+These proofs are about `TransactSat`, a hand-written model. They say nothing about the R1CS
+`circom` actually emits — a compiler bug, or a template whose constraints the model reads
+more strictly than circom generates them, would be invisible to them. That is a different
+question, and it is answered by a different tool.
+
+[**Picus**](https://github.com/Veridise/Picus) (Veridise) decides it directly on the compiled
+artifact. Its default check is **weak safety**: for a fixed assignment to the circuit's
+declared inputs, is every output uniquely determined? A circuit failing it has a signal the
+prover may choose freely in a way that reaches `y`.
+
+| Artifact | Wires | Verdict |
+|---|---|---|
+| `--O0` build, as Picus recommends | 158,793 | **properly constrained** (exit `8` = `safe`) |
+| deployed `build/2x2.r1cs`, circom default `--O1` | 70,171 | **properly constrained** (exit `8` = `safe`) |
+
+Both verdicts came from the propagation phase alone — the `binary01`, `linear`, `basis2`,
+`aboz` and `bim` lemmas determined every signal without a single SMT query, which is what
+one expects from a circuit assembled entirely out of well-understood circomlib gadgets. Each
+run took under 90 seconds.
+
+Reproduce with `just picus` (needs Docker; the image is ~4.5 GB and is not part of CI).
+
+Two caveats worth stating precisely:
+
+* **Weak safety is not strong safety.** The runs above pin the *outputs*, not every
+  intermediate signal. A free intermediate that cannot reach `y` is harmless to a verifier
+  that only sees `(z, y)`, but it is not nothing. `just picus STRONG=1` asks the stronger
+  question and is markedly slower.
+* **Exit code `0` means *unknown*, not success.** Picus uses `8` for a guarantee and `9` for
+  a counterexample, so a naive `$?` check inverts the result. The recipe reports the code.
 
 ## Trusted base
 
@@ -207,7 +258,7 @@ flowchart LR
     GUARD --> ALLOW{{"axiom ∈ allow-list?"}}
     ALLOW -->|no| FAILB["build fails"]
 
-    SRC -->|"lake env lean Meta/Assumptions"| PRINT["axiom report<br/><i>33 headline theorems</i>"]
+    SRC -->|"lake env lean Meta/Assumptions"| PRINT["axiom report<br/><i>35 headline theorems</i>"]
     PRINT --> DIFF{{"diff expected/axioms.txt"}}
     DIFF -->|differs| FAILA["check-axioms.sh fails"]
 
@@ -285,7 +336,9 @@ lean/
       AxiomGuard           build-time axiom check over every declaration
   expected/                generated; regenerate with --update on the relevant script
     axioms.txt             expected output of Meta/Assumptions
-    layout-2x2.txt         expected output of Circuit/Witness :: layoutNames
+    layout-2x2.txt         expected output of Circuit/Witness :: layoutNames, one per shape
+    layout-2x3.txt
+    layout-3x3.txt
   scripts/                 check-all, check-axioms, dump-layout, check-prime
 ```
 

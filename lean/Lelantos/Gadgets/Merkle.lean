@@ -34,17 +34,17 @@ def slots (t : ℕ) (cur : F) (sib : ℕ → F) : ℕ → F := fun k =>
 
 /-- The constraint system of `MerkleLevel4` — `src/lib/merkle.circom:19-73`. -/
 structure MerkleLevel4Sat (cur : F) (sib : ℕ → F) (idx : F) (b s c : ℕ → F) (out : F) : Prop where
-  /-- `:25-34` — the one-hot selector for this level's path index. -/
+  /-- `:26-27` — the one-hot selector for this level's path index. -/
   selectors : PathIndexSelectorsSat idx b s
-  /-- `:42-47` — `c0 = s0·cur + (1-s0)·sib[0]`. -/
+  /-- `:35-39` — `c0 = s0·cur + (1-s0)·sib[0]`. -/
   c0_def : c 0 = s 0 * cur + (1 - s 0) * sib 0
-  /-- `:49-56` — `c1 = s1·cur + s0·sib[0] + (s2+s3)·sib[1]`. -/
+  /-- `:42-48` — `c1 = s1·cur + s0·sib[0] + (s2+s3)·sib[1]`. -/
   c1_def : c 1 = s 1 * cur + s 0 * sib 0 + (s 2 + s 3) * sib 1
-  /-- `:58-65` — `c2 = s2·cur + (s0+s1)·sib[1] + s3·sib[2]`. -/
+  /-- `:51-57` — `c2 = s2·cur + (s0+s1)·sib[1] + s3·sib[2]`. -/
   c2_def : c 2 = s 2 * cur + (s 0 + s 1) * sib 1 + s 3 * sib 2
-  /-- `:67-72` — `c3 = s3·cur + (1-s3)·sib[2]`. -/
+  /-- `:60-64` — `c3 = s3·cur + (1-s3)·sib[2]`. -/
   c3_def : c 3 = s 3 * cur + (1 - s 3) * sib 2
-  /-- `:74-80` — `out = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
+  /-- `:66-72` — `out = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
   out_def : out = merkleNode c
 
 /-- **Soundness of `MerkleLevel4`.** The slot arithmetic is insertion of `cur` at
@@ -76,12 +76,12 @@ theorem merkleLevel4_sound {cur idx out : F} {sib b s c : ℕ → F}
 `cur` is the chain of intermediate nodes, `pe` / `pi` the path elements and indices. -/
 structure MerkleRootSat (depth : ℕ) (leaf : F) (pe : ℕ → ℕ → F) (pi : ℕ → F)
     (b s c : ℕ → ℕ → F) (cur : ℕ → F) (root : F) : Prop where
-  /-- `:92` — the chain starts at the leaf. -/
+  /-- `:84` — the chain starts at the leaf. -/
   base : cur 0 = leaf
-  /-- `:94-102` — one `MerkleLevel4` per level. -/
+  /-- `:86-94` — one `MerkleLevel4` per level. -/
   level : ∀ d, d < depth →
     MerkleLevel4Sat (cur d) (pe d) (pi d) (b d) (s d) (c d) (cur (d + 1))
-  /-- `:104` — the root is the top of the chain. -/
+  /-- `:96` — the root is the top of the chain. -/
   top : root = cur depth
 
 /-- What it *means* for a leaf to sit under a root along a given path: the abstract
@@ -109,13 +109,13 @@ theorem merkleRoot_sound {depth : ℕ} {leaf root : F} {pe : ℕ → ℕ → F} 
 -/
 structure MerkleProofOrDummySat (depth : ℕ) (leaf : F) (pe : ℕ → ℕ → F) (pi : ℕ → F)
     (root isDummy diff computed : F) (b s c : ℕ → ℕ → F) (curChain : ℕ → F) : Prop where
-  /-- `:115` — the dummy flag is boolean. -/
+  /-- `:107` — the dummy flag is boolean. -/
   dummy_bit : IsBit isDummy
-  /-- `:117-124` — the recomputed root. -/
+  /-- `:109-116` — the recomputed root. -/
   recomputed : MerkleRootSat depth leaf pe pi b s c curChain computed
-  /-- `:127` — `diff <== mr.root - root`. -/
+  /-- `:119` — `diff <== mr.root - root`. -/
   diff_def : diff = computed - root
-  /-- `:128` — the difference is forced to zero for real slots only. -/
+  /-- `:120` — the difference is forced to zero for real slots only. -/
   matches_root : (1 - isDummy) * diff = 0
 
 /-- **Soundness of `MerkleProofOrDummy`.** A non-dummy slot proves membership.

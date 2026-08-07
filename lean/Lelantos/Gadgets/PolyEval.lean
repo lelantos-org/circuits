@@ -69,11 +69,11 @@ theorem hornerAcc_full (c : ℕ → F) (n : ℕ) (z : F) :
 /-- The constraint system of `PolyEval(n)` — `src/lib/poly_eval.circom:7-18`.
 `acc` is the intermediate signal array. -/
 structure PolyEvalSat (n : ℕ) (c : ℕ → F) (z : F) (acc : ℕ → F) (y : F) : Prop where
-  /-- `:12` — `acc[0] <== 0`. -/
+  /-- `:13` — `acc[0] <== 0`. -/
   base : acc 0 = 0
-  /-- `:13-15` — the Horner step, reindexed by `j = N - i`. -/
+  /-- `:14-16` — the Horner step, reindexed by `j = N - i`. -/
   step : ∀ j, j < n → acc (j + 1) = acc j * z + c (n - 1 - j)
-  /-- `:16` — `y <== acc[N]`. -/
+  /-- `:17` — `y <== acc[N]`. -/
   result : y = acc n
 
 theorem polyEvalSat_acc {n : ℕ} {c : ℕ → F} {z : F} {acc : ℕ → F} {y : F}
