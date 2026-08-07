@@ -1,8 +1,9 @@
 pragma circom 2.2.3;
 
-// Horner-form polynomial evaluation: y = Σ c[k]·z^k for k ∈ [0, N).
-// Compresses N logical PIs into (z, y); collision prob ≤ (N-1)/p.
-// Coefficient ordering MUST match contracts/src/lib/PubInputs.sol.
+// Horner evaluation y = Σ_{k<N} c[k]·z^k.
+// Compresses N logical public inputs into the pair (z, y); two distinct
+// coefficient vectors collide with probability at most (N-1)/p.
+// Coefficient ordering must match contracts/src/lib/PubInputs.sol.
 template PolyEval(N) {
     signal input coeffs[N];
     signal input z;
@@ -16,22 +17,21 @@ template PolyEval(N) {
     y <== acc[N];
 }
 
-// Transact PI compressor for arbitrary (N_IN, N_OUT).
-// Layout (must match a corresponding PubInputs.sol :: compress overload):
-//   [0]                                merkle_root
-//   [1 .. 1+N_IN)                      nullifier[N_IN]
-//   [1+N_IN .. 1+N_IN+N_OUT)           out_cm[N_OUT]
-//   [+0,+1,+2]                         public_asset_id, public_in, public_out
-//   next 2·N_IN                        in_cv[N_IN][2]  (row-major)
-//   next 2·N_OUT                       out_cv[N_OUT][2]
-//   next 4                             recipient, chain_id, payer, relayer
-//   next 2·N_OUT                       out_cv_dep[N_OUT][2]
-//   next 3·N_OUT                       (clueRx, clueRy, clueBits) per out
+// Transact public-input compressor for arbitrary (N_IN, N_OUT).
+// Layout, which must match the corresponding PubInputs.sol :: compress overload:
+//   [0]                        merkle_root
+//   [1 .. 1+N_IN)              nullifier[N_IN]
+//   [1+N_IN .. 1+N_IN+N_OUT)   out_cm[N_OUT]
+//   next 3                     public_asset_id, public_in, public_out
+//   next 2·N_IN                in_cv[N_IN][2]  (row-major)
+//   next 2·N_OUT               out_cv[N_OUT][2]
+//   next 4                     recipient, chain_id, payer, relayer
+//   next 2·N_OUT               out_cv_dep[N_OUT][2]
+//   next 3·N_OUT               (clue_Rx, clue_Ry, clue_bits) per output
 // Total = 8 + 3·N_IN + 8·N_OUT.
 template TransactCompressN(N_IN, N_OUT) {
-    var PI_BASE = 8 + 3 * N_IN + 5 * N_OUT;
     var PI_PER_OUT = 3;
-    var N = PI_BASE + PI_PER_OUT * N_OUT;
+    var N = 8 + 3 * N_IN + 5 * N_OUT + PI_PER_OUT * N_OUT;
 
     signal input z;
     signal input merkle_root;
@@ -98,8 +98,8 @@ template TransactCompressN(N_IN, N_OUT) {
     y <== pe.y;
 }
 
-// TreeUpdateBatch PI compressor: 4 + 9·MAX_N coeffs → (z, y).
-// Layout MUST match PubInputs.sol :: compress(TreeUpdateBatch).
+// TreeUpdateBatch public-input compressor: 4 + 9·MAX_N coefficients → (z, y).
+// Layout must match PubInputs.sol :: compress(TreeUpdateBatch).
 template BatchCompress(MAX_N) {
     var N = 4 + 9 * MAX_N;
 

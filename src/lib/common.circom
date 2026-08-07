@@ -4,8 +4,10 @@ include "../../node_modules/circomlib/circuits/poseidon.circom";
 include "../../node_modules/circomlib/circuits/bitify.circom";
 include "tags.circom";
 
-// path_index ∈ {0..3} → bits[0..1] (LSB-first) + one-hot s[k] = 1 iff k == path_index.
-//   s[0]=(1-b0)(1-b1), s[1]=b0(1-b1), s[2]=(1-b0)b1, s[3]=b0·b1.
+// Decompose path_index ∈ {0..3} into bits[0..1] (LSB-first) and the one-hot
+// selector s[k] = 1 iff k == path_index:
+//   s[0] = (1-b0)(1-b1), s[1] = b0(1-b1), s[2] = (1-b0)b1, s[3] = b0·b1.
+// Num2Bits(2) also range-checks path_index.
 template PathIndexSelectors() {
     signal input path_index;
     signal output bits[2];
@@ -24,8 +26,8 @@ template PathIndexSelectors() {
     s[3] <== bb;
 }
 
-// Empty-subtree hashes: zeros[0]=0, zeros[d+1]=Poseidon(TAG_MERKLE, zeros[d]×4).
-// TAG_MERKLE MUST match MerkleLevel4.
+// Empty-subtree hashes: zeros[0] = 0, zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] × 4).
+// TAG_MERKLE must match MerkleLevel4.
 template EmptySubtreeHashes(DEPTH) {
     signal output zeros[DEPTH + 1];
 

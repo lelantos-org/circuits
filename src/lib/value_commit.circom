@@ -6,9 +6,11 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 include "../../node_modules/circomlib/circuits/escalarmulany.circom";
 include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 
-// Baby-Jubjub value commitment: cv = value·gen + rcv·H.
-//   gen: HashToAssetGen output or public-bucket point.
-//   rcv: 253-bit blinder. H = Pedersen BASE[2], gen = BASE[0] (disjoint).
+// Baby-Jubjub value commitments: cv = value·gen + rcv·H.
+//   gen — HashToAssetGen output, or the transparent-bucket point.
+//   rcv — 253-bit blinder.
+// H is Pedersen BASE[2] and gen derives from BASE[0], so their images are
+// disjoint.
 
 function H_BASE_X() {
     return 5802099305472655231388284418920769829666717045250560929368476121199858275951;
@@ -17,8 +19,8 @@ function H_BASE_Y() {
     return 5980429700218124965372158798884772646841287887664001482443826541541529227896;
 }
 
-// Variable-base scalar mul: value·gen. Bits LSB-first from RangeCheck64.
-// value=0 → identity (0,1).
+// Variable-base scalar multiplication value·gen, bits LSB-first from
+// RangeCheck64. value = 0 yields the identity (0, 1).
 template ValueScalarMul() {
     signal input bits[64];
     signal input gen[2];
@@ -35,7 +37,7 @@ template ValueScalarMul() {
     out[1] <== mul.out[1];
 }
 
-// Fixed-base scalar mul: rcv·H, 253-bit scalar.
+// Fixed-base scalar multiplication rcv·H with a 253-bit scalar.
 template MulH() {
     signal input scalar;
     signal output out[2];
@@ -55,7 +57,7 @@ template MulH() {
     out[1] <== mul.out[1];
 }
 
-// cv = value·gen + rcv·H. rH exposed for PerAssetPointBalance.
+// cv = value·gen + rcv·H. rH is exposed for PerAssetPointBalance.
 template ValueCommit() {
     signal input bits[64];
     signal input gen[2];
@@ -85,7 +87,7 @@ template ValueCommit() {
     rH[1] <== rHmul.out[1];
 }
 
-// Chained Edwards point sum. PointSum(0) = identity (0,1).
+// Chained Edwards point sum. PointSum(0) is the identity (0, 1).
 template PointSum(N) {
     signal input pts[N][2];
     signal output out[2];

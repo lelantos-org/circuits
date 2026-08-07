@@ -2,13 +2,15 @@
 //   - per-pair leaf format leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
 //   - per-pair Pedersen aggregate (deposit mode) cv_dep_0 + cv_dep_1
 //                                = pair_public_in · V^pair_asset + rcv_total · H
+//   - per-leaf pad binding cv_dep_1 == rcv_dep_pad · H (C-1'' closure)
 //   - C-1 regression: cross-asset / value-inflation rejection
 //   - Padding zero constraints
 //
 // MAX_N = 8 ⇒ 16 leaves max (halved from prior 16). Tests stay at small
 // actual_count for runtime; one larger case verifies multiplex logic.
 
-import { Poseidon, Jubjub, MerkleTree, type Field, type Point } from "./helpers";
+import { expect } from "chai";
+import { Poseidon, Jubjub, MerkleTree, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./helpers";
 import { fiatShamirZ, hornerEval } from "@lelantos-org/sdk";
 import { loadCircuit, srcPath } from "./lib/circuit";
 import { treeUpdateBatchInputJson, flattenTreeUpdateBatch } from "./lib/inputs";
@@ -29,6 +31,7 @@ interface PairWitness {
     pairPublicIn: Field;
     isDeposit: 0 | 1;
     rcvTotal: Field;
+    rcvDepPad: Field;
 }
 
 function padToSlots<T>(real: T[], total: number, zero: T): T[] {
@@ -61,6 +64,9 @@ function buildPairWitness(opts: {
     const pairPublicIn = isDeposit === 1 ? val0 + val1 : 0n;
     const pairAsset = isDeposit === 1 ? asset : 0n;
     const rcvTotal = isDeposit === 1 ? rcvDep0 + rcvDep1 : 0n;
+    // Deposit pads (leaf 1) must commit to value 0 so cv_dep0 is pinned to
+    // pairPublicIn exactly; the circuit checks cv_dep1 == rcvDepPad·H.
+    const rcvDepPad = isDeposit === 1 ? rcvDep1 : 0n;
     return {
         cm0,
         cm1,
@@ -70,6 +76,7 @@ function buildPairWitness(opts: {
         pairPublicIn,
         isDeposit,
         rcvTotal,
+        rcvDepPad,
     };
 }
 
@@ -144,6 +151,7 @@ function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, pairs: PairWitne
     const pairPublicInPadded = padToSlots(pairs.map(p => p.pairPublicIn), MAX_N, 0n);
     const isDepositPadded = padToSlots(pairs.map(p => p.isDeposit as number), MAX_N, 0);
     const rcvTotalPadded = padToSlots(pairs.map(p => p.rcvTotal), MAX_N, 0n);
+    const rcvDepPadPadded = padToSlots(pairs.map(p => p.rcvDepPad), MAX_N, 0n);
 
     const coeffs = flattenTreeUpdateBatch({
         oldRoot,
@@ -170,6 +178,7 @@ function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, pairs: PairWitne
         pairPublicIn: pairPublicInPadded,
         isDeposit: isDepositPadded,
         rcvTotal: rcvTotalPadded,
+        rcvDepPad: rcvDepPadPadded,
         frontier,
         z,
         y,
@@ -308,8 +317,8 @@ describe("tree_update_batch", function () {
 
     it("honest 2-pair deposit batch passes", async () => {
         const pairs = [
-            simplePair({ J, P, val0: 11n, val1: 22n, isDeposit: 1, asset: 7n, pk: 0xaa1n }),
-            simplePair({ J, P, val0: 33n, val1: 44n, isDeposit: 1, asset: 7n, pk: 0xaa2n }),
+            simplePair({ J, P, val0: 33n, val1: 0n, isDeposit: 1, asset: 7n, pk: 0xaa1n }),
+            simplePair({ J, P, val0: 77n, val1: 0n, isDeposit: 1, asset: 7n, pk: 0xaa2n }),
         ];
         const w = buildHonest(P, J, 0, pairs);
         const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
@@ -319,7 +328,7 @@ describe("tree_update_batch", function () {
     it("honest full-batch (actual_count = MAX_N = 8) passes", async () => {
         const pairs: PairWitness[] = [];
         for (let i = 0; i < MAX_N; i++) {
-            pairs.push(simplePair({ J, P, val0: BigInt(100 + i), val1: BigInt(200 + i), isDeposit: 1, pk: BigInt(0xbe00 + i) }));
+            pairs.push(simplePair({ J, P, val0: BigInt(300 + 2 * i), val1: 0n, isDeposit: 1, pk: BigInt(0xbe00 + i) }));
         }
         const w = buildHonest(P, J, 0, pairs);
         const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
@@ -342,8 +351,8 @@ describe("tree_update_batch", function () {
         // (digits [1, 3, 0, ...]); inserts land at indices 13..16, crossing
         // a level-1 carry.
         const pairs = [
-            simplePair({ J, P, val0: 1n, val1: 2n, isDeposit: 1, pk: 0xd01n }),
-            simplePair({ J, P, val0: 3n, val1: 4n, isDeposit: 1, pk: 0xd02n }),
+            simplePair({ J, P, val0: 3n, val1: 0n, isDeposit: 1, pk: 0xd01n }),
+            simplePair({ J, P, val0: 7n, val1: 0n, isDeposit: 1, pk: 0xd02n }),
         ];
         const w = buildHonest(P, J, 13, pairs);
         const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
@@ -453,10 +462,58 @@ describe("tree_update_batch", function () {
         // Honest path: cv_dep_0 + cv_dep_1 = pair_public_in · V^asset + rcv_total · H.
         // Tamper: bump pair_public_in to a smaller-than-real value while
         // keeping cv_deps real ⇒ aggregate equality fails.
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 100n, val1: 50n, isDeposit: 1 })]);
+        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 150n, val1: 0n, isDeposit: 1 })]);
         // Honest pair_public_in == 100+50 = 150. Inflate the claim to 200.
         w.pairPublicIn[0] = 200n;
         rebindFiatShamir(w);
+        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+    });
+
+    it("FAILS on C-1'' per-leaf inflation: pair sum honest, split forged", async () => {
+        // The pair aggregate alone fixes only Σvalue mod the subgroup order.
+        // Attacker deposits pair_public_in = 1 but loads leaf 0 with 2^63 and
+        // lets leaf 1 absorb (1 - 2^63) mod l — an unspendable leaf they
+        // abandon — walking away with a valid 2^63 note. The pad-leaf
+        // constraint (cv_dep1 == rcv_dep_pad·H) rejects this.
+        const asset = 7n;
+        const assetGen = J.hashToAssetGen(asset);
+        const honest = simplePair({ J, P, val0: 1n, isDeposit: 1, asset });
+
+        const stolen = 1n << 63n;
+        const r0 = 5n;
+        const r1 = honest.rcvTotal - r0;
+        // cv_dep0 opens to 2^63 (in range, spendable); cv_dep1 takes the
+        // negative remainder so the pair sum is untouched.
+        const fakeCvDep0 = J.valueCommit(stolen, assetGen, r0);
+        const fakeCvDep1 = J.valueCommit(
+            (BABYJUB_SUBGROUP_ORDER + honest.pairPublicIn - stolen) % BABYJUB_SUBGROUP_ORDER,
+            assetGen,
+            r1,
+        );
+        const tampered: PairWitness = { ...honest, cvDep0: fakeCvDep0, cvDep1: fakeCvDep1 };
+
+        // Sanity: the old aggregate-only check is still satisfied by this split,
+        // i.e. the pad-leaf constraint is what does the rejecting below.
+        const sum = J.addPoint(fakeCvDep0, fakeCvDep1);
+        const expected = J.valueCommit(honest.pairPublicIn, assetGen, honest.rcvTotal);
+        expect(sum[0]).to.equal(expected[0]);
+        expect(sum[1]).to.equal(expected[1]);
+
+        const w = buildHonest(P, J, 0, [tampered]);
+        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+    });
+
+    it("FAILS when a deposit pad leaf carries non-zero value", async () => {
+        // Splitting a deposit across both leaves is no longer allowed: leaf 1
+        // must be a value-0 commitment so leaf 0 is pinned to pair_public_in.
+        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 100n, val1: 50n, isDeposit: 1 })]);
+        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+    });
+
+    it("FAILS when rcv_dep_pad is tampered (pad-leaf binding)", async () => {
+        // rcv_dep_pad is not in PolyEval ⇒ Fiat-Shamir unchanged.
+        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 9n, isDeposit: 1 })]);
+        w.rcvDepPad[0] = w.rcvDepPad[0] + 1n;
         await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
     });
 
@@ -464,7 +521,7 @@ describe("tree_update_batch", function () {
         // Honest: cv_dep_0 + cv_dep_1 = pair_public_in·V + rcv_total·H.
         // Tamper rcv_total ⇒ rhs shifts by Δ·H ≠ 0 ⇒ point equality fails.
         // rcv_total is NOT in PolyEval so Fiat-Shamir is unchanged.
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 100n, val1: 50n, isDeposit: 1 })]);
+        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 150n, val1: 0n, isDeposit: 1 })]);
         w.rcvTotal[0] = w.rcvTotal[0] + 1n;
         await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
     });

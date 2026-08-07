@@ -4,9 +4,10 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 include "../../node_modules/circomlib/circuits/pedersen.circom";
 include "tags.circom";
 
-// V^t = Pedersen(TAG_ASSET || asset_id_LE_64) on Baby-Jubjub.
-// Bits LSB-first: [0..7]=TAG_ASSET, [8..71]=asset_id. Uses BASE[0]; H uses
-// BASE[2] (disjoint images). Matches circomlibjs pedersen.hash([TAG_ASSET, ...assetId_LE_8]).
+// Per-asset generator V^t = Pedersen(TAG_ASSET || asset_id_LE_64) on Baby-Jubjub.
+// Bits are LSB-first: [0..7] = TAG_ASSET, [8..71] = asset_id. Uses BASE[0], while
+// the blinding base H uses BASE[2], so their images are disjoint.
+// Equivalent to circomlibjs pedersen.hash([TAG_ASSET, ...assetId_LE_8]).
 template HashToAssetGen() {
     signal input asset_id;
     signal output gen[2];

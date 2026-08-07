@@ -43,6 +43,7 @@ export interface TreeUpdateBatchArgs {
     pairPublicIn: Field[];
     isDeposit: (number | bigint)[];
     rcvTotal: Field[];
+    rcvDepPad: Field[];
     frontier: Field[][];
     z: Field;
 }
@@ -60,6 +61,7 @@ export function treeUpdateBatchInputJson(a: TreeUpdateBatchArgs) {
         pair_public_in: a.pairPublicIn.map(p => p.toString()),
         is_deposit: a.isDeposit.map(d => d.toString()),
         rcv_total: a.rcvTotal.map(r => r.toString()),
+        rcv_dep_pad: a.rcvDepPad.map(r => r.toString()),
         frontier_in: a.frontier.map(lvl => lvl.map(s => s.toString())),
     };
 }

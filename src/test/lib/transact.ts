@@ -10,6 +10,7 @@ import {
     derivePk,
     commit,
     nullifier,
+    buildRho,
     toCircomInput,
     FMD_DEFAULT_GAMMA,
     fmdFlag,
@@ -87,7 +88,7 @@ export class TxBuilder {
         const idx = tree.insert(leaf);
         return {
             ...n, nsk, cm,
-            nf: nullifier(this.P, nsk, n.rho),
+            nf: nullifier(this.P, nsk, n.rho, cm),
             leafIndex: idx,
             pathElements: [], pathIndices: [], isDummy: false,
         };
@@ -100,10 +101,16 @@ export class TxBuilder {
 
     // Build the JSON object that the circuit consumes. The public asset
     // generator is derived in-circuit from publicAssetId.
+    //
+    // Output rho is forced to the Orchard-style derivation the circuit now
+    // enforces: rho = Poseidon(TAG_RHO, nullifier[0], out_index). Any note.rho
+    // the caller passed is overridden (matches the SDK bundle builders).
     build(args: TxBuildArgs): any {
+        const nf0 = args.inputs[0].nf;
+        const outputs = args.outputs.map((o, j) => ({ ...o, rho: buildRho(this.P, nf0, j) }));
         const outputClues =
-            args.outputClues ?? args.outputs.map(() => this.nextClue());
-        return toCircomInput(this.P, this.J, { ...args, outputClues });
+            args.outputClues ?? outputs.map(() => this.nextClue());
+        return toCircomInput(this.P, this.J, { ...args, outputs, outputClues });
     }
 
     newTree(): MerkleTree {

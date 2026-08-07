@@ -16,12 +16,13 @@ import {
     buildNoteCommitment,
     buildNullifier,
     buildNullifierFromNsk,
+    buildRho,
     MerkleTree,
     type Field,
     type Point,
 } from "@lelantos-org/sdk/crypto";
 
-export { Poseidon, Jubjub, H_BASE, deriveIvk, derivePk, derivePkFromIvk, deriveNk, buildNullifier, MerkleTree };
+export { Poseidon, Jubjub, H_BASE, deriveIvk, derivePk, derivePkFromIvk, deriveNk, buildNullifier, buildRho, MerkleTree };
 export type { Field, Point };
 
 export {
@@ -46,7 +47,9 @@ export {
 export function commit(P: Poseidon, n: { asset: Field; value: Field; pk: Field; rho: Field; rcm: Field }): Field {
     return buildNoteCommitment(P, n);
 }
-export function nullifier(P: Poseidon, nsk: Field, rho: Field): Field {
-    return buildNullifierFromNsk(P, nsk, rho);
+// nf = Poseidon(TAG_NF, nk, rho, cm) — cm is in the preimage so a rho
+// collision alone cannot brick a note (see Nullifier in lib/note.circom).
+export function nullifier(P: Poseidon, nsk: Field, rho: Field, cm: Field): Field {
+    return buildNullifierFromNsk(P, nsk, rho, cm);
 }
 

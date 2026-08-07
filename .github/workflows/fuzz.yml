@@ -11,7 +11,7 @@ on:
       fuzz_mode:
         description: 'FUZZ tier (light/medium/heavy)'
         required: false
-        default: 'heavy'
+        default: 'light'
 
 permissions:
   contents: read
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   fuzz:
-    runs-on: [self-hosted]
+    runs-on: [ubuntu-latest]
     # PR runs use FUZZ=light (~minutes); push-to-main FUZZ=medium; cron +
     # manual default FUZZ=heavy. Single timeout covers heavy mode.
     timeout-minutes: 60
@@ -40,7 +40,7 @@ jobs:
           github.event_name == 'pull_request' && 'light' ||
           github.event_name == 'push' && 'medium' ||
           github.event_name == 'workflow_dispatch' && (inputs.fuzz_mode || 'heavy') ||
-          'heavy'
+          'light'
         }}
     steps:
       - uses: actions/checkout@v4

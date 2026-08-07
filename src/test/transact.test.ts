@@ -1,6 +1,6 @@
 import { expect } from "chai";
 
-import { dummyInputAt, dummyOutput, SpentNote, Note, Field, commit, nullifier } from "./helpers";
+import { dummyInputAt, dummyOutput, SpentNote, Note, Field, commit, nullifier, buildRho, deriveNk } from "./helpers";
 import { loadCircuit, srcPath } from "./lib/circuit";
 import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "./lib/transact";
 import { expectWitnessFails } from "./lib/expect";
@@ -126,7 +126,7 @@ describe("transact_2x2", function () {
         const proof = tree.proof(idx);
         const tampered: SpentNote = {
             ...n, nsk: wrongNsk, cm,
-            nf: nullifier(tx.P, wrongNsk, n.rho),
+            nf: nullifier(tx.P, wrongNsk, n.rho, cm),
             leafIndex: idx, pathElements: proof.pathElements, pathIndices: proof.pathIndices, isDummy: false,
         };
         const outA = tx.note(100n, realNsk, 9n);
@@ -212,7 +212,7 @@ describe("transact_2x2", function () {
         await expectWitnessFails(circuit, input);
     });
 
-    it("FAILS when nullifier doesn't match Poseidon(TAG_NF, nk, rho) for dummy slot", async () => {
+    it("FAILS when nullifier doesn't match Poseidon(TAG_NF, nk, rho, cm) for dummy slot", async () => {
         const tree = tx.newTree();
         const root = tree.root();
         const dA = dummyInputAt(tx.P, DEPTH, 0n);
@@ -368,6 +368,9 @@ describe("transact_2x2", function () {
         dB.pk = 0xbadc0den;
         dB.rcm = 0xdeadn;
         dB.pathElements[0][0] = 12345n;
+        // nf binds cm, and cm covers pk/rcm — re-seal after mutating them.
+        dB.cm = commit(tx.P, dB);
+        dB.nf = nullifier(tx.P, dB.nsk, dB.rho, dB.cm);
 
         const outA = tx.note(100n, aliceNsk, 9n);
         const outB = tx.note(0n, aliceNsk, 11n);
@@ -461,6 +464,9 @@ describe("transact_2x2", function () {
         // DummyZeroValue; gen is computed but multiplied by 0 → identity.
         dB.asset = 12345n;
         dB.rcv = 0n;
+        // asset feeds packed_av inside cm, and nf binds cm — re-seal.
+        dB.cm = commit(tx.P, dB);
+        dB.nf = nullifier(tx.P, dB.nsk, dB.rho, dB.cm);
 
         const outA = tx.note(100n, aliceNsk, 9n);
         const outB = tx.note(0n, aliceNsk, 11n);
@@ -781,7 +787,7 @@ describe("transact_2x2", function () {
 
     it("FAILS when nullifier[0] is tampered directly (nf binding constraint)", async () => {
         // nsk and rho are correct; only the public nullifier signal is forged.
-        // Circuit recomputes nf = Poseidon(TAG_NF, nk, rho) and checks equality.
+        // Circuit recomputes nf = Poseidon(TAG_NF, nk, rho, cm) and checks equality.
         await expectFailsAfterTamper(input => {
             const orig = BigInt((input.nullifier as string[])[0]);
             (input.nullifier as string[])[0] = (orig + 1n).toString();
@@ -834,5 +840,154 @@ describe("transact_2x2", function () {
             const orig = BigInt((input.out_cv_dep as string[][])[1][1]);
             (input.out_cv_dep as string[][])[1][1] = (orig + 1n).toString();
         });
+    });
+
+    // ===== F2: cross-asset cancellation (asset-generator DL) =====
+
+    it("FAILS on cross-asset cancellation V^1 + V^3 == 2·V^2", async () => {
+        // HashToAssetGen is circomlib Pedersen over 72 bits ⇒ a single segment
+        // ⇒ V^a = m(a)·BASE[0] for a publicly computable m(·). m is ~2^85 and
+        // affine in the low nibbles of asset_id, so m(1) + m(3) == 2·m(2)
+        // exactly and the Edwards point balance is satisfied by spending X of
+        // asset 1 plus X of asset 3 to mint 2X of asset 2. PerAssetValueBalance
+        // rejects it: assets are compared as field elements, not as points.
+        const nsk = 11n;
+        const X = 1000n;
+
+        const tree = tx.newTree();
+        let inA = tx.insert(tree, tx.note(X, nsk, 1n, 1n), nsk);
+        let inB = tx.insert(tree, tx.note(X, nsk, 2n, 3n), nsk);
+        const root = tree.root();
+        inA = tx.finalize(tree, inA);
+        inB = tx.finalize(tree, inB);
+
+        // Sanity: the point balance really is satisfied by this forgery.
+        const J = tx.J;
+        const lhs = J.addPoint(
+            J.mulPointEscalar(J.hashToAssetGen(1n), X),
+            J.mulPointEscalar(J.hashToAssetGen(3n), X),
+        );
+        const rhs = J.mulPointEscalar(J.hashToAssetGen(2n), 2n * X);
+        expect(lhs[0]).to.equal(rhs[0]);
+        expect(lhs[1]).to.equal(rhs[1]);
+
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB],
+            outputs: [tx.note(2n * X, nsk, 9n, 2n), tx.note(0n, nsk, 11n, 2n)],
+            merkleRoot: root,
+        });
+        await expectWitnessFails(circuit, input);
+    });
+
+    it("FAILS when an output asset is swapped for one of equal total value", async () => {
+        // Straight asset substitution: same numbers, wrong colour.
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB],
+            outputs: [tx.note(150n, nsk, 9n, ASSET_B), tx.note(0n, nsk, 11n, ASSET)],
+            merkleRoot: root,
+        });
+        await expectWitnessFails(circuit, input);
+    });
+
+    it("multi-asset: two assets conserved independently", async () => {
+        // Per-asset conservation, not aggregate: 100 of ASSET in → 100 of
+        // ASSET out, 50 of ASSET_B in → 50 of ASSET_B out.
+        const nsk = 11n;
+        const tree = tx.newTree();
+        let inA = tx.insert(tree, tx.note(100n, nsk, 1n, ASSET), nsk);
+        let inB = tx.insert(tree, tx.note(50n, nsk, 2n, ASSET_B), nsk);
+        const root = tree.root();
+        inA = tx.finalize(tree, inA);
+        inB = tx.finalize(tree, inB);
+
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB],
+            outputs: [tx.note(100n, nsk, 9n, ASSET), tx.note(50n, nsk, 11n, ASSET_B)],
+            merkleRoot: root,
+        });
+        const w = await circuit.calculateWitness(input, true);
+        await circuit.checkConstraints(w);
+    });
+
+    // ===== F3: nullifier binds cm (faerie-gold defense, all inserters) =====
+
+    it("nullifier separates two notes that share (nk, rho)", () => {
+        // The faerie-gold shape: a dust note planted at a victim's pk reusing
+        // the rho of a note they already hold. rho for transact outputs is
+        // publicly derivable from nullifier[0], and the deposit path
+        // (tree_update_batch's cms[]) constrains no rho at all, so rho alone
+        // is not a safe nullifier key. cm in the preimage separates them.
+        const nsk = 11n;
+        const rho = 42n;
+        const real = tx.note(1000n, nsk, rho);
+        const dust = tx.note(1n, nsk, rho);
+        const cmReal = commit(tx.P, real);
+        const cmDust = commit(tx.P, dust);
+        expect(cmReal).to.not.equal(cmDust);
+        expect(nullifier(tx.P, nsk, rho, cmReal)).to.not.equal(
+            nullifier(tx.P, nsk, rho, cmDust),
+        );
+    });
+
+    it("FAILS when nullifier omits cm from the preimage", async () => {
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        // Pre-fix derivation: Poseidon(TAG_NF, nk, rho), no cm.
+        inA.nf = tx.P.hash([2n, deriveNk(tx.P, nsk), inA.rho]);
+
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB],
+            outputs: [tx.note(75n, nsk, 9n), tx.note(75n, nsk, 11n)],
+            merkleRoot: root,
+        });
+        await expectWitnessFails(circuit, input);
+    });
+
+    // ===== F1: output rho uniqueness (faerie-gold defense) =====
+
+    it("output rho is bound to Poseidon(TAG_RHO, nullifier[0], out_index)", async () => {
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const outA = tx.note(75n, nsk, 9n);
+        const outB = tx.note(75n, nsk, 11n);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
+        });
+        // build() overrides note.rho with the Orchard-style derivation.
+        const nf0 = inA.nf;
+        expect((input.out_rho as string[])[0]).to.equal(buildRho(tx.P, nf0, 0).toString());
+        expect((input.out_rho as string[])[1]).to.equal(buildRho(tx.P, nf0, 1).toString());
+        const w = await circuit.calculateWitness(input, true);
+        await circuit.checkConstraints(w);
+    });
+
+    it("FAILS (faerie-gold) when two outputs share a rho, even with cm rebound", async () => {
+        // Force both outputs to the SAME rho and recompute out_cm[1] so the cm
+        // binding still passes — isolating the new DeriveRho equality constraint,
+        // which rejects because out_rho[1] != Poseidon(TAG_RHO, nullifier[0], 1).
+        const nsk = 11n;
+        const { root, inA, inB } = twoRealInputs([100n, 50n], nsk);
+        const outA = tx.note(75n, nsk, 9n);
+        const outB = tx.note(75n, nsk, 11n);
+        const input = tx.build({
+            publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+            inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
+        });
+        const sharedRho = (input.out_rho as string[])[0];
+        (input.out_rho as string[])[1] = sharedRho;
+        // Rebind out_cm[1] to the shared rho so cm binding is not what fails.
+        // cv / cv_dep are rho-independent, so only DeriveRho can reject here.
+        (input.out_cm as string[])[1] = commit(tx.P, {
+            asset: outB.asset, value: outB.value, pk: outB.pk,
+            rho: BigInt(sharedRho), rcm: outB.rcm,
+        }).toString();
+        await expectWitnessFails(circuit, input);
     });
 });

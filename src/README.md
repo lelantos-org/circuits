@@ -22,6 +22,19 @@ as Edwards-point equality across the spent and output bundles.
 
 ---
 
+> **Machine-checked proofs.** Several arguments in this document are formalised in Lean 4
+> under [`formal/`](../formal/README.md) — notably the candidate-set argument of §6
+> (`perAssetValueBalance_all_assets`), its no-wrap lift to integers
+> (`perAssetValueBalance_nat`), the Schwartz–Zippel binding of §2
+> (`polyEval_binding`), and the faerie-gold defence of §7 (`nullifier_binds_cm`).
+> The known-discrete-log weakness of §5 is formalised too — as a *negative* result,
+> `pointBalance_not_sound`, so that no one can re-derive conservation from the Edwards
+> point balance. See [`formal/README.md`](../formal/README.md) for what is and is not
+> covered, and [`formal/FIDELITY.md`](../formal/FIDELITY.md) for how faithfully the Lean
+> model tracks this source.
+
+---
+
 ## 1. Threat model and security goals
 
 The circuit, together with the on-chain contract obligations in §10,
@@ -31,13 +44,18 @@ enforces the following properties for every accepted transaction:
   hierarchy `nsk → ivk → pk` whose `pk` is bound inside the note
   commitment.
 - **No double spend.** Every spent slot — real or padding — emits a
-  Poseidon nullifier `nf = Poseidon(TAG_NF, nk, rho)` with
+  Poseidon nullifier `nf = Poseidon(TAG_NF, nk, rho, cm)` with
   `nk = Poseidon(TAG_NK, nsk)`. The contract rejects collisions with
-  the global `spent` set.
+  the global `spent` set. `cm` is in the preimage so the nullifier
+  identifies the exact note: two notes sharing `(nk, rho)` no longer
+  share a nullifier, which is what blocks faerie-gold griefing (§7).
 - **Per-asset value conservation.** For every asset class, the sum of
   inputs (shielded plus the transparent bucket) equals the sum of
-  outputs. Cross-asset cancellation requires breaking the discrete log
-  of the Pedersen-derived generators.
+  outputs. Enforced by `PerAssetValueBalance` as explicit integer
+  arithmetic over asset ids compared as field elements — **no**
+  group-theoretic assumption. Do not rely on the Edwards point balance
+  for this: the Pedersen asset generators share one base and have
+  publicly computable discrete logs (§5).
 - **Recipient binding.** `recipient_address` and `chain_id` are bound
   through the `PolyEval` Fiat-Shamir digest `(z, y)` checked by
   Groth16; a relayer cannot rewrite the withdrawal target or replay
@@ -49,8 +67,11 @@ enforces the following properties for every accepted transaction:
 - **Deposit binding.** For every deposit-mode pair in
   `tree_update_batch`, the Pedersen aggregate
   `cv_dep[2i] + cv_dep[2i+1] == pair_public_in[i] · V^pair_asset[i] +
-  rcv_total[i] · H` forces both leaves in the pair to commit to the
-  declared `(pair_asset, pair_public_in)` total. Each spend of those
+  rcv_total[i] · H`, **together with** the pad-leaf constraint
+  `cv_dep[2i+1] == rcv_dep_pad[i] · H`, pins each leaf individually:
+  leaf `2i` to exactly `pair_public_in` units and leaf `2i+1` to zero.
+  The aggregate alone would fix only `Σvalue` mod the subgroup order
+  (§14). Each spend of those
   leaves later recomputes the same `cv_dep` from `(asset, value,
   rcv_dep)`, so substituting `(asset, value)` at spend time is
   infeasible.
@@ -152,8 +173,18 @@ Soundness: any tampering with `coeffs[k]` changes `y` for all but at
 most `N-1` values of `z` (Schwartz–Zippel over the BN254 scalar field;
 collision probability `≤ (N-1) / r ≈ 2^-249`). The contract MUST
 derive `z` from a Fiat-Shamir transcript over the full flattened
-vector after canonicalising every slot to `uint256`; sampling `z`
-independently of the slots breaks the binding.
+vector; sampling `z` independently of the slots breaks the binding
+completely (a prover free to choose `z` picks a forged PI vector and
+solves `forged(z) - real(z) = 0` for `z`).
+
+The contract MUST also **reject any slot that is not already reduced
+mod `r`**, not merely reduce it while compressing. `compress()` works
+in `addmod`/`mulmod`, so `v` and `v + r` produce the same `y`: without
+an explicit `slot < r` check every PI is malleable after the fact.
+That matters most for the unconstrained clue slots (`out_clue_Rx`,
+`out_clue_Ry`, `out_clue_bits`) — anyone relaying the transaction
+could mutate the emitted clue while keeping the proof valid, leaving
+the recipient unable to detect their own note.
 
 The Solidity verifier exported via `snarkjs zkey export
 solidityverifier` exposes `IC0`, `IC1`, `IC2` and a
@@ -249,6 +280,21 @@ from any other Pedersen call sharing Baby-Jubjub. 72 bits → 1 Pedersen
 segment (`BASE[0]`); the `H` base used by `ValueCommit` is `BASE[2]`,
 outside the image of the 72-bit `HashToAssetGen`.
 
+> **The asset generators are NOT independent.** Because 72 bits fit in
+> a single Pedersen segment, `V^a = m(a) · BASE[0]` where `m(a)` is the
+> signed-4-bit-window multiplier — an integer anyone can compute from
+> `a`. All asset generators therefore live in the *same* prime-order
+> group with *known* relative discrete logs. `m(·)` is only ~2^85 and
+> is affine in the low nibbles of `asset_id`, so exact relations are
+> trivial to find; e.g. `V^1 + V^3 == 2·V^2`. Consequently the Edwards
+> point balance alone is satisfied by spending `X` of asset 1 plus `X`
+> of asset 3 to mint `2X` of asset 2. Value conservation is enforced by
+> `PerAssetValueBalance` instead (§6); the point balance is retained
+> only as defense in depth. `H = BASE[2]` is unaffected — blinding is
+> still sound. Replacing this with a real hash-to-curve (unknown DL)
+> would let the point balance stand on its own again, but requires a
+> new ceremony and an SDK/WASM mirror.
+
 The SDK mirror in [`sdk/src/crypto/jubjub.ts`](../../sdk/src/crypto/jubjub.ts)
 passes the 9-byte buffer `[TAG_ASSET, ...asset_id_LE_8]` to
 `circomlibjs.pedersen.hash`, producing the same point byte-for-byte.
@@ -281,7 +327,24 @@ exposes the `rH = rcv · H` component so balance can sum points;
 collapsing it to a scalar `Σrcv_in − Σrcv_out` would wrap into 254 bits
 when outputs exceed inputs and break a 253-bit decomposition.
 
-Per-asset point balance, equivalent to per-asset value conservation:
+**Value conservation (binding check).** `PerAssetValueBalance` checks,
+for every asset id `c` appearing anywhere in the transaction:
+
+```
+Σ_i in_value[i]·[in_asset[i] == c]  + public_in ·[public_asset_id == c]
+  == Σ_j out_value[j]·[out_asset[j] == c] + public_out·[public_asset_id == c]
+```
+
+Candidates are `{in_asset[*], out_asset[*], public_asset_id}`; any
+asset outside that set contributes zero to both sides, so covering the
+candidates covers every asset present. Assets are compared as field
+elements via `IsEqual`, values are 64-bit with at most `N_IN + 1` terms
+per side, so the sums stay far below `r` — exact integer arithmetic, no
+modular wrap, and **no group-theoretic assumption**. Dummy inputs carry
+`value = 0` (`DummyZeroValue`) and are neutral whatever `asset_id` they
+declare. Cost ≈ 40 constraints per candidate.
+
+**Per-asset point balance (defense in depth).**
 
 ```
 Σ in_cv  + public_in · V^pub  + Σ out_rH
@@ -292,7 +355,11 @@ Per-asset point balance, equivalent to per-asset value conservation:
 `V^pub` is derived in-circuit as `HashToAssetGen(public_asset_id)`.
 The Pedersen image lies in the prime-order subgroup by construction,
 so off-curve / small-order attacks are infeasible without breaking
-Pedersen.
+Pedersen. This equation is kept because every honest transaction
+satisfies it and it keeps `cv` a meaningful on-chain value commitment,
+but it does **not** imply per-asset conservation on its own — the asset
+generators are known multiples of a single base (§5), so cross-asset
+cancellation is easy. Never treat it as the conservation guarantee.
 
 ---
 
@@ -304,7 +371,7 @@ nsk  (spend authority)
  │    └─ pk  = Poseidon(TAG_PK, ivk)      (bound in note cm)
  └─ nk  = Poseidon(TAG_NK, nsk)         (nullifier-deriving key; FVK)
 
-nf  = Poseidon(TAG_NF, nk, rho)
+nf  = Poseidon(TAG_NF, nk, rho, cm)
 dk  = Poseidon(TAG_DK, ivk)              (off-circuit; FMD)
 ```
 
@@ -314,11 +381,24 @@ is required to satisfy the in-circuit `pk_check` derived via `ivk`,
 and Poseidon is one-way so neither `ivk` nor `nk` reveals `nsk`.
 
 Every spent slot — real or dummy — constrains
-`nullifier[i] === Poseidon(TAG_NF, nk, rho)` where `nk` is derived
-in-circuit from the prover-supplied `nsk`. Dummies use prover-chosen
+`nullifier[i] === Poseidon(TAG_NF, nk, rho, cm)` where `nk` is derived
+in-circuit from the prover-supplied `nsk` and `cm` is the commitment
+`SpentNote` recomputes from the same witness. Dummies use prover-chosen
 private `(nsk, rho)` so their public nullifier is indistinguishable
 from a real spend, and the contract inserts every nullifier
 unconditionally (no sentinel skip).
+
+**Why `cm` is in the preimage (faerie gold).** Keyed on `(nk, rho)`
+alone, two notes sharing a `rho` share a nullifier, and spending
+either permanently bricks the other. That is reachable: output `rho`
+is `Poseidon(TAG_RHO, nullifier[0], j)` and `nullifier[0]` is a public
+input, so every output note's `rho` is publicly computable; and the
+deposit path supplies `cms[]` to `tree_update_batch` with no rho
+constraint and no SNARK, so an attacker can plant a dust note at a
+victim's `pk` reusing an existing `rho`, delivered through the normal
+deposit FMD clue + ciphertext. Binding `cm` closes this for **every**
+inserter rather than relying on each one deriving `rho` correctly;
+`DeriveRho` (§) remains as the transact-path defense.
 
 ---
 
@@ -386,9 +466,13 @@ Constraints that hold regardless of asset mix:
 
 - `RangeCheck64` on every private `value`.
 - Real notes reject `asset_id == 0`.
-- `cv` is bound to `(asset_id, value, rcv)`; `cv`s are summed as
-  Edwards points so distinct assets — living in distinct subgroups —
-  cannot cancel.
+- `cv` is bound to `(asset_id, value, rcv)`. (Historic note: an
+  earlier version of this document claimed distinct assets "live in
+  distinct subgroups" so their `cv`s cannot cancel. That is false —
+  see §5 — which is why conservation is enforced arithmetically by
+  `PerAssetValueBalance` and not by the point sum.)
+- `in_asset` / `out_asset` / `public_asset_id` are compared as field
+  elements, so an asset id can only cancel against itself.
 - `cv_dep` is bound to `(asset_id, value, rcv_dep)` and pinned into
   the Merkle leaf hash, so the deposit-anchored asset/value cannot
   drift from one spend to the next.
@@ -419,6 +503,11 @@ verifier:
    flat vector, and compute `y = Σ coeffs[k]·z^k mod r`. Pass
    `[z, y]` to `Verifier.verifyProof`. `z` MUST be a deterministic
    function of every slot.
+0a. **Canonical slots.** `require(slot < r)` for *every* one of the
+   `8 + 3·N_IN + 8·N_OUT` logical PIs before compressing. `compress()`
+   is modular, so `v` and `v + r` yield the same `y`; without this
+   check any slot — in particular the unconstrained `out_clue_*` — can
+   be mutated in calldata while the proof still verifies.
 1. `require(chainId == block.chainid)`.
 2. `require(public_in < 2**64 && public_out < 2**64)`.
 3. `require(public_asset_id < 2**64)` (or whatever the registry
@@ -454,7 +543,7 @@ compatibility with prior proofs and with test helpers.
 | Function | Value | Use | Arity |
 |---|---|---|---|
 | `TAG_CM()` | 1 | Reserved. `NoteCommitment` uses (asset,value)-packing + arity 4 instead. | — |
-| `TAG_NF()` | 2 | `nf = Poseidon(TAG_NF, nk, rho)` | 3 |
+| `TAG_NF()` | 2 | `nf = Poseidon(TAG_NF, nk, rho, cm)` | 4 |
 | `TAG_PK()` | 3 | `pk = Poseidon(TAG_PK, ivk)` | 2 |
 | `TAG_IVK()` | 4 | `ivk = Poseidon(TAG_IVK, nsk)` | 2 |
 | `TAG_MERKLE()` | 5 | `node = Poseidon(TAG_MERKLE, c0..c3)` | 5 |
@@ -487,7 +576,8 @@ for current counts.
 | 4 × `HashToAssetGen` (Pedersen 72) | ~8.4k |
 | 4 × `ValueCommit` for `cv` + 4 × `ValueCommit` for `cv_dep` | ~38k |
 | 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4.5k |
-| `PerAssetPointBalance` point sums | ~70 |
+| `PerAssetPointBalance` point sums (defense in depth) | ~70 |
+| `PerAssetValueBalance` per-asset conservation | ~200 |
 | Note commitments + Merkle + nullifiers + leaf hashes | ~17k |
 | FMD clue signals | 0 (off-circuit, §7a) |
 | `PolyEval(30)` Horner chain | ~30 |
@@ -514,14 +604,17 @@ Dominated by MAX_N pairs × 2 inserts × 10 Merkle levels of
 | File | Role |
 |---|---|
 | [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` — main 2-in × 2-out transact circuit. |
+| [`2x3.circom`](2x3.circom) | `Transact(10, 2, 3)` — 2-in × 3-out shape. |
+| [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` — 3-in × 3-out shape. |
 | [`tree_update_batch.circom`](tree_update_batch.circom) | Relayer batch tree-advance circuit (frontier-bound). See §14. |
+| [`lib/transact.circom`](lib/transact.circom) | `Transact(DEPTH, N_IN, N_OUT)` — the shared transact template all three shapes instantiate. |
 | [`lib/tags.circom`](lib/tags.circom) | Domain-separation tag constants and `2^64`. |
 | [`lib/common.circom`](lib/common.circom) | `PathIndexSelectors`, `EmptySubtreeHashes` — shared between merkle / insert / frontier_root. |
 | [`lib/note.circom`](lib/note.circom) | Note commitment, key derivation, nullifier. |
 | [`lib/merkle.circom`](lib/merkle.circom) | Quaternary Merkle level (Poseidon(5)), root, dummy-aware proof. |
 | [`lib/asset_gen.circom`](lib/asset_gen.circom) | `HashToAssetGen` — Pedersen hash-to-curve for asset generators. |
 | [`lib/value_commit.circom`](lib/value_commit.circom) | `ValueScalarMul`, `MulH`, `ValueCommit`, `PointSum`, `H_BASE`. |
-| [`lib/balance.circom`](lib/balance.circom) | `RangeCheck64`, `DummyZeroValue`, `PerAssetPointBalance`. |
+| [`lib/balance.circom`](lib/balance.circom) | `RangeCheck64`, `ValueTimesGen`, `DummyZeroValue`, `PerAssetValueBalance`, `PerAssetPointBalance`. |
 | [`lib/spent.circom`](lib/spent.circom) | `SpentNote` — per-slot key / Merkle / nullifier / range / cv / cv_dep binding. |
 | [`lib/output.circom`](lib/output.circom) | `OutputNote` — per-slot cm / range / cv / cv_dep binding. |
 | [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsertLevel` + `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO. |
@@ -586,18 +679,33 @@ slots still feed `PolyEval`, so zeroing prevents a prover from
 smuggling arbitrary cv_dep values into the verifier-visible compressed
 PIs.
 
-**Deposit binding (C-1 closure).** When `active[i] == 1` and
+**Deposit binding (C-1 / C-1'' closure).** When `active[i] == 1` and
 `is_deposit[i] == 1`:
 
 ```
 cv_dep[2i] + cv_dep[2i+1] == pair_public_in[i] · V^pair_asset[i]
-                             + rcv_total[i] · H
+                             + rcv_total[i] · H          (pair total)
+cv_dep[2i+1]              == rcv_dep_pad[i] · H          (pad leaf = 0)
 ```
 
-This forces both leaves in the deposit pair to commit to
-`(pair_asset, pair_public_in)` as their total `(asset, value)`. The
-deposit path runs no transact SNARK, so this aggregate is the only
+The deposit path runs no transact SNARK, so these are the only
 guarantee that depositor funds are correctly attributed.
+
+The aggregate **alone is not sufficient**: it fixes only `Σvalue` mod
+the subgroup order `l`, not the split. A depositor could set
+`cv_dep[2i] = 2^63 · V^A + r0 · H` and let `cv_dep[2i+1]` absorb
+`(pair_public_in − 2^63) mod l` — a leaf no 64-bit `ValueCommit` can
+reopen, so they simply abandon it — and walk away with a valid `2^63`
+note for a 1-unit deposit. Forcing the pad leaf to a value-0
+commitment makes `cv_dep[2i] = pair_public_in · V^asset +
+(rcv_total − rcv_dep_pad) · H` exactly, so neither leaf's value is
+depositor-chosen. Deposits must therefore place the whole amount in
+leaf `2i`; splitting across the pair is rejected.
+
+`rcv_dep_pad` is a private witness carried alongside `rcv_total` in
+`DepositIntent`. Same disclosure argument as `rcv_total`: a Pedersen
+blinder is information-theoretically independent of value/asset/
+identity.
 
 **Insert chain.** For pair `i`: `insA[i] = QuaternaryInsert(leaves[2i],
 fr[i], start_index + 2i)`; `insB[i] = QuaternaryInsert(leaves[2i+1],

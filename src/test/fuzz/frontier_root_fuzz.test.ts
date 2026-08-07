@@ -50,6 +50,7 @@ interface Pair {
     pairPublicIn: Field;
     isDeposit: 0 | 1;
     rcvTotal: Field;
+    rcvDepPad: Field;
 }
 
 function padToSlots<T>(real: T[], total: number, zero: T): T[] {
@@ -61,7 +62,9 @@ function padToSlots<T>(real: T[], total: number, zero: T): T[] {
 function buildPair(P: Poseidon, J: Jubjub, seed: number, isDeposit: 0 | 1): Pair {
     const asset = 7n;
     const val0 = BigInt(100 + seed);
-    const val1 = BigInt(200 + seed);
+    // Deposit pads must carry value 0: tree_update_batch pins cv_dep1 to
+    // rcv_dep_pad·H so the pair total cannot be split between the leaves.
+    const val1 = isDeposit === 1 ? 0n : BigInt(200 + seed);
     const pk = BigInt(0xb000 + seed);
     const rho0 = BigInt(1 + 4 * seed);
     const rho1 = BigInt(2 + 4 * seed);
@@ -77,7 +80,8 @@ function buildPair(P: Poseidon, J: Jubjub, seed: number, isDeposit: 0 | 1): Pair
     const pairPublicIn = isDeposit === 1 ? val0 + val1 : 0n;
     const pairAsset = isDeposit === 1 ? asset : 0n;
     const rcvTotal = isDeposit === 1 ? rcvDep0 + rcvDep1 : 0n;
-    return { cm0, cm1, cvDep0, cvDep1, pairAsset, pairPublicIn, isDeposit, rcvTotal };
+    const rcvDepPad = isDeposit === 1 ? rcvDep1 : 0n;
+    return { cm0, cm1, cvDep0, cvDep1, pairAsset, pairPublicIn, isDeposit, rcvTotal, rcvDepPad };
 }
 
 function leafOf(P: Poseidon, cm: Field, cvDep: Point): Field {
@@ -95,6 +99,7 @@ interface Witness {
     pairPublicIn: Field[];
     isDeposit: number[];
     rcvTotal: Field[];
+    rcvDepPad: Field[];
     frontier: Field[][];
     z: Field;
     y: Field;
@@ -126,6 +131,7 @@ function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, pairs: Pair[]): 
     const pairPublicInPadded = padToSlots(pairs.map(p => p.pairPublicIn), MAX_N, 0n);
     const isDepositPadded = padToSlots(pairs.map(p => p.isDeposit as number), MAX_N, 0);
     const rcvTotalPadded = padToSlots(pairs.map(p => p.rcvTotal), MAX_N, 0n);
+    const rcvDepPadPadded = padToSlots(pairs.map(p => p.rcvDepPad), MAX_N, 0n);
 
     const coeffs = flattenTreeUpdateBatch({
         oldRoot,
@@ -152,6 +158,7 @@ function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, pairs: Pair[]): 
         pairPublicIn: pairPublicInPadded,
         isDeposit: isDepositPadded,
         rcvTotal: rcvTotalPadded,
+        rcvDepPad: rcvDepPadPadded,
         frontier,
         z,
         y,
