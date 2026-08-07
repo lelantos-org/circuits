@@ -176,6 +176,20 @@ lint:
 clean:
     rm -rf "{{BUILD}}"
 
+# === lean proofs ===
+
+# Elaborate and kernel-check every proof; also runs the namespace-wide axiom guard.
+lean-build:
+    cd "{{ROOT}}/lean" && lake build
+
+# Everything CI runs against the Lean development.
+lean-check:
+    cd "{{ROOT}}/lean" && ./scripts/check-all.sh
+
+# Regenerate the two golden files under lean/expected/ after an intentional change.
+lean-update:
+    cd "{{ROOT}}/lean" && ./scripts/check-axioms.sh --update && ./scripts/dump-layout.sh --update
+
 # === package ===
 
 # Stage and verify the runtime artifact bundle for npm publish.

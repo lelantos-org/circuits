@@ -10,19 +10,19 @@ import { flatten } from "@lelantos-org/sdk";
 // The 30-slot ordering exists in four places -- `TransactCompressN`
 // (src/lib/poly_eval.circom:32), `PubInputs.sol :: compress(Transact, aux)`,
 // `sdk/src/bundle/snark-compression.ts :: flatten`, and `Lelantos.piSlot`
-// (formal/Lelantos/Transact.lean). A transposition between any two of them silently
+// (lean/Lelantos/Circuit/Witness.lean). A transposition between any two of them silently
 // breaks proof verification, and `PolyEval` binding is stated *about* this layout, so a
 // wrong layout in Lean would make `transact_sound`'s compression clause meaningless.
 //
-// `formal/layout-2x2.txt` is generated from the Lean definition by
-// `formal/scripts/dump-layout.sh`, which also guards it against drift on the Lean side.
+// `lean/expected/layout-2x2.txt` is generated from the Lean definition by
+// `lean/scripts/dump-layout.sh`, which also guards it against drift on the Lean side.
 // This test closes the other side: it checks that file against the SDK's `flatten`.
 //
 // The circuit <-> SDK link is already covered by the PolyEval binding cases in
 // transact.test.ts:645-729, so together the three checks pin all four implementations.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const LAYOUT_FILE = resolve(HERE, "../../../formal/layout-2x2.txt");
+const LAYOUT_FILE = resolve(HERE, "../../../lean/expected/layout-2x2.txt");
 
 // Distinct sentinel per logical field, so any transposition shows up as a mismatch
 // rather than coincidentally agreeing.

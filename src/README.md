@@ -23,14 +23,14 @@ as Edwards-point equality across the spent and output bundles.
 ---
 
 > **Machine-checked proofs.** Several arguments in this document are formalised in Lean 4
-> under [`formal/`](../formal/README.md) — notably the candidate-set argument of §6
+> under [`lean/`](../lean/README.md) — notably the candidate-set argument of §6
 > (`perAssetValueBalance_all_assets`), its no-wrap lift to integers
 > (`perAssetValueBalance_nat`), the Schwartz–Zippel binding of §2
 > (`polyEval_binding`), and the faerie-gold defence of §7 (`nullifier_binds_cm`).
 > The known-discrete-log weakness of §5 is formalised too — as a *negative* result,
 > `pointBalance_not_sound`, so that no one can re-derive conservation from the Edwards
-> point balance. See [`formal/README.md`](../formal/README.md) for what is and is not
-> covered, and [`formal/FIDELITY.md`](../formal/FIDELITY.md) for how faithfully the Lean
+> point balance. See [`lean/README.md`](../lean/README.md) for what is and is not
+> covered, and [`lean/FIDELITY.md`](../lean/FIDELITY.md) for how faithfully the Lean
 > model tracks this source.
 
 ---
