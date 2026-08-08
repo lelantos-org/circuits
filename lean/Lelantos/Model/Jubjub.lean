@@ -125,7 +125,7 @@ This is the concrete instance that makes `pointBalance_not_sound` bite. It is ch
 runtime by `src/test/transact.test.ts:847`. -/
 axiom assetMul_arith : assetMul 1 + assetMul 3 = 2 * assetMul 2
 
-/-- `PointSum(n)` (`src/lib/value_commit.circom:91`): the identity for `n = 0`, otherwise a
+/-- `PointSum(n)` (`src/lib/value_commit.circom:156`): the identity for `n = 0`, otherwise a
 left-nested chain of `BabyAdd`. -/
 def pointSum (pts : ℕ → G) (n : ℕ) : G := ∑ i ∈ Finset.range n, pts i
 

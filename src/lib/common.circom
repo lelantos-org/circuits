@@ -28,18 +28,42 @@ template PathIndexSelectors() {
 
 // Empty-subtree hashes: zeros[0] = 0, zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] × 4).
 // TAG_MERKLE must match MerkleLevel4.
+//
+// These are compile-time constants, but circom does not constant-fold Poseidon:
+// computing the chain in-circuit emitted DEPTH × Poseidon(5) real constraints per
+// instantiation, and `tree_update_batch` instantiates EmptySubtreeHashes 17 times
+// (16 QuaternaryInsert + 1 FrontierRoot) for the same fixed table. Tabulating them
+// removes ~48.6k non-linear constraints from that circuit.
+//
+// The table is pinned two ways, so a typo cannot pass silently:
+//   - `src/test/merkle.test.ts` recomputes the chain with circomlibjs and asserts
+//     every entry, including that EMPTY_SUBTREE(10) is the genesis root.
+//   - EMPTY_SUBTREE(10) equals CommitmentTree.EMPTY_ROOT in the contracts repo
+//     (0x1308eb79d37ed29a9a2d34861692ea8c3e4fed3f555f53a8776c1256738e40a7).
+//
+// Extending the tree beyond DEPTH = 10 requires appending entries here.
+function EMPTY_SUBTREE(d) {
+    assert(d >= 0);
+    assert(d <= 10);
+    var z[11];
+    z[0]  = 0;
+    z[1]  = 9688446225132779566270323192018004944760743136261961935684920214842198706882;
+    z[2]  = 7372477669598451827916824388459948538481024917085258427336598380045876808937;
+    z[3]  = 6963002638166051310340460060373962221427984164408700966057955389678820537775;
+    z[4]  = 4501891970687803437678777359116189768994683435388499944223872268390656914248;
+    z[5]  = 3179580195589593749366678182492387114398097369354143955628276022038298865503;
+    z[6]  = 21800864736458967629487849402702439053787989654957290894223200992718642916160;
+    z[7]  = 6243778328599448874473440891433129521442396349997420030341684817177854107879;
+    z[8]  = 7697891372117443905574123126877256384618067426963460859230406409031270788574;
+    z[9]  = 9730897556345557679365537455943876163307163461955882385767465684822645783047;
+    z[10] = 8609704094418396324511832574933371601208234217740666943293213721288143421607;
+    return z[d];
+}
+
 template EmptySubtreeHashes(DEPTH) {
     signal output zeros[DEPTH + 1];
 
-    component zh[DEPTH];
-    zeros[0] <== 0;
-    for (var i = 0; i < DEPTH; i++) {
-        zh[i] = Poseidon(5);
-        zh[i].inputs[0] <== TAG_MERKLE();
-        zh[i].inputs[1] <== zeros[i];
-        zh[i].inputs[2] <== zeros[i];
-        zh[i].inputs[3] <== zeros[i];
-        zh[i].inputs[4] <== zeros[i];
-        zeros[i + 1] <== zh[i].out;
+    for (var i = 0; i <= DEPTH; i++) {
+        zeros[i] <== EMPTY_SUBTREE(i);
     }
 }

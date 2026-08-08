@@ -41,7 +41,7 @@ template OutputNote() {
     cm_h.rcm      <== rcm;
     cm_h.cm === cm;
 
-    // 2. Range-check value; the bits are shared by both ValueCommits.
+    // 2. Range-check value; the bits are shared by both commitments below.
     component rng = RangeCheck64();
     rng.v <== value;
 
@@ -50,17 +50,20 @@ template OutputNote() {
     asset_nz.in <== asset_id;
     asset_nz.out === 0;
 
-    // 4. Bind cv to (asset_id, value, rcv).
+    // 4. Bind cv to (asset_id, value, rcv) and cv_dep to (asset_id, value,
+    //    rcv_dep). Same value and generator, so the two commitments differ only
+    //    in their blinding and share one scalar mul; see ValueCommitPair.
     component gen = HashToAssetGen();
     gen.asset_id <== asset_id;
 
-    component vc = ValueCommit();
+    component vc = ValueCommitPair();
     for (var i = 0; i < 64; i++) {
         vc.bits[i] <== rng.bits[i];
     }
-    vc.gen[0] <== gen.gen[0];
-    vc.gen[1] <== gen.gen[1];
-    vc.rcv    <== rcv;
+    vc.gen[0]  <== gen.gen[0];
+    vc.gen[1]  <== gen.gen[1];
+    vc.rcv     <== rcv;
+    vc.rcv_dep <== rcv_dep;
 
     cv[0] === vc.cv[0];
     cv[1] === vc.cv[1];
@@ -68,16 +71,6 @@ template OutputNote() {
     rH[0] <== vc.rH[0];
     rH[1] <== vc.rH[1];
 
-    // 5. Bind cv_dep to (asset_id, value, rcv_dep). Same value and generator as
-    //    cv, so the two commitments differ only in their blinding.
-    component vc_dep = ValueCommit();
-    for (var i = 0; i < 64; i++) {
-        vc_dep.bits[i] <== rng.bits[i];
-    }
-    vc_dep.gen[0] <== gen.gen[0];
-    vc_dep.gen[1] <== gen.gen[1];
-    vc_dep.rcv    <== rcv_dep;
-
-    cv_dep[0] <== vc_dep.cv[0];
-    cv_dep[1] <== vc_dep.cv[1];
+    cv_dep[0] <== vc.cv_dep[0];
+    cv_dep[1] <== vc.cv_dep[1];
 }

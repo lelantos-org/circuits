@@ -16,7 +16,8 @@ Two things it does prove, and both matter:
   domain-separated from tag-prefixed hashes.
 
 * `cv` and `cv_dep` are built from the *same* range-checked bit array and the *same*
-  generator (`src/lib/output.circom:61,77`), so they cannot open to different
+  generator — structurally so, since both come out of one `ValueCommitPair`
+  (`src/lib/output.circom:59-66`) — so they cannot open to different
   `(asset, value)` pairs. That is `outputNote_cvDep_binds` — the 2x2 half of deposit
   binding. The value-inflation defences C-1' and C-1'' live in
   `tree_update_batch.circom` and are **not** covered by this development.
@@ -62,13 +63,14 @@ structure OutputNoteSat (o : OutputSlot) : Prop where
   asset_isZero : IsZeroSat o.assetId o.assetInv o.assetIsZero
   /-- `:51` — unconditional non-zero asset id, unlike `SpentNote`'s gated check. -/
   asset_nonzero : o.assetIsZero = 0
-  /-- `:54-55` — `HashToAssetGen`, which also enforces `asset_id < 2^64`. -/
+  /-- `:56-57` — `HashToAssetGen`, which also enforces `asset_id < 2^64`. -/
   asset_bits : Num2BitsSat 64 o.assetId o.assetBits
-  /-- `:54-55` — …and its output point. -/
+  /-- `:56-57` — …and its output point. -/
   gen_def : o.gen = coords (assetGen o.assetId)
-  /-- `:57-66` — value commitment. -/
+  /-- `:59-66, 68-69` — value commitment (`ValueCommitPair.cv`, bound to the `cv` input). -/
   cv_sat : ValueCommitSat o.valueBits o.gen o.rcv o.rcvBits o.vT o.rH o.cv
-  /-- `:73-82` — deposit value commitment, sharing the same bits and generator. -/
+  /-- `:59-66, 74-75` — deposit value commitment (`ValueCommitPair.cv_dep`), sharing the
+  same bits and generator structurally rather than by convention. -/
   cv_dep_sat : ValueCommitSat o.valueBits o.gen o.rcvDep o.rcvDepBits o.vTDep o.rHDep o.cvDep
 
 /-- What an output slot establishes. -/

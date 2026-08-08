@@ -15,11 +15,11 @@ and it should be reviewable without reading the soundness proofs.
 
 namespace Lelantos
 
-/-- Number of `PolyEval` coefficients: `8 + 3·N_IN + 8·N_OUT`
-(`src/lib/poly_eval.circom:33-34`). For `(2, 2)` this is 30. -/
-def piCount (nIn nOut : ℕ) : ℕ := 8 + 3 * nIn + 8 * nOut
+/-- Number of `PolyEval` coefficients: `9 + 3·N_IN + 8·N_OUT`
+(`src/lib/poly_eval.circom:43-44`). For `(2, 2)` this is 31. -/
+def piCount (nIn nOut : ℕ) : ℕ := 9 + 3 * nIn + 8 * nOut
 
-example : piCount 2 2 = 30 := by norm_num [piCount]
+example : piCount 2 2 = 31 := by norm_num [piCount]
 
 /-- Every signal of `Transact(depth, nIn, nOut)`. -/
 structure TxWitness (depth nIn nOut : ℕ) where
@@ -44,6 +44,12 @@ structure TxWitness (depth nIn nOut : ℕ) where
   outClueRx : ℕ → F
   outClueRy : ℕ → F
   outClueBits : ℕ → F
+  /-- Digest of the encrypted-note payload (`ephPub` and ciphertext, per output).
+  `PolyEval`-bound only, exactly like the clue fields: the circuit carries it so that
+  tampering with the payload in calldata changes `y`. That the digest is the *real* hash of
+  the payload the contract received is a contract obligation, not a circuit property —
+  see `ContractObligations` in `Lelantos.Circuit.Transact`. -/
+  outAuxDigest : F
   /-- Public-bucket signals. -/
   pubGen : Pt
   pubAssetBits : ℕ → F
@@ -114,9 +120,10 @@ inductive PISlot where
   | clueRx (j : ℕ)
   | clueRy (j : ℕ)
   | clueBits (j : ℕ)
+  | auxDigest
 deriving Repr, DecidableEq, Inhabited
 
-/-- The layout of `TransactCompressN(nIn, nOut)` — `src/lib/poly_eval.circom:32-99`.
+/-- The layout of `TransactCompressN(nIn, nOut)` — `src/lib/poly_eval.circom:68-109`.
 Single source of truth. -/
 def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   let oNf := 1
@@ -127,6 +134,7 @@ def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   let oAddr := oOutCv + 2 * nOut
   let oDep := oAddr + 4
   let oClue := oDep + 2 * nOut
+  let oAux := oClue + 3 * nOut
   if k = 0 then .merkleRoot
   else if k < oCm then .nullifier (k - oNf)
   else if k < oPub then .outCm (k - oCm)
@@ -143,6 +151,7 @@ def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   else if k = oAddr + 3 then .relayer
   else if k < oClue then
     (if (k - oDep) % 2 = 0 then .outCvDepX ((k - oDep) / 2) else .outCvDepY ((k - oDep) / 2))
+  else if oAux ≤ k then .auxDigest
   else if (k - oClue) % 3 = 0 then .clueRx ((k - oClue) / 3)
   else if (k - oClue) % 3 = 1 then .clueRy ((k - oClue) / 3)
   else .clueBits ((k - oClue) / 3)
@@ -168,6 +177,7 @@ def slotValue (w : TxWitness depth nIn nOut) : PISlot → F
   | .clueRx j => w.outClueRx j
   | .clueRy j => w.outClueRy j
   | .clueBits j => w.outClueBits j
+  | .auxDigest => w.outAuxDigest
 
 /-- The `PolyEval` coefficient vector. -/
 def txCoeffs (w : TxWitness depth nIn nOut) (k : ℕ) : F :=
@@ -210,6 +220,7 @@ def slotIndex (nIn nOut : ℕ) : PISlot → ℕ
   | .clueRx j => 8 + 3 * nIn + 5 * nOut + 3 * j
   | .clueRy j => 8 + 3 * nIn + 5 * nOut + 3 * j + 1
   | .clueBits j => 8 + 3 * nIn + 5 * nOut + 3 * j + 2
+  | .auxDigest => 8 + 3 * nIn + 8 * nOut
 
 theorem slotIndex_lt {nIn nOut : ℕ} {s : PISlot} (hs : s.InRange nIn nOut) :
     slotIndex nIn nOut s < piCount nIn nOut := by

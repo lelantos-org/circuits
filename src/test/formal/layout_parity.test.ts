@@ -7,8 +7,8 @@ import { flatten } from "@lelantos-org/sdk";
 
 // Fidelity bridge: the Lean model's public-input layout vs. the SDK's.
 //
-// The 30-slot ordering exists in four places -- `TransactCompressN`
-// (src/lib/poly_eval.circom:32), `PubInputs.sol :: compress(Transact, aux)`,
+// The 31-slot ordering exists in four places -- `TransactCompressN`
+// (src/lib/poly_eval.circom:41), `PubInputs.sol :: compress(Transact, aux)`,
 // `sdk/src/bundle/snark-compression.ts :: flatten`, and `Lelantos.piSlot`
 // (lean/Lelantos/Circuit/Witness.lean). A transposition between any two of them silently
 // breaks proof verification, and `PolyEval` binding is stated *about* this layout, so a
@@ -57,6 +57,7 @@ const SENTINEL: Record<string, bigint> = {
     "clueRx 1": 1090n,
     "clueRy 1": 1091n,
     "clueBits 1": 1092n,
+    auxDigest: 1100n,
 };
 
 const S = SENTINEL;
@@ -87,6 +88,7 @@ const SENTINEL_INPUT = {
     out_clue_Rx: [S["clueRx 0"], S["clueRx 1"]],
     out_clue_Ry: [S["clueRy 0"], S["clueRy 1"]],
     out_clue_bits: [S["clueBits 0"], S["clueBits 1"]],
+    out_aux_digest: S["auxDigest"],
 };
 
 function leanLayout(): string[] {
@@ -97,10 +99,10 @@ function leanLayout(): string[] {
 }
 
 describe("formal model / public-input layout parity", () => {
-    it("the Lean layout file has exactly the 30 slots the circuit compresses", () => {
+    it("the Lean layout file has exactly the 31 slots the circuit compresses", () => {
         const layout = leanLayout();
-        expect(layout.length).to.equal(30);
-        expect(new Set(layout).size).to.equal(30, "layout slot names must be distinct");
+        expect(layout.length).to.equal(31);
+        expect(new Set(layout).size).to.equal(31, "layout slot names must be distinct");
     });
 
     it("every Lean slot name has a sentinel (the test covers the whole layout)", () => {

@@ -28,10 +28,20 @@ template PolyEval(N) {
 //   next 4                     recipient, chain_id, payer, relayer
 //   next 2·N_OUT               out_cv_dep[N_OUT][2]
 //   next 3·N_OUT               (clue_Rx, clue_Ry, clue_bits) per output
-// Total = 8 + 3·N_IN + 8·N_OUT.
+//   last 1                     out_aux_digest
+// Total = 9 + 3·N_IN + 8·N_OUT.
+//
+// out_aux_digest binds the encrypted-note payload the relayer carries in
+// calldata: keccak256(abi.encode(aux)) mod r over the full AuxValidation.Output
+// array. Without it only the three clue fields per output are bound, so a
+// relayer could keep the FMD clue intact — proof still verifies, recipient still
+// flags the note — while corrupting ephPub/ciphertext, leaving the recipient
+// unable to decrypt the opening of a note whose inputs are already spent.
+// Appended after the clue block so slots 0..(8+3·N_IN+8·N_OUT-1) keep their
+// indices.
 template TransactCompressN(N_IN, N_OUT) {
     var PI_PER_OUT = 3;
-    var N = 8 + 3 * N_IN + 5 * N_OUT + PI_PER_OUT * N_OUT;
+    var N = 9 + 3 * N_IN + 5 * N_OUT + PI_PER_OUT * N_OUT;
 
     signal input z;
     signal input merkle_root;
@@ -50,6 +60,7 @@ template TransactCompressN(N_IN, N_OUT) {
     signal input out_clue_Rx[N_OUT];
     signal input out_clue_Ry[N_OUT];
     signal input out_clue_bits[N_OUT];
+    signal input out_aux_digest;
 
     signal output y;
 
@@ -94,6 +105,8 @@ template TransactCompressN(N_IN, N_OUT) {
         pe.coeffs[off + PI_PER_OUT * j + 1] <== out_clue_Ry[j];
         pe.coeffs[off + PI_PER_OUT * j + 2] <== out_clue_bits[j];
     }
+    off = off + PI_PER_OUT * N_OUT;
+    pe.coeffs[off] <== out_aux_digest;
     pe.z <== z;
     y <== pe.y;
 }

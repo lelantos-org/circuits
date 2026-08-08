@@ -21,7 +21,8 @@ include "lib/transact.circom";
 //     [19]      relayer_address
 //     [20..23]  out_cv_dep[0..1][0..1]   (forwarded to tree_update_batch)
 //     [24..29]  (clue_Rx, clue_Ry, clue_bits) per output
-// Total = 8 + 3·N_IN + 8·N_OUT = 30.
+//     [30]      out_aux_digest           (contract recomputes; never read from calldata)
+// Total = 9 + 3·N_IN + 8·N_OUT = 31.
 component main {
     public [ z ]
 } = Transact(10, 2, 2);

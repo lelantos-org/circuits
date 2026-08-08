@@ -1,5 +1,16 @@
 pragma circom 2.2.3;
 
+// REFERENCE ONLY — deliberately outside `src/lib/` and outside the `just lint`
+// path. Nothing includes this file; the FMD bit derivation it describes runs
+// off-circuit in the SDK (`sdk/src/crypto/sqrt.ts`), and the clue fields reach
+// the transact circuit constrained only by PolyEval.
+//
+// It lives here rather than in `src/lib/` because its `inv <-- 1 / hash` hint is
+// the only `<--` in the tree. Keeping it out of the lint path lets `just lint`
+// run without the CS0005 / CS0015 / CS0017 waivers, so those passes stay live on
+// the circuits that actually get compiled. Do not move it back into `src/lib/`
+// without restoring those waivers and re-reviewing the sites they hide.
+//
 // Legendre-symbol bit extraction: 4 constraints instead of Num2Bits(254)'s ~254.
 //   bit = 1  ⟺  hash = y²      (quadratic residue)
 //   bit = 0  ⟺  hash = y²·Z    (Z = 5, a fixed non-residue in 𝔽_r)

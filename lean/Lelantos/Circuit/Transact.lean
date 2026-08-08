@@ -19,7 +19,7 @@ properties:
 * every output slot is well-formed and its `rho` is the Orchard-style derivation,
 * **for every asset id in the field**, value is conserved as an equation over `ℕ`,
 * the deposit value commitments are the ones the output notes computed,
-* and `y` is the polynomial evaluation of the declared 30-slot layout at `z`.
+* and `y` is the polynomial evaluation of the declared 31-slot layout at `z`.
 
 Every one of those is arithmetic: `transact_sound` assumes **nothing about Poseidon**.
 
@@ -39,6 +39,9 @@ from reaching conservation and every other consequence. See `Lelantos.Model.Pose
   uniqueness, so it appears in `ContractObligations`, not as a theorem.
 * The FMD clue fields are bound by `PolyEval` and by nothing else. That is the circuit's
   actual behaviour (`src/README.md § 1 "FMD clue binding"`), and the model says so.
+* `outAuxDigest` is likewise `PolyEval`-bound and nothing more. The circuit carries the
+  digest so that altering it changes `y`; that it *is* the hash of the payload the contract
+  received is checked on-chain, so it sits in `ContractObligations`.
 * Everything is modulo the axioms in `Lelantos.Meta.Assumptions`.
 -/
 
@@ -48,7 +51,7 @@ variable {depth nIn nOut : ℕ}
 
 /-- The constraint system of `Transact(depth, nIn, nOut)`. -/
 structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
-  /-- `src/lib/transact.circom:90-110` — each spent slot, bound to the shared root. -/
+  /-- `src/lib/transact.circom:97-117` — each spent slot, bound to the shared root. -/
   spent_sat : ∀ i, i < nIn → SpentNoteSat (w.spent i)
   spent_root : ∀ i, i < nIn → (w.spent i).root = w.merkleRoot
   /-- `:88, 113-114` — `DummyZeroValue(N_IN)`. -/
@@ -102,6 +105,13 @@ structure ContractObligations (w : TxWitness depth nIn nOut) : Prop where
   challenge_is_fiat_shamir : True
   /-- `chain_id = block.chainid` and `recipient_address < 2^160`. -/
   address_and_chain_checked : True
+  /-- `out_aux_digest` is recomputed from the `aux` calldata, not taken from it. The
+  coefficient binds whatever value the prover put there; only this check ties that value to
+  the encrypted-note payload the recipient will actually receive. Without it a relayer keeps
+  the `PolyEval`-bound clue intact — so the recipient still flags the note — while corrupting
+  `ephPub` and the ciphertext, leaving a note that cannot be opened after its inputs are
+  already spent. -/
+  aux_digest_recomputed : True
 
 /-- What a satisfying assignment proves. -/
 structure TxWellFormed (w : TxWitness depth nIn nOut) : Prop where
@@ -233,7 +243,7 @@ theorem no_asset_creation {w : TxWitness depth nIn nOut}
 
 /-- **Public-input binding at the transaction level.** If two transactions with *different*
 public inputs are accepted against the same `(z, y)`, then `z` is one of at most
-`piCount - 1` field elements — 29 out of `p ≈ 2^253.6` for the deployed instance.
+`piCount - 1` field elements — 30 out of `p ≈ 2^253.6` for the deployed instance.
 
 The security reading needs `ContractObligations.challenge_is_fiat_shamir`: the prover must
 not be able to pick `z` after fixing the coefficients. The circuit cannot enforce that, so
@@ -281,13 +291,13 @@ theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
 `perAssetValueBalance_nat`, where it is what keeps each side of the balance equation below
 `p`. The repository ships exactly three shapes, and all three sit inside it. -/
 
-/-- `Transact(10, 2, 2)` — `src/2x2.circom:27`. -/
+/-- `Transact(10, 2, 2)` — `src/2x2.circom:28`. -/
 abbrev Transact2x2 := TxWitness 10 2 2
 
-/-- `Transact(10, 2, 3)` — `src/2x3.circom:26`. -/
+/-- `Transact(10, 2, 3)` — `src/2x3.circom:35`. NOT DEPLOYED; see the circom header. -/
 abbrev Transact2x3 := TxWitness 10 2 3
 
-/-- `Transact(10, 3, 3)` — `src/3x3.circom:26`. -/
+/-- `Transact(10, 3, 3)` — `src/3x3.circom:38`. NOT DEPLOYED; see the circom header. -/
 abbrev Transact3x3 := TxWitness 10 3 3
 
 /-- **Soundness of the deployed `2x2` instance.** -/

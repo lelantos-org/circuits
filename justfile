@@ -134,16 +134,16 @@ test-fuzz:
 
 # Static analysis via Trail of Bits circomspect. Install: cargo install circomspect
 #
+# Scope is `src/` minus `src/reference/`, which holds the unused HashToBit
+# gadget. That file carries the only `<--` in the tree; excluding it lets the
+# CS0005 / CS0015 / CS0017 passes (signal-assignment, unconstrained-division,
+# under-constrained-signal) run live on every compiled circuit instead of being
+# waived tree-wide. Re-check `grep -rn '<--' src/lib src/*.circom` before adding
+# any waiver back.
+#
 # Suppressed analysis passes (each reviewed; rationale below). To audit, run
 # without `--allow` flags and confirm every reported site falls under one of
 # the documented categories. Re-evaluate whenever the listed sites change.
-#
-#   CS0005 signal-assignment           HashToBit: `inv <-- 1/hash; inv*hash===1`
-#   CS0015 unconstrained-division      is the canonical non-zero-hash check.
-#   CS0017 under-constrained-signal    `inv` is fully constrained by the
-#                                      product equation (any prover assignment
-#                                      satisfying `inv*hash===1` forces
-#                                      inv = hash^{-1}; hash=0 is unsatisfiable).
 #
 #   CS0010 non-strict-binary-conversion
 #       Each Num2Bits site uses n < 254 bits, so 2^n < p and no aliasing is
@@ -169,9 +169,10 @@ test-fuzz:
 #           insB root feeds the mux). Costs extra constraints but is sound.
 lint:
     @command -v circomspect >/dev/null || { echo "circomspect not found. Install: cargo install circomspect"; exit 1; }
-    circomspect "{{ROOT}}/src" -L "{{ROOT}}/node_modules" \
-        --allow CS0005 --allow CS0010 --allow CS0014 \
-        --allow CS0015 --allow CS0017 --allow CS0018
+    @test -z "$(grep -rl -- '<--' "{{ROOT}}/src/lib" "{{ROOT}}/src"/*.circom || true)" \
+        || { echo "a '<--' hint appeared in a linted circuit; review it before waiving CS0005/CS0015/CS0017"; exit 1; }
+    circomspect "{{ROOT}}/src/lib" "{{ROOT}}/src"/*.circom -L "{{ROOT}}/node_modules" \
+        --allow CS0010 --allow CS0014 --allow CS0018
 
 clean:
     rm -rf "{{BUILD}}"
@@ -196,17 +197,34 @@ lean-update:
 #
 #   docker build -t picus:local https://github.com/Veridise/Picus.git
 #
+# On arm64 that image runs under emulation (upstream publishes amd64 only), so `just
+# picus-image` builds a native one instead and `picus` prefers it when present.
+#
 # Picus recommends --O0 input, so this compiles a separate artifact rather than reusing
 # build/2x2.r1cs.
 
+# Build the native arm64 Picus image, avoiding the emulated upstream one.
+picus-image:
+    docker build --platform linux/arm64 -t picus:arm64 \
+        -f "{{ROOT}}/docker/picus-arm64.Dockerfile" "{{ROOT}}/docker"
+
 # Check the compiled R1CS for under-constrainedness (needs Docker). STRONG=1 for strong safety.
 picus STRONG="":
-    @command -v docker >/dev/null || { echo "docker not found"; exit 1; }
-    @docker image inspect picus:local >/dev/null 2>&1 || \
-        { echo "picus:local image missing. Build it: docker build -t picus:local https://github.com/Veridise/Picus.git"; exit 1; }
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v docker >/dev/null || { echo "docker not found"; exit 1; }
+    if docker image inspect picus:arm64 >/dev/null 2>&1; then
+        image=picus:arm64
+    elif docker image inspect picus:local >/dev/null 2>&1; then
+        image=picus:local
+    else
+        echo "no Picus image. Build one: just picus-image (native arm64)"
+        echo "  or: docker build -t picus:local https://github.com/Veridise/Picus.git"
+        exit 1
+    fi
     mkdir -p "{{BUILD}}/picus"
     circom "{{ROOT}}/src/2x2.circom" --r1cs --sym --O0 -o "{{BUILD}}/picus" -l "{{ROOT}}/node_modules"
-    docker run --rm -v "{{BUILD}}/picus:/data" picus:local \
+    docker run --rm -v "{{BUILD}}/picus:/data" "$image" \
         ./run-picus --solver z3 --timeout 10000 {{ if STRONG != "" { "--strong" } else { "" } }} /data/2x2.r1cs
 
 # === package ===

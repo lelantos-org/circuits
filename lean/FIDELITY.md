@@ -34,6 +34,9 @@ Known deliberate omissions, all in the safe direction:
   is satisfiable for any assignment by solving for `pubOutG`.
 * The FMD clue fields carry no constraint beyond `PolyEval` inclusion — that is the
   circuit's actual behaviour (`src/README.md § 1 "FMD clue binding"`), not a modelling shortcut.
+* `out_aux_digest` likewise carries no constraint beyond `PolyEval` inclusion, again
+  matching the circuit. Whether the digest is the true hash of the aux calldata is checked
+  on-chain and recorded in `ContractObligations.aux_digest_recomputed`.
 * `Num2Bits`' `<--` witness hints are not modelled, only the `===` constraints beneath
   them. That is exactly right: the hints carry no soundness weight.
 
@@ -133,8 +136,9 @@ assetMul 3 = 2 · assetMul 2`) is checked against the real gadget at runtime by
 |---|---|
 | `:24-38` `ValueScalarMul` | `ValueScalarMulSat` |
 | `:41-58` `MulH` (`Num2Bits(253)` + `EscalarMulFix`) | `MulHSat` |
-| `:78-85` `cv = BabyAdd(vT, rH)` | `ValueCommitSat` third conjunct; opened by `valueCommit_opens` |
-| `:102-116` `PointSum` chain | `pointSum` |
+| `:77-124` `ValueCommitPair` — one shared `value·gen`, two blinders | two independent `ValueCommitSat` instances per note slot (same constraint set; see the `Gadgets/ValueCommit.lean` module note) |
+| `:143-150` `cv = BabyAdd(vT, rH)` | `ValueCommitSat` third conjunct; opened by `valueCommit_opens` |
+| `:167-181` `PointSum` chain | `pointSum` |
 
 ### `src/lib/spent.circom` / `src/lib/output.circom`
 
@@ -149,11 +153,12 @@ mirrors. They can be read side by side with the originals and checked a row at a
 | `poly_eval:13` `acc[0] <== 0` | `PolyEvalSat` first conjunct |
 | `poly_eval:15` Horner step | `PolyEvalSat` second conjunct |
 | `poly_eval:17` `y <== acc[N]` | `PolyEvalSat` third conjunct |
-| `poly_eval:57-96` coefficient layout | `piSlot` + `slotValue` |
-| `transact:129` `out_rho[j] === DeriveRho(nf0, j)` | `TransactSat.rho_derived` |
-| `transact:143-144` `out_cv_dep === OutputNote.cv_dep` | `TransactSat.cv_dep_bound` |
-| `transact:107` `spent[i].root <== merkle_root` | `TransactSat.spent_root` |
-| `transact:150-161` public bucket | `pub_gen`, `pub_in_range`, `pub_out_range`, `pub_in_mul`, `pub_out_mul` |
+| `poly_eval:66-109` coefficient layout | `piSlot` + `slotValue` |
+| `poly_eval:109` `coeffs[last] <== out_aux_digest` | `PISlot.auxDigest` / `slotValue .auxDigest` |
+| `transact:136` `out_rho[j] === DeriveRho(nf0, j)` | `TransactSat.rho_derived` |
+| `transact:150-151` `out_cv_dep === OutputNote.cv_dep` | `TransactSat.cv_dep_bound` |
+| `transact:114` `spent[i].root <== merkle_root` | `TransactSat.spent_root` |
+| `transact:157-168` public bucket | `pub_gen`, `pub_in_range`, `pub_out_range`, `pub_in_mul`, `pub_out_mul` |
 
 ## Defence 2 — witness parity harness
 
@@ -170,7 +175,7 @@ unverified in that direction.
 
 ## Defence 3 — public-input layout parity
 
-Built and running. The 30-slot ordering exists in four implementations:
+Built and running. The 31-slot ordering exists in four implementations:
 
 1. `src/lib/poly_eval.circom :: TransactCompressN`
 2. `contracts/src/lib/PubInputs.sol :: compress(Transact, aux)`

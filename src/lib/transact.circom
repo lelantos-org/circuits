@@ -30,7 +30,8 @@ include "poly_eval.circom";
 // are all < 2^64.
 //
 // Left to the contract: chain_id == block.chainid, recipient_address < 2^160,
-// each nullifier[i] unspent, and each out_cm[j] inserted into the commitment tree.
+// each nullifier[i] unspent, each out_cm[j] inserted into the commitment tree,
+// and out_aux_digest recomputed from the aux calldata rather than taken from it.
 template Transact(DEPTH, N_IN, N_OUT) {
     // ===== PUBLIC (verifier-visible) =====
     signal input  z;   // Fiat-Shamir challenge.
@@ -58,6 +59,12 @@ template Transact(DEPTH, N_IN, N_OUT) {
     signal input out_clue_bits[N_OUT];
     signal input out_clue_Rx[N_OUT];
     signal input out_clue_Ry[N_OUT];
+
+    // Digest of the encrypted-note payload (ephPub + ciphertext, per output),
+    // computed off-circuit and constrained only by PolyEval — same treatment as
+    // the clue fields. It exists so the relayer cannot corrupt the payload while
+    // keeping the proof valid; see poly_eval.circom :: TransactCompressN.
+    signal input out_aux_digest;
 
     // ===== PRIVATE: spent notes =====
     signal input in_asset[N_IN];
@@ -222,5 +229,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
     pe.chain_id          <== chain_id;
     pe.payer_address     <== payer_address;
     pe.relayer_address   <== relayer_address;
+    pe.out_aux_digest    <== out_aux_digest;
     y <== pe.y;
 }

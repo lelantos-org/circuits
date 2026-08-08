@@ -54,7 +54,7 @@ def nullifierOf (nk rho cm : F) : F := poseidon [TAG_NF, nk, rho, cm]
 def merkleNode (c : ℕ → F) : F := poseidon [TAG_MERKLE, c 0, c 1, c 2, c 3]
 
 /-- The leaf hash binding a commitment to its deposit value commitment —
-`src/lib/spent.circom:79`. -/
+`src/lib/spent.circom:82`. -/
 def leafHash (cm x y : F) : F := poseidon [TAG_LEAF, cm, x, y]
 
 /-! ## Structural facts -/

@@ -14,9 +14,18 @@ range-checked `value` under its own asset generator.
 Two modelling points:
 
 * `ValueCommit` takes pre-decomposed bits and imposes no range check of its own
-  (`src/lib/value_commit.circom:61-63`). `value < 2^64` holds only because the caller
+  (`src/lib/value_commit.circom:126-128`). `value < 2^64` holds only because the caller
   applies `RangeCheck64`, and `SpentNote` / `OutputNote` feed the *same* bit array to both
   `cv` and `cv_dep`, which is what forces the two commitments to open to the same value.
+
+* The circuit builds each note's `(cv, cv_dep)` with a single `ValueCommitPair`
+  (`src/lib/value_commit.circom:77-124`) rather than two `ValueCommit` instances: the
+  shared `value · gen` term is computed once and each blinder added separately. This
+  model keeps two independent `ValueCommitSat` instances per slot, which is the same
+  constraint set — `ValueCommitPair` removes a *duplicated* `EscalarMulAny(64)`, not a
+  constraint. Sharing the term structurally is strictly stronger than the model's
+  assumption that the two instances receive equal `bits` and `gen`, so the model stays
+  on the safe (weaker) side.
 
 * `MulH` decomposes its scalar with `Num2Bits(253)`. Since `2^253 < p` that decomposition
   is alias-free, but the subgroup order is `ell ≈ 2^251`, so `rcv` is not uniquely
@@ -38,14 +47,16 @@ structure MulHSat (scalar : F) (sbits : ℕ → F) (out : Pt) : Prop where
   /-- `:52-57` — `EscalarMulFix(253, H)`. -/
   out_def : out = escalarMul (bitsNat sbits 253) (coords H)
 
-/-- `ValueCommit` — `src/lib/value_commit.circom:61-88`. -/
+/-- `ValueCommit` — `src/lib/value_commit.circom:126-153`. Note slots instantiate the
+two-blinder `ValueCommitPair` (`:77-124`) instead; see the module note for why modelling
+that as two independent `ValueCommitSat` is the same constraint set. -/
 structure ValueCommitSat (bits : ℕ → F) (gen : Pt) (rcv : F) (sbits : ℕ → F)
     (vT rH cv : Pt) : Prop where
-  /-- `:68-73` — `vT = value · gen`. -/
+  /-- `:133-138` — `vT = value · gen`. -/
   value_term : ValueScalarMulSat bits gen vT
-  /-- `:75-76, 86-87` — `rH = rcv · H`, and the `rH` output it is read from. -/
+  /-- `:140-141, 151-152` — `rH = rcv · H`, and the `rH` output it is read from. -/
   blind_term : MulHSat rcv sbits rH
-  /-- `:78-85` — `cv = BabyAdd(vT, rH)`. -/
+  /-- `:143-150` — `cv = BabyAdd(vT, rH)`. -/
   sum_def : cv = babyAdd vT rH
 
 /-- The value a bit array commits to, as a subgroup scalar. -/

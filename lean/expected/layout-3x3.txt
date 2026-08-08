@@ -39,3 +39,4 @@ clueBits 1
 clueRx 2
 clueRy 2
 clueBits 2
+auxDigest

@@ -28,3 +28,4 @@ clueBits 0
 clueRx 1
 clueRy 1
 clueBits 1
+auxDigest

@@ -27,6 +27,12 @@ type ClueInputs = { clueBits: Field; clueRx: Field; clueRy: Field };
 // Default asset id used by tests that don't care which asset they're on.
 export const DEFAULT_ASSET: Field = 7n;
 
+// Stand-in for `auxDigest(aux)`. These tests build clue witnesses but no real
+// encrypted-note payload, and the circuit places no constraint on this slot —
+// it is bound by PolyEval only. Non-zero so a test that drops the field fails
+// loudly rather than matching an accidental default.
+export const TEST_AUX_DIGEST: Field = 0xa17d19e57n;
+
 export interface TxBuildArgs {
     publicAssetId: Field;
     publicIn: bigint;
@@ -35,6 +41,7 @@ export interface TxBuildArgs {
     outputs: Note[];
     merkleRoot: Field;
     outputClues?: ClueInputs[];
+    outputAuxDigest?: Field;
 }
 
 // Deterministic clue synth: no circuit constraints on clue signals; just
@@ -110,7 +117,13 @@ export class TxBuilder {
         const outputs = args.outputs.map((o, j) => ({ ...o, rho: buildRho(this.P, nf0, j) }));
         const outputClues =
             args.outputClues ?? outputs.map(() => this.nextClue());
-        return toCircomInput(this.P, this.J, { ...args, outputs, outputClues });
+        const outputAuxDigest = args.outputAuxDigest ?? TEST_AUX_DIGEST;
+        return toCircomInput(this.P, this.J, {
+            ...args,
+            outputs,
+            outputClues,
+            outputAuxDigest,
+        });
     }
 
     newTree(): MerkleTree {

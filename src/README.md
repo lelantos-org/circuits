@@ -93,10 +93,10 @@ generator is derived in-circuit from `public_asset_id` via
 ## 2. I/O surface
 
 The verifier sees only **two** field elements — `z` (Fiat-Shamir
-challenge) and `y` (Horner evaluation). The `8 + 3·N_IN + 8·N_OUT`
+challenge) and `y` (Horner evaluation). The `9 + 3·N_IN + 8·N_OUT`
 logical PIs below are private witnesses bound into `(z, y)` by the
 [`TransactCompressN(N_IN, N_OUT)`](lib/poly_eval.circom) gadget (§2a) —
-30 slots at `N_IN = N_OUT = 2`.
+31 slots at `N_IN = N_OUT = 2`.
 
 Verifier-visible public signals:
 
@@ -165,9 +165,25 @@ byte-for-byte; reordering is a soundness change for the contract):
 | 12 | `out_cv[0][0]`       | 27 | `out_clue_Rx[1]` |
 | 13 | `out_cv[0][1]`       | 28 | `out_clue_Ry[1]` |
 | 14 | `out_cv[1][0]`       | 29 | `out_clue_bits[1]` |
+|    |                      | 30 | `out_aux_digest` |
 
 Clue slots are appended in output order: `[Rx_j, Ry_j, bits_j]` for
-`j = 0..N_OUT-1`, starting at slot `24`.
+`j = 0..N_OUT-1`, starting at slot `24`. `out_aux_digest` is the single
+final slot, at `8 + 3·N_IN + 8·N_OUT`.
+
+`out_aux_digest` is `keccak256(abi.encode(aux)) mod r` over the whole
+`AuxValidation.Output` array. The contract MUST **recompute** it from
+the aux calldata rather than accept it as an input: the coefficient
+binds whatever the prover supplied, and only the recomputation ties
+that value to the payload the recipient receives. Without this slot,
+`out_clue_{Rx,Ry,bits}` are the only per-output fields bound, so a
+relayer can leave the clue intact — the proof still verifies and the
+recipient's FMD scan still flags the note — while corrupting `ephPub`
+and the ciphertext. The recipient then cannot derive the ECDH secret,
+cannot decrypt the opening, and cannot spend a note whose inputs are
+already nullified. It is not theft (the sender still holds the opening
+and can re-deliver out of band) but there is no on-chain recourse, and
+on a transfer the victim is a third party who never chose the relayer.
 
 Soundness: any tampering with `coeffs[k]` changes `y` for all but at
 most `N-1` values of `z` (Schwartz–Zippel over the BN254 scalar field;
@@ -423,7 +439,7 @@ clue_bits = pack(1 - bit_i for i in [GAMMA])     (sender flips; receiver ⊕ == 
 
 `legendre_bit(h)` is computed off-circuit via `fmdLegendreWitness` in
 [`sdk/src/crypto/sqrt.ts`](../../sdk/src/crypto/sqrt.ts), using the
-4-constraint [`HashToBit()`](lib/hash_to_bit.circom) structure as a
+4-constraint [`HashToBit()`](reference/hash_to_bit.circom) structure as a
 reference (`Z = 5` QNR, synced with `FMD_LEGENDRE_QNR` in
 [`sdk/src/crypto/tags.ts`](../../sdk/src/crypto/tags.ts)).
 
@@ -504,10 +520,15 @@ verifier:
    `[z, y]` to `Verifier.verifyProof`. `z` MUST be a deterministic
    function of every slot.
 0a. **Canonical slots.** `require(slot < r)` for *every* one of the
-   `8 + 3·N_IN + 8·N_OUT` logical PIs before compressing. `compress()`
+   `9 + 3·N_IN + 8·N_OUT` logical PIs before compressing. `compress()`
    is modular, so `v` and `v + r` yield the same `y`; without this
    check any slot — in particular the unconstrained `out_clue_*` — can
    be mutated in calldata while the proof still verifies.
+0b. **Aux digest.** Fill slot `8 + 3·N_IN + 8·N_OUT` with
+   `keccak256(abi.encode(aux)) mod r` computed from the aux calldata.
+   Never read this slot from the caller: taking it as an input makes it
+   agree with any payload and restores the tampering it exists to
+   prevent (§2a).
 1. `require(chainId == block.chainid)`.
 2. `require(public_in < 2**64 && public_out < 2**64)`.
 3. `require(public_asset_id < 2**64)` (or whatever the registry
@@ -619,7 +640,7 @@ Dominated by MAX_N pairs × 2 inserts × 10 Merkle levels of
 | [`lib/output.circom`](lib/output.circom) | `OutputNote` — per-slot cm / range / cv / cv_dep binding. |
 | [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsertLevel` + `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO. |
 | [`lib/frontier_root.circom`](lib/frontier_root.circom) | `FrontierRoot(DEPTH)` — rebuild `old_root` from frontier + leaf count (SOUNDNESS-CRITICAL). |
-| [`lib/hash_to_bit.circom`](lib/hash_to_bit.circom) | `HashToBit()` — 4-constraint Legendre-symbol bit extractor. Reference for the SDK's off-circuit FMD derivation; not wired into any circuit. |
+| [`reference/hash_to_bit.circom`](reference/hash_to_bit.circom) | `HashToBit()` — 4-constraint Legendre-symbol bit extractor. Reference for the SDK's off-circuit FMD derivation; not wired into any circuit, and deliberately outside the `just lint` path (see the `lint` recipe). |
 | [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)`, `TransactCompressN(N_IN, N_OUT)`, `BatchCompress(MAX_N)`. |
 | [`test/helpers.ts`](test/helpers.ts) | Poseidon / Pedersen / value-commit test primitives. |
 | [`test/lib/`](test/lib/) | Shared test harness: circuit loader, input shapers, witness assertions, transact witness builders. |

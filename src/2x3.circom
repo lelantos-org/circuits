@@ -20,7 +20,16 @@ include "lib/transact.circom";
 //     [22]      relayer_address
 //     [23..28]  out_cv_dep[0..2][0..1]
 //     [29..37]  (clue_Rx, clue_Ry, clue_bits) per output
-// Total = 8 + 3·N_IN + 8·N_OUT = 38.
+//     [38]      out_aux_digest           (contract recomputes; never read from calldata)
+// Total = 9 + 3·N_IN + 8·N_OUT = 39.
+//
+// NOT DEPLOYED. No justfile recipe compiles this shape, no test instantiates it,
+// and no trusted setup exists for it. It is kept only so `Transact` is exercised
+// at a second shape by the Lean development (lean/expected/layout-2x3.txt).
+// Deploying it requires: a compile/setup recipe, its own phase-2 ceremony, a
+// PubInputs.sol compress overload for 39 slots, a satisfying Lean witness
+// (transact2x3_sound is not yet shown non-vacuous), and extending
+// layout_parity.test.ts to this shape.
 component main {
     public [ z ]
 } = Transact(10, 2, 3);

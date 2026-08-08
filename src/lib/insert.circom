@@ -79,13 +79,20 @@ template QuaternaryInsertLevel() {
     cur_next <== h.out;
 
     // frontier_out[k] = s[k]·cur + (1-s[k])·f[k] for slots 0..2.
-    signal w_cur[3];
-    signal w_sib[3];
-    for (var k = 0; k < 3; k++) {
-        w_cur[k] <== sel.s[k] * cur;
-        w_sib[k] <== (1 - sel.s[k]) * frontier_in[k];
-        frontier_out[k] <== w_cur[k] + w_sib[k];
-    }
+    //
+    // s[k]·cur is already computed above as c0_cur / c1_cur / c2_cur, and
+    // (1-s[0])·f[0] as c0_sib, so slot 0 is a pure linear combination and slots
+    // 1..2 need only their own sibling product. The k=1,2 sibling terms genuinely
+    // differ from the child muxes — c1_sib is (s2+s3)·f[1] but slot 1 needs
+    // (1-s1)·f[1] = (s0+s2+s3)·f[1], likewise for slot 2 — so those two stay.
+    signal w_sib1;
+    signal w_sib2;
+    w_sib1 <== (1 - sel.s[1]) * frontier_in[1];
+    w_sib2 <== (1 - sel.s[2]) * frontier_in[2];
+
+    frontier_out[0] <== c0_cur + c0_sib;
+    frontier_out[1] <== c1_cur + w_sib1;
+    frontier_out[2] <== c2_cur + w_sib2;
 }
 
 // Insert one leaf, returning the new root and frontier.

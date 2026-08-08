@@ -485,6 +485,7 @@ noncomputable def ofParts (p : Parts) : TxWitness 10 2 2 :=
       out := p.out
       outCvDep := fun j => (p.out j).cvDep
       outClueRx := fun _ => 0, outClueRy := fun _ => 0, outClueBits := fun _ => 0
+      outAuxDigest := 0
       pubGen := gen p.pubAsset
       pubAssetBits := p.pubAssetBits
       pubInBits := p.pubInBits

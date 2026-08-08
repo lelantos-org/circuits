@@ -97,8 +97,8 @@ The load-bearing result, and the one with the smallest trusted base.
 | Theorem | Where | Statement |
 |---|---|---|
 | `polyEval_sound` | `Gadgets/PolyEval.lean` | the Horner chain computes `Σ cₖ zᵏ` |
-| `polyEval_binding` | `Gadgets/PolyEval.lean` | distinct coefficient vectors agree on `≤ 29` challenges |
-| `transact_pi_binding` | `Circuit/Transact.lean` | two transactions with different public inputs share `(z, y)` for at most 29 challenges |
+| `polyEval_binding` | `Gadgets/PolyEval.lean` | distinct coefficient vectors agree on `≤ 30` challenges |
+| `transact_pi_binding` | `Circuit/Transact.lean` | two transactions with different public inputs share `(z, y)` for at most 30 challenges |
 | `transact_pi_binding_slot` | `Circuit/Transact.lean` | …stated per **named** public input |
 | `piSlot_slotIndex` | `Circuit/Witness.lean` | `slotIndex` inverts the coefficient layout, turning a named-field difference into a coefficient index |
 
@@ -326,7 +326,7 @@ lean/
     Circuit/               the transact circuit itself
       Spent                SpentNote
       Output               OutputNote
-      Witness              TxWitness and the 30-slot public-input layout
+      Witness              TxWitness and the 31-slot public-input layout
       Transact             TransactSat, TxWellFormed, TxBinding, transact_sound
     Proofs/                results about the finished system
       Completeness         three concrete satisfying assignments (non-vacuity)

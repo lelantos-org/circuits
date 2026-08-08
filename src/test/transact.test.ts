@@ -690,6 +690,29 @@ describe("transact_2x2", function () {
         }, "out_clue_bits[1]");
     });
 
+    // ===== PolyEval binding: encrypted-note payload =====
+    // out_aux_digest is keccak256(abi.encode(aux)) mod r, recomputed on-chain
+    // from the aux calldata. Like the clue fields it has no in-circuit
+    // constraint, so PolyEval inclusion is the entire defence: without it a
+    // relayer could keep the clue intact (proof verifies, recipient's FMD scan
+    // still flags the note) while corrupting ephPub/ciphertext, leaving the
+    // recipient unable to decrypt the opening of a note already paid for.
+
+    it("BINDS out_aux_digest: altering it changes y", async () => {
+        const base = buildBindingBase();
+        await assertBinds(base, inp => {
+            inp.out_aux_digest = (BigInt(inp.out_aux_digest) + 1n).toString();
+            return inp;
+        }, "out_aux_digest");
+    });
+
+    it("out_aux_digest occupies the final coefficient slot", () => {
+        const base = buildBindingBase();
+        const coeffs = flatten(base);
+        expect(coeffs.length).to.equal(31);
+        expect(coeffs[30]).to.equal(BigInt(base.out_aux_digest));
+    });
+
     // ===== PolyEval binding: address fields =====
 
     it("BINDS recipient_address: altering it changes y", async () => {
