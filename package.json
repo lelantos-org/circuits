@@ -1,7 +1,7 @@
 {
   "name": "@lelantos-org/circuits",
   "version": "0.7.0",
-  "description": "Lelantos MASP Groth16 prover artifacts (2x2 transact circuit). PROTOTYPE — single-contributor zkey, NOT mainnet-safe.",
+  "description": "Lelantos MASP Groth16 prover artifacts.",
   "license": "Apache-2.0",
   "type": "module",
   "files": [

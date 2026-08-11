@@ -51,9 +51,10 @@ jobs:
           # There is no `test` or `lint` target; do not let auto-config invent one.
           test: false
           lint: false
-          # An independent re-check of the whole environment by the kernel: it catches
-          # a proof that only type-checks because of an elaborator bug. It re-checks
-          # Mathlib too, so it is too slow to gate every PR on.
+          # An independent re-check by the kernel of every declaration under the
+          # `Lelantos` prefix: it catches a proof that only type-checks because of an
+          # elaborator bug. Run with no arguments, so its target is the manifest
+          # package name capitalized — see the note in `lean/lakefile.toml`.
           leanchecker: ${{ github.event_name == 'push' }}
 
       # The proofs are worthless if any of them is admitted. `check-axioms.sh` would
