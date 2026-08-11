@@ -121,7 +121,7 @@ chain result below depends on `p_prime` alone.
 | `batch_step_inserts` | `Circuit/TreeUpdateBatch.lean` | an active step is a genuine `InsertsTo` of that leaf over the running frontier |
 | `batch_step_stalls` | `Circuit/TreeUpdateBatch.lean` | an inactive step carries the running state through unchanged |
 | `batch_advances_by_count` | `Circuit/TreeUpdateBatch.lean` | **both halves at once: every step below `actual_count` is a real insert, and `new_root` is the running root at `actual_count`** — the formal content of "odd counts work" |
-| `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(10, 16)`, `COUNT_BITS = 4` |
+| `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(10, 8)`, `COUNT_BITS = 3` |
 | `batch_bounds_deployed` | `Circuit/TreeUpdateBatch.lean` | the two side conditions are simultaneously satisfiable at the deployed shape, so the results above are not conditional on an impossible hypothesis |
 | `batch_deposit_opens` | `Circuit/TreeUpdateBatch.lean` | an active deposit leaf's `cv_dep` opens to exactly `leaf_public_in` units of `leaf_asset` |
 | `quaternaryInsertLevel_sound` | `Gadgets/Insert.lean` | the level arithmetic is the fill table: `cur` at the digit, frontier left, empty-subtree hash right — and the frontier update is a *different* mux, also proved |

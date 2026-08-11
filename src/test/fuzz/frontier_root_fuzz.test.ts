@@ -1,4 +1,4 @@
-// Fuzz coverage for the H-1 frontier-binding fix at DEPTH=10 / MAX_L=16.
+// Fuzz coverage for the H-1 frontier-binding fix at DEPTH=10 / MAX_L=8.
 //
 // `lib/frontier_root.circom` rebinds `frontier_in` to public `old_root` so a
 // malicious relayer cannot pair a real `oldRoot` with a forged frontier.
@@ -38,7 +38,7 @@ import { expectWitnessFails } from "../lib/expect";
 import { fcParamsFor } from "./arbitraries";
 
 const DEPTH = 10;
-const MAX_L = 16;
+const MAX_L = 8;
 const TAG_LEAF = 10n;
 const CAPACITY = 4 ** DEPTH;
 const WRAPPER = srcPath("tree_update_batch.circom");
@@ -166,7 +166,7 @@ function tamperableLevels(digits: number[]): number[] {
     return out;
 }
 
-describe("frontier_root [fuzz, depth=10, MAX_L=16]", function () {
+describe("frontier_root [fuzz, depth=10, MAX_L=8]", function () {
     this.timeout(3_600_000);
 
     let circuit: any;
@@ -179,7 +179,7 @@ describe("frontier_root [fuzz, depth=10, MAX_L=16]", function () {
         circuit = await loadCircuit(WRAPPER);
     });
 
-    it("any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..16 leaves)", async () => {
+    it("any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..8 leaves)", async () => {
         // Compose digits + k together so k always fits the remaining capacity,
         // avoiding a discard when the draw would overflow.
         // We also require at least one digit==3 so `tamperableLevels` is

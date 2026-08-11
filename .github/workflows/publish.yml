@@ -86,12 +86,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           grep '^circuits-shas=' /tmp/check-artifacts.log >> "$GITHUB_OUTPUT"
 
-      - name: Cache ptau_20 (tree_update_batch)
-        uses: actions/cache@v4
-        with:
-          path: ptau/powersOfTau28_hez_final_20.ptau
-          key: ptau-20
-
       - name: Build tree_update_batch artifacts
         id: build_batch
         run: |

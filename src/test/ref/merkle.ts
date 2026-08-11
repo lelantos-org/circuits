@@ -22,8 +22,8 @@ const MAX_DEPTH = 25;
  *
  * The stride must scale with depth: a fixed 2^18 holds only at depth 10, and
  * at any greater depth a level-1 index runs past it and collides with a
- * level-2 key. `merkle.test.ts` pins the injectivity directly, since the
- * in-repo tests run only at depths 2 and 10.
+ * level-2 key. `reference.test.ts` checks injectivity across every supported
+ * depth, since the circuit tests exercise only depths 2 and 10.
  */
 export function cacheKeyStride(depth: number): number {
     return 2 ** (2 * depth - 2);

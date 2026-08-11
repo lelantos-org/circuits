@@ -33,7 +33,7 @@ On the chain side:
   below `actual_count` is a genuine `InsertsTo` of that leaf over the running frontier, and
   `new_root` is the running root at index `actual_count`. Neither half alone is the wanted
   statement — see the theorem's own note. This is the formal content of "odd counts work",
-  and `batch_advances_by_count_deployed` pins it at `TreeUpdateBatch(10, 16)`.
+  and `batch_advances_by_count_deployed` pins it at `TreeUpdateBatch(10, 8)`.
 
 `InsertsTo` (`Gadgets/Insert.lean`) is the abstract meaning of an append. It is an
 existential over the hash chain, but `InsertsTo.unique` shows the chain is determined by
@@ -360,29 +360,29 @@ theorem batch_advances_by_count {depth maxL countBits : ℕ} {w : BatchSignals d
 
 /-! ### The deployed instantiation
 
-`src/tree_update_batch.circom:269` instantiates `TreeUpdateBatch(10, 16)` with
-`COUNT_BITS = 4`. Discharging the side conditions at those numbers is not decoration: it
+`src/tree_update_batch.circom` instantiates `TreeUpdateBatch(10, 8)` with
+`COUNT_BITS = 3`. Discharging the side conditions at those numbers is not decoration: it
 shows the two bounds the results above carry are *simultaneously satisfiable*, so those
 theorems are not conditional on an impossible hypothesis. -/
 
 /-- The deployed shape meets both side conditions. -/
-theorem batch_bounds_deployed : (2 : ℕ) ^ 4 = 16 ∧ (2 : ℕ) ^ (4 + 2) ≤ p := by
+theorem batch_bounds_deployed : (2 : ℕ) ^ 3 = 8 ∧ (2 : ℕ) ^ (3 + 2) ≤ p := by
   refine ⟨by norm_num, ?_⟩
   unfold p
   norm_num
 
-/-- `batch_advances_by_count` at `TreeUpdateBatch(10, 16)`, `COUNT_BITS = 4`. -/
-theorem batch_advances_by_count_deployed {w : BatchSignals 10 16}
-    (h : BatchChainSat 4 w) :
+/-- `batch_advances_by_count` at `TreeUpdateBatch(10, 8)`, `COUNT_BITS = 3`. -/
+theorem batch_advances_by_count_deployed {w : BatchSignals 10 8}
+    (h : BatchChainSat 3 w) :
     (∀ k, k < w.actualCount.val →
       InsertsTo 10 (w.leaves k) (w.idxDig k) (w.fr k) w.zeros (w.fr (k + 1))
         (w.runningRoot (k + 1))) ∧
       w.newRoot = w.runningRoot w.actualCount.val :=
   batch_advances_by_count batch_bounds_deployed.1 batch_bounds_deployed.2 h
 
-/-- `actual_count ∈ [1, 16]` at the deployed shape — odd values included. -/
-theorem batch_count_range_deployed {w : BatchSignals 10 16} (h : BatchChainSat 4 w) :
-    1 ≤ w.actualCount.val ∧ w.actualCount.val ≤ 16 :=
+/-- `actual_count ∈ [1, 8]` at the deployed shape — odd values included. -/
+theorem batch_count_range_deployed {w : BatchSignals 10 8} (h : BatchChainSat 3 w) :
+    1 ≤ w.actualCount.val ∧ w.actualCount.val ≤ 8 :=
   batch_count_range batch_bounds_deployed.1
     (pow_countBits_lt_p batch_bounds_deployed.2) h
 

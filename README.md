@@ -1,13 +1,6 @@
 # Lelantos Circuits
 
-Groth16 prover artifacts for the Lelantos 2x2 transact circuit, consumed by
-[`@lelantos-org/sdk`](../sdk) (`2x2.wasm`, `2x2_final.zkey`,
-`verification_key.json`). The SDK resolves them automatically via subpath
-`exports`.
-
-The `tree_update_batch` artifacts are **not** shipped in the npm package —
-they are built locally (`just rebuild-batch`) and deployed through the
-contracts repo's pipeline.
+Groth16 prover artifacts for the Lelantos 2x2 transact circuit.
 
 Circuit design: [src/README.md](src/README.md). Formal verification:
 [lean/README.md](lean/README.md).
@@ -22,10 +15,15 @@ npm install @lelantos-org/circuits
 
 R1CS totals on BN254 (`snarkjs r1cs info`):
 
-| Circuit                                    | Constraints | Wires   | Private inputs |
-|--------------------------------------------|------------:|--------:|---------------:|
-| `2x2.circom` — `Transact(10, 2, 2)`        |      69,350 |  69,419 |            143 |
-| `tree_update_batch.circom` — `TreeUpdateBatch(10, 8)` | 238,751 | 238,495 |     122 |
+| Circuit                                               | Constraints | Wires   | Private inputs |
+|-------------------------------------------------------|------------:|--------:|---------------:|
+| `2x2.circom` — `Transact(10, 2, 2)`                   |      69,350 |  69,419 |            143 |
+| `3x3.circom` — `Transact(10, 3, 3)`                   |     102,939 | 103,040 |            210 |
+| `tree_update_batch.circom` — `TreeUpdateBatch(10, 16)` |     252,672 | 252,368 |            146 |
+
+Each has one public input (the Fiat–Shamir challenge `z`). Only the `2x2`
+artifacts ship in the npm package; `3x3` is built but not wired on-chain (it
+needs a 42-slot `PubInputs.compress` overload — see [src/3x3.circom](src/3x3.circom)).
 
 ## Formal verification
 

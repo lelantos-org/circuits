@@ -7,7 +7,7 @@ subgroup. The package exports two Groth16 entry points:
 | Circuit | Instantiation | Purpose |
 |---|---|---|
 | [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` | Pool transact circuit: up to 2 shielded inputs, 2 shielded outputs per proof. |
-| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 16)` | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 16 leaves, any count (odd included). See §14. |
+| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 8)` | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 8 leaves, any count (odd included). See §14. |
 
 The transact circuit operates on a quaternary Merkle tree of depth 10
 (`4^10 = 1,048,576` leaves). Each output carries an off-circuit FMD
@@ -610,14 +610,14 @@ for current counts.
 | FMD clue signals | 0 (off-circuit, §7a) |
 | `PolyEval(30)` Horner chain | ~30 |
 
-### `TreeUpdateBatch(10, 16)`
+### `TreeUpdateBatch(10, 8)`
 
 ```
-constraints:     252,672
-wires:           252,368
+constraints:     130,607
+wires:           130,471
 public inputs:   1     (z)
 public outputs:  1     (y)
-private inputs:  146
+private inputs:  90
 ```
 
 Dominated by MAX_L single-leaf inserts × 10 Merkle levels of
@@ -625,11 +625,12 @@ Dominated by MAX_L single-leaf inserts × 10 Merkle levels of
 (each: `HashToAssetGen` + `ValueScalarMul` + `MulH` + `BabyAdd`).
 `FrontierRoot` adds ~8.7k constraints. `PolyEval(100)` is negligible.
 
-Going leaf-granular cost ~14k constraints over the previous
-pair-granular `TreeUpdateBatch(10, 8)` (238,751 measured with the same
-toolchain): the insert count is unchanged at 16, the deposit bindings
-double from 8 to 16, and the per-pair aggregate — a second `MulH` for
-the pad blinder plus the pair-sum `BabyAdd`s — is removed.
+`MAX_L = 8` is a proving-speed choice: it lands just under the 2^17 FFT
+domain, making a proof ~1.8x faster than `MAX_L = 16` (2.7s vs 4.8s
+measured) and fitting `ptau_17` instead of `ptau_20`. Headroom is thin —
+130,607 of 131,072 — so roughly 465 constraints of growth would push the
+circuit to 2^18 and undo it. Verification gas is unaffected either way
+(195,026, a fixed pairing check over 2 public inputs).
 
 ---
 
@@ -693,16 +694,16 @@ leaf and a 3-output shape had no representation at all.
 | `new_root` | 1 | Output — bound to the running root after `MAX_L` muxed inserts. |
 | `start_index` | 1 | First insertion slot. Contract validates against `committedCount`. |
 | `actual_count` | 1 | Active leaf count, range `[1, MAX_L]`. |
-| `cms[MAX_L]` | 16 | Per-leaf commitments; padding (inactive) MUST be 0. |
-| `cv_dep[MAX_L][2]` | 32 | Per-leaf deposit-anchored Pedersen value commitments; padding MUST be 0. |
-| `leaf_asset[MAX_L]` | 16 | Per-leaf public asset id (deposit only; padding 0). |
-| `leaf_public_in[MAX_L]` | 16 | Per-leaf public_in (deposit only; padding 0). |
-| `is_deposit[MAX_L]` | 16 | 0/1 per leaf; 1 selects the deposit binding check. |
+| `cms[MAX_L]` | 8 | Per-leaf commitments; padding (inactive) MUST be 0. |
+| `cv_dep[MAX_L][2]` | 16 | Per-leaf deposit-anchored Pedersen value commitments; padding MUST be 0. |
+| `leaf_asset[MAX_L]` | 8 | Per-leaf public asset id (deposit only; padding 0). |
+| `leaf_public_in[MAX_L]` | 8 | Per-leaf public_in (deposit only; padding 0). |
+| `is_deposit[MAX_L]` | 8 | 0/1 per leaf; 1 selects the deposit binding check. |
 
 Private witnesses: `frontier_in[DEPTH][3]`, `rcv[MAX_L]` (the
 `rcv_dep` blinder of leaf `k`).
 
-Total compressed PI count: `4 + 6·MAX_L = 100` for `MAX_L = 16`.
+Total compressed PI count: `4 + 6·MAX_L = 52` for `MAX_L = 8`.
 
 **Frontier binding (SOUNDNESS-CRITICAL).** `frontier_in` is
 prover-supplied. Without binding, a relayer could submit
@@ -748,7 +749,7 @@ update propagates `ins[k].frontier_out` and `ins[k].root` when
 `active[k] == 1`, else carries `fr[k]` / `running_root[k]` through.
 After `MAX_L` leaves, `new_root === running_root[MAX_L]`.
 
-**SnarkCompression.** 100 logical PIs folded into `(z, y)` via
+**SnarkCompression.** 52 logical PIs folded into `(z, y)` via
 `BatchCompress(MAX_L)`. Slot order MUST match
 `contracts/src/libs/PubInputs.sol :: compress(TreeUpdateBatch)`. The
 two `uint64` blocks are adjacent and the `uint8` block follows them, so

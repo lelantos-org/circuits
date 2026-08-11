@@ -94,11 +94,14 @@ compile-batch:
     npx snarkjs r1cs info "{{BUILD}}/tree_update_batch.r1cs"
 
 # Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
-# tree_update_batch (MAX_L=16) has ~253k constraints, requires ptau_20 (~3GB).
+# tree_update_batch (MAX_L=8) has ~131k constraints -> 2^17 FFT domain, so it
+# uses PTAU17 like 2x2/3x3. It needed PTAU20 (~3GB) at MAX_L=16 (~253k, 2^18).
+# Headroom is thin: 130,607 of 131,072. Adding per-leaf constraints pushes it
+# back to PTAU20 and roughly doubles proving time.
 setup-batch:
-    just _fetch-ptau "{{PTAU20}}"
+    just _fetch-ptau "{{PTAU17}}"
     echo "==> Phase-2 setup (tree_update_batch)"
-    npx snarkjs groth16 setup "{{BUILD}}/tree_update_batch.r1cs" "{{PTAU_DIR}}/{{PTAU20}}" "{{BUILD}}/tree_update_batch_0.zkey"
+    npx snarkjs groth16 setup "{{BUILD}}/tree_update_batch.r1cs" "{{PTAU_DIR}}/{{PTAU17}}" "{{BUILD}}/tree_update_batch_0.zkey"
     echo "==> Single contribution (PROTOTYPE ONLY)"
     npx snarkjs zkey contribute "{{BUILD}}/tree_update_batch_0.zkey" "{{BUILD}}/tree_update_batch_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
     echo "==> Export verification key"

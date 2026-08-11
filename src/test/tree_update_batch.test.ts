@@ -5,7 +5,7 @@
 //   - odd leaf counts (1, 3, 15) and leaf-granular multiplexing
 //   - Padding zero constraints
 //
-// MAX_L = 16 leaves max, counted individually: actual_count is a LEAF count,
+// MAX_L = 8 leaves max, counted individually: actual_count is a LEAF count,
 // so a batch may commit an odd number of leaves. Tests stay at small
 // actual_count for runtime; larger cases verify multiplex logic.
 
@@ -26,7 +26,7 @@ import { expectWitnessFails } from "./lib/expect";
 import { expect } from "chai";
 
 const DEPTH = 10;
-const MAX_L = 16;
+const MAX_L = 8;
 const WRAPPER = srcPath("tree_update_batch.circom");
 
 interface LeafWitness {
@@ -282,16 +282,16 @@ describe("tree_update_batch", function () {
         await expectHonest(circuit, w);
     });
 
-    it("honest odd batch: 15 leaves passes", async () => {
+    it("honest odd batch: 7 leaves passes", async () => {
         const leaves: LeafWitness[] = [];
-        for (let i = 0; i < 15; i++) {
+        for (let i = 0; i < 7; i++) {
             leaves.push(simpleLeaf({ J, P, val: BigInt(300 + i), isDeposit: 1, pk: BigInt(0xbe00 + i) }));
         }
         const w = buildHonest(P, J, 0, leaves);
         await expectHonest(circuit, w);
     });
 
-    it("honest full-batch (actual_count = MAX_L = 16) passes", async () => {
+    it("honest full-batch (actual_count = MAX_L = 8) passes", async () => {
         const leaves: LeafWitness[] = [];
         for (let i = 0; i < MAX_L; i++) {
             leaves.push(simpleLeaf({ J, P, val: BigInt(300 + 2 * i), isDeposit: 1, pk: BigInt(0xbf00 + i) }));
@@ -381,7 +381,7 @@ describe("tree_update_batch", function () {
     // ===== Other negative coverage (D) =====
 
     it("FAILS when actual_count == 0 (Num2Bits(COUNT_BITS) rejects -1)", async () => {
-        // Circuit decomposes (actual_count - 1) in COUNT_BITS=4 bits ⇒
+        // Circuit decomposes (actual_count - 1) in COUNT_BITS=3 bits ⇒
         // actual_count=0 yields -1, a 254-bit field element that Num2Bits
         // cannot fit.
         const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
@@ -395,11 +395,11 @@ describe("tree_update_batch", function () {
         await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    it("FAILS when actual_count > MAX_L (Num2Bits(COUNT_BITS) rejects 16)", async () => {
-        // COUNT_BITS=4 bounds (actual_count - 1) ∈ [0, 15] ⇒ actual_count ≤ 16.
-        // Setting actual_count = 17 ⇒ (17-1)=16 ⇒ Num2Bits(4) fails.
+    it("FAILS when actual_count > MAX_L (Num2Bits(COUNT_BITS) rejects 8)", async () => {
+        // COUNT_BITS=3 bounds (actual_count - 1) ∈ [0, 7] ⇒ actual_count ≤ 8.
+        // Setting actual_count = 9 ⇒ (9-1)=8 ⇒ Num2Bits(3) fails.
         const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
-        w.actualCount = 17;
+        w.actualCount = 9;
         rebindFiatShamir(w);
         await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });

@@ -70,7 +70,7 @@ const LEAN_EXPECTED = path.join(ROOT, "lean", "expected");
 
 const SCHEMA = "lelantos.circuits.vectors/1";
 const DEPTH = 10;
-const MAX_L = 16;
+const MAX_L = 8;
 
 const outDir = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, "vectors");
 

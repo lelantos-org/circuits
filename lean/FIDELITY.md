@@ -174,7 +174,7 @@ append results reach no curve axiom.
 
 Three rows are deliberately empty. `BabyCheck` and `FrontierRoot` are genuine gaps, not
 simplifications, and both are listed in the README. `BatchCompress` is covered generically by
-`polyEval_sound` / `polyEval_binding`; what Lean does not pin is the *order* of the 100
+`polyEval_sound` / `polyEval_binding`; what Lean does not pin is the *order* of the 52
 coefficients, which the TypeScript suite asserts against the circuit's own `y` output.
 
 ### `src/lib/note.circom`

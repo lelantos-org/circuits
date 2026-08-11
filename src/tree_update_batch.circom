@@ -49,7 +49,7 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 //   [4 + 3·MAX_L .. 3 + 4·MAX_L]   leaf_asset
 //   [4 + 4·MAX_L .. 3 + 5·MAX_L]   leaf_public_in
 //   [4 + 5·MAX_L .. 3 + 6·MAX_L]   is_deposit
-// Total = 4 + 6·MAX_L (100 for MAX_L = 16).
+// Total = 4 + 6·MAX_L (52 for MAX_L = 8).
 //
 // The caller must ensure start_index + MAX_L - 1 < 4^DEPTH.
 template TreeUpdateBatch(DEPTH, MAX_L) {
@@ -74,7 +74,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 
     // 1. Range-check actual_count ∈ [1, MAX_L] via Num2Bits(actual_count - 1).
     //    That bounds it by 2^COUNT_BITS, so the bound must be tight to MAX_L.
-    var COUNT_BITS = 4;
+    var COUNT_BITS = 3;
     assert((1 << COUNT_BITS) == MAX_L);
     component cnt_bits = Num2Bits(COUNT_BITS);
     cnt_bits.in <== actual_count - 1;
@@ -261,9 +261,16 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 }
 
 // DEPTH = 10 must match 2x2.circom and the on-chain CommitmentTree.
-// MAX_L = 16 leaves per batch, sized for ptau_20 headroom.
+// MAX_L = 8 leaves per batch. Chosen for proving speed: 8 lands at ~131k
+// constraints, just under the 2^17 FFT domain, which makes a proof ~1.8x faster
+// than MAX_L = 16 (2.7s vs 4.8s measured) and fits ptau_17 instead of ptau_20.
+//
+// HEADROOM WARNING: 130,607 constraints against a 2^17 domain of 131,072 leaves
+// ~465 constraints of slack. One extra constraint per leaf tips the circuit into
+// 2^18 and the speed advantage disappears in a single commit. Re-measure before
+// adding anything to the per-leaf work.
 // Changing either requires a new ceremony and a contract change, since the
 // public-input layout is 4 + 6·MAX_L.
 component main {
     public [ z ]
-} = TreeUpdateBatch(10, 16);
+} = TreeUpdateBatch(10, 8);

@@ -2,7 +2,7 @@
 //
 // An independent implementation of the same quaternary node hashing as
 // merkle.ts. The two are kept separate so one constructs and the other checks;
-// merkle.test.ts cross-validates them.
+// reference.test.ts cross-validates them.
 
 import type { Field } from "./field.js";
 import type { Poseidon } from "./poseidon.js";
