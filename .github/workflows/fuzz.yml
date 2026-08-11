@@ -11,7 +11,7 @@ on:
       fuzz_mode:
         description: 'FUZZ tier (light/medium/heavy)'
         required: false
-        default: 'heavy'
+        default: 'light'
 
 permissions:
   contents: read
@@ -26,13 +26,12 @@ concurrency:
 
 jobs:
   fuzz:
-    runs-on: [self-hosted]
+    runs-on: [ubuntu-latest]
     # PR runs use FUZZ=light (~minutes); push-to-main FUZZ=medium; cron +
     # manual default FUZZ=heavy. Single timeout covers heavy mode.
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: read
     env:
       CIRCOM_VERSION: v2.2.3
       FUZZ: >-
@@ -40,7 +39,7 @@ jobs:
           github.event_name == 'pull_request' && 'light' ||
           github.event_name == 'push' && 'medium' ||
           github.event_name == 'workflow_dispatch' && (inputs.fuzz_mode || 'heavy') ||
-          'heavy'
+          'light'
         }}
     steps:
       - uses: actions/checkout@v4
@@ -54,50 +53,13 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Cache cargo registry + git
-        uses: actions/cache@v4
+      - name: Setup circom
+        uses: ./.github/actions/setup-circom
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-circom-${{ env.CIRCOM_VERSION }}
-
-      - name: Cache circom binary
-        id: cache-circom
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/bin/circom
-          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install circom
-        if: steps.cache-circom.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          os=$(uname -s)
-          arch=$(uname -m)
-          case "$os-$arch" in
-            Linux-x86_64)  asset=circom-linux-amd64 ;;
-            Darwin-x86_64) asset=circom-macos-amd64 ;;
-            *)             asset="" ;;
-          esac
-          if [ -n "$asset" ]; then
-            curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/${asset}" \
-              -o "$HOME/.local/bin/circom"
-            chmod +x "$HOME/.local/bin/circom"
-          else
-            cargo install --git https://github.com/iden3/circom --tag "${CIRCOM_VERSION}" --root "$HOME/.local" circom
-          fi
-
-      - name: Add circom to PATH
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Verify circom
-        run: circom --version
+          version: ${{ env.CIRCOM_VERSION }}
 
       - name: Install npm dependencies
         run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run fuzz suite (FUZZ=${{ env.FUZZ }})
         run: just test-fuzz

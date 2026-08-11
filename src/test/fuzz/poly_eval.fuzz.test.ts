@@ -6,8 +6,7 @@
 // algebraic identities (linearity, z=0, z=1) that lock the gadget to its
 // Horner-form specification.
 //
-// Wrapper exposes `TestPolyEval26` (N=26 — the legacy 20-base + 6-clue
-// Transact compress size). Property: contract-side `SnarkCompression`
+// Wrapper exposes `TestPolyEval26` (N=26). Property: contract-side `SnarkCompression`
 // implements the SAME Horner schedule, so any Schwartz–Zippel divergence
 // here would break the on-chain ↔ in-circuit binding.
 

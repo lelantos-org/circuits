@@ -6,9 +6,11 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 include "../../node_modules/circomlib/circuits/escalarmulany.circom";
 include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 
-// Baby-Jubjub value commitment: cv = value·gen + rcv·H.
-//   gen: HashToAssetGen output or public-bucket point.
-//   rcv: 253-bit blinder. H = Pedersen BASE[2], gen = BASE[0] (disjoint).
+// Baby-Jubjub value commitments: cv = value·gen + rcv·H.
+//   gen — HashToAssetGen output, or the transparent-bucket point.
+//   rcv — 253-bit blinder.
+// H is Pedersen BASE[2] and gen derives from BASE[0], so their images are
+// disjoint.
 
 function H_BASE_X() {
     return 5802099305472655231388284418920769829666717045250560929368476121199858275951;
@@ -17,8 +19,8 @@ function H_BASE_Y() {
     return 5980429700218124965372158798884772646841287887664001482443826541541529227896;
 }
 
-// Variable-base scalar mul: value·gen. Bits LSB-first from RangeCheck64.
-// value=0 → identity (0,1).
+// Variable-base scalar multiplication value·gen, bits LSB-first from
+// RangeCheck64. value = 0 yields the identity (0, 1).
 template ValueScalarMul() {
     signal input bits[64];
     signal input gen[2];
@@ -35,7 +37,7 @@ template ValueScalarMul() {
     out[1] <== mul.out[1];
 }
 
-// Fixed-base scalar mul: rcv·H, 253-bit scalar.
+// Fixed-base scalar multiplication rcv·H with a 253-bit scalar.
 template MulH() {
     signal input scalar;
     signal output out[2];
@@ -55,7 +57,72 @@ template MulH() {
     out[1] <== mul.out[1];
 }
 
-// cv = value·gen + rcv·H. rH exposed for PerAssetPointBalance.
+// Two commitments to the SAME (value, gen) under independent blinders, sharing
+// one variable-base scalar multiplication:
+//   cv     = value·gen + rcv·H
+//   cv_dep = value·gen + rcv_dep·H
+//
+// Every note needs exactly this pair — `cv` is the per-spend re-randomisation
+// published in the transaction, `cv_dep` is the note's permanent blinding that
+// reproduces its committed leaf. The two blinders MUST stay independent: if
+// rcv == rcv_dep then in_cv at spend time equals the leaf's cv_dep and an
+// observer learns which leaf was spent.
+//
+// The value·gen term, however, is identical across the two. Instantiating
+// ValueCommit twice would compute EscalarMulAny(64) twice for the same bits and
+// the same generator — 585 constraints of duplicated work per note slot. This
+// template computes it once and adds each blinder.
+//
+// rH / rH_dep are exposed for PerAssetPointBalance.
+template ValueCommitPair() {
+    signal input bits[64];
+    signal input gen[2];
+    signal input rcv;
+    signal input rcv_dep;
+    signal output cv[2];
+    signal output rH[2];
+    signal output cv_dep[2];
+    signal output rH_dep[2];
+
+    // The shared term, computed once.
+    component vt = ValueScalarMul();
+    for (var i = 0; i < 64; i++) {
+        vt.bits[i] <== bits[i];
+    }
+    vt.gen[0] <== gen[0];
+    vt.gen[1] <== gen[1];
+
+    component rHmul = MulH();
+    rHmul.scalar <== rcv;
+
+    component add = BabyAdd();
+    add.x1 <== vt.out[0];
+    add.y1 <== vt.out[1];
+    add.x2 <== rHmul.out[0];
+    add.y2 <== rHmul.out[1];
+
+    cv[0] <== add.xout;
+    cv[1] <== add.yout;
+    rH[0] <== rHmul.out[0];
+    rH[1] <== rHmul.out[1];
+
+    component rHmul_dep = MulH();
+    rHmul_dep.scalar <== rcv_dep;
+
+    component add_dep = BabyAdd();
+    add_dep.x1 <== vt.out[0];
+    add_dep.y1 <== vt.out[1];
+    add_dep.x2 <== rHmul_dep.out[0];
+    add_dep.y2 <== rHmul_dep.out[1];
+
+    cv_dep[0] <== add_dep.xout;
+    cv_dep[1] <== add_dep.yout;
+    rH_dep[0] <== rHmul_dep.out[0];
+    rH_dep[1] <== rHmul_dep.out[1];
+}
+
+// cv = value·gen + rcv·H. rH is exposed for PerAssetPointBalance.
+// Single-blinder form, used where only one commitment is needed.
 template ValueCommit() {
     signal input bits[64];
     signal input gen[2];
@@ -85,7 +152,7 @@ template ValueCommit() {
     rH[1] <== rHmul.out[1];
 }
 
-// Chained Edwards point sum. PointSum(0) = identity (0,1).
+// Chained Edwards point sum. PointSum(0) is the identity (0, 1).
 template PointSum(N) {
     signal input pts[N][2];
     signal output out[2];

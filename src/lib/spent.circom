@@ -8,15 +8,18 @@ include "value_commit.circom";
 include "../../node_modules/circomlib/circuits/comparators.circom";
 
 // One spent-note slot.
-// is_dummy=0: pk check, Merkle membership, asset_id != 0.
-// is_dummy=1: those bypassed; DummyZeroValue enforces value == 0.
-// Always:
-//   nf     == Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho)
-//   value < 2^64
+//
+// is_dummy = 0 enforces the pk check, Merkle membership and asset_id != 0.
+// is_dummy = 1 bypasses those; the caller's DummyZeroValue forces value == 0.
+//
+// Enforced in both cases:
+//   nf     == Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm)
+//   value  < 2^64
 //   cv     == ValueCommit(value, HashToAssetGen(asset_id), rcv)
 //   cv_dep == ValueCommit(value, HashToAssetGen(asset_id), rcv_dep)
 //   leaf   == Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
-// rH exposed for PerAssetPointBalance.
+//
+// rH is exposed for PerAssetPointBalance.
 template SpentNote(DEPTH) {
     // ---- private witness ----
     signal input asset_id;
@@ -36,7 +39,7 @@ template SpentNote(DEPTH) {
     signal input nullifier;
     signal input cv[2];
 
-    // ---- exposed for caller ----
+    // ---- exposed to caller ----
     signal output rH[2];
 
     // 1. nsk → ivk → pk.
@@ -55,30 +58,34 @@ template SpentNote(DEPTH) {
     cm.rho      <== rho;
     cm.rcm      <== rcm;
 
-    // 3. Range-check value; bits shared with both ValueCommits.
+    // 3. Range-check value; the bits are shared by both commitments below.
     component rng_in = RangeCheck64();
     rng_in.v <== value;
 
-    // 4. cv_dep = ValueCommit(value, V^asset, rcv_dep).
+    // 4. cv     = ValueCommit(value, V^asset, rcv)      — bound in step 9.
+    //    cv_dep  = ValueCommit(value, V^asset, rcv_dep)  — feeds the leaf below.
+    //    Both share one value·V^asset scalar mul; see ValueCommitPair.
     component gen_in = HashToAssetGen();
     gen_in.asset_id <== asset_id;
 
-    component vc_dep = ValueCommit();
+    component vc = ValueCommitPair();
     for (var i = 0; i < 64; i++) {
-        vc_dep.bits[i] <== rng_in.bits[i];
+        vc.bits[i] <== rng_in.bits[i];
     }
-    vc_dep.gen[0] <== gen_in.gen[0];
-    vc_dep.gen[1] <== gen_in.gen[1];
-    vc_dep.rcv    <== rcv_dep;
+    vc.gen[0]  <== gen_in.gen[0];
+    vc.gen[1]  <== gen_in.gen[1];
+    vc.rcv     <== rcv;
+    vc.rcv_dep <== rcv_dep;
 
-    // 5. leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
+    // 5. leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y). Recomputing the same
+    //    leaf that tree_update_batch inserted pins (asset, value) to the note.
     component leaf_h = Poseidon(4);
     leaf_h.inputs[0] <== TAG_LEAF();
     leaf_h.inputs[1] <== cm.cm;
-    leaf_h.inputs[2] <== vc_dep.cv[0];
-    leaf_h.inputs[3] <== vc_dep.cv[1];
+    leaf_h.inputs[2] <== vc.cv_dep[0];
+    leaf_h.inputs[3] <== vc.cv_dep[1];
 
-    // 6. Merkle membership (skipped if is_dummy).
+    // 6. Merkle membership, skipped when is_dummy == 1.
     component mp = MerkleProofOrDummy(DEPTH);
     mp.leaf     <== leaf_h.out;
     mp.root     <== root;
@@ -90,29 +97,23 @@ template SpentNote(DEPTH) {
         mp.path_indices[d]     <== path_indices[d];
     }
 
-    // 7. nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho).
+    // 7. nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm). cm is in the
+    //    preimage so a rho collision alone cannot lock a note.
     component nk_d = DeriveNk();
     nk_d.nsk <== nsk;
 
     component nf_h = Nullifier();
     nf_h.nk  <== nk_d.nk;
     nf_h.rho <== rho;
+    nf_h.cm  <== cm.cm;
     nf_h.nf === nullifier;
 
-    // 8. asset_id != 0 for real notes (ghost-note defense).
+    // 8. Real notes carry asset_id != 0, so packed_av >= 2^64 in NoteCommitment.
     component asset_nz = IsZero();
     asset_nz.in <== asset_id;
     (1 - is_dummy) * asset_nz.out === 0;
 
     // 9. Bind cv to (asset_id, value, rcv).
-    component vc = ValueCommit();
-    for (var i = 0; i < 64; i++) {
-        vc.bits[i] <== rng_in.bits[i];
-    }
-    vc.gen[0] <== gen_in.gen[0];
-    vc.gen[1] <== gen_in.gen[1];
-    vc.rcv    <== rcv;
-
     cv[0] === vc.cv[0];
     cv[1] === vc.cv[1];
 

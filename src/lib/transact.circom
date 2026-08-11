@@ -1,38 +1,42 @@
 pragma circom 2.2.3;
 
-include "lib/spent.circom";
-include "lib/output.circom";
-include "lib/balance.circom";
-include "lib/value_commit.circom";
-include "lib/poly_eval.circom";
-// MASP Pool: 2-input × 3-output transact circuit. Semantics identical to
-// 2x2.circom — same wiring with N_IN=2, N_OUT=3.
-//
-// PI compression via TransactCompressN(2, 3). Layout:
-//     [ 0]      merkle_root
-//     [ 1.. 2]  nullifier[0..1]
-//     [ 3.. 5]  out_cm[0..2]
-//     [ 6]      public_asset_id
-//     [ 7]      public_in
-//     [ 8]      public_out
-//     [ 9..12]  in_cv[0..1][0..1]
-//     [13..18]  out_cv[0..2][0..1]
-//     [19]      recipient_address
-//     [20]      chain_id
-//     [21]      payer_address
-//     [22]      relayer_address
-//     [23..28]  out_cv_dep[0..2][0..1]
-//   Slots [29 .. 29 + 3·N_OUT): per-output (clueRx, clueRy, clueBits).
-//   Total = 8 + 3·N_IN + 8·N_OUT = 38 for (2,3).
-//
-// FMD clue: off-circuit, PolyEval-bound.
+include "spent.circom";
+include "output.circom";
+include "balance.circom";
+include "asset_gen.circom";
+include "value_commit.circom";
+include "poly_eval.circom";
 
-template Transact23(DEPTH, N_IN, N_OUT) {
-    // ===== PUBLIC =====
-    signal input  z;
-    signal output y;
+// MASP pool: N_IN-input × N_OUT-output multi-asset transact circuit.
+// The concrete shapes instantiate this template; see 2x2.circom and 3x3.circom.
+//
+// Parameters:
+//   DEPTH — Merkle depth; capacity 4^DEPTH leaves.
+//   N_IN  — spent-note slots; unused slots are dummies.
+//   N_OUT — output-note slots; unused slots are value-0 notes to self.
+//
+// Per-note generator V^t = HashToAssetGen(asset_id); the transparent bucket uses
+// V^pub = HashToAssetGen(public_asset_id); cv = value·V^t + rcv·H.
+// Conservation is enforced by PerAssetValueBalance; PerAssetPointBalance is
+// defense in depth (see balance.circom).
+//
+// Per-slot constraints live in SpentNote and OutputNote; this template is wiring.
+//
+// The verifier sees only (z, y) with y = PolyEval(coeffs, z); the coefficient
+// layout is TransactCompressN's and must match PubInputs.sol.
+//
+// Enforced here: in_asset, out_asset, public_asset_id, public_in and public_out
+// are all < 2^64.
+//
+// Left to the contract: chain_id == block.chainid, recipient_address < 2^160,
+// each nullifier[i] unspent, each out_cm[j] inserted into the commitment tree,
+// and out_aux_digest recomputed from the aux calldata rather than taken from it.
+template Transact(DEPTH, N_IN, N_OUT) {
+    // ===== PUBLIC (verifier-visible) =====
+    signal input  z;   // Fiat-Shamir challenge.
+    signal output y;   // PolyEval(coeffs, z).
 
-    // ===== LOGICAL PIs =====
+    // ===== LOGICAL PUBLIC INPUTS (private signals, bound via PolyEval) =====
     signal input merkle_root;
     signal input nullifier[N_IN];
     signal input out_cm[N_OUT];
@@ -45,7 +49,21 @@ template Transact23(DEPTH, N_IN, N_OUT) {
     signal input chain_id;
     signal input payer_address;
     signal input relayer_address;
+
+    // Pins (asset, value) into the inserted leaf; forwarded to tree_update_batch.
     signal input out_cv_dep[N_OUT][2];
+
+    // FMD clue. Computed off-circuit and constrained only by PolyEval; GAMMA is a
+    // subscription-time parameter, not a circuit parameter.
+    signal input out_clue_bits[N_OUT];
+    signal input out_clue_Rx[N_OUT];
+    signal input out_clue_Ry[N_OUT];
+
+    // Digest of the encrypted-note payload (ephPub + ciphertext, per output),
+    // computed off-circuit and constrained only by PolyEval — same treatment as
+    // the clue fields. It exists so the relayer cannot corrupt the payload while
+    // keeping the proof valid; see poly_eval.circom :: TransactCompressN.
+    signal input out_aux_digest;
 
     // ===== PRIVATE: spent notes =====
     signal input in_asset[N_IN];
@@ -68,11 +86,6 @@ template Transact23(DEPTH, N_IN, N_OUT) {
     signal input out_rcm[N_OUT];
     signal input out_rcv[N_OUT];
     signal input out_rcv_dep[N_OUT];
-
-    // ===== LOGICAL PIs: FMD clue (off-circuit, PolyEval-bound) =====
-    signal input out_clue_bits[N_OUT];
-    signal input out_clue_Rx[N_OUT];
-    signal input out_clue_Ry[N_OUT];
 
     // -------------------------------------------------------------------------
     // Spent-note slots
@@ -102,6 +115,7 @@ template Transact23(DEPTH, N_IN, N_OUT) {
         spent[i].cv[0]     <== in_cv[i][0];
         spent[i].cv[1]     <== in_cv[i][1];
 
+        // is_dummy == 1 ⇒ value == 0.
         in_dz.dummy[i] <== in_is_dummy[i];
         in_dz.value[i] <== in_value[i];
     }
@@ -109,9 +123,17 @@ template Transact23(DEPTH, N_IN, N_OUT) {
     // -------------------------------------------------------------------------
     // Output-note slots
     // -------------------------------------------------------------------------
+    // out_rho is pinned to DeriveRho(nullifier[0], j) so no two committed output
+    // notes can share a rho, and therefore no two can share a future nullifier.
+    component out_rho_d[N_OUT];
     component out_note[N_OUT];
 
     for (var j = 0; j < N_OUT; j++) {
+        out_rho_d[j] = DeriveRho();
+        out_rho_d[j].nf0   <== nullifier[0];
+        out_rho_d[j].index <== j;
+        out_rho[j] === out_rho_d[j].rho;
+
         out_note[j] = OutputNote();
         out_note[j].asset_id <== out_asset[j];
         out_note[j].value    <== out_value[j];
@@ -128,31 +150,38 @@ template Transact23(DEPTH, N_IN, N_OUT) {
         out_cv_dep[j][1] === out_note[j].cv_dep[1];
     }
 
-    // Public-bucket scalar mults.
+    // -------------------------------------------------------------------------
+    // Transparent bucket: public_in / public_out as points on V^pub
+    // -------------------------------------------------------------------------
     component pub_gen = HashToAssetGen();
     pub_gen.asset_id <== public_asset_id;
 
-    component pub_in_rng = RangeCheck64();
-    pub_in_rng.v <== public_in;
-
-    component pub_in_mul = ValueScalarMul();
-    for (var i = 0; i < 64; i++) {
-        pub_in_mul.bits[i] <== pub_in_rng.bits[i];
-    }
+    component pub_in_mul = ValueTimesGen();
+    pub_in_mul.value  <== public_in;
     pub_in_mul.gen[0] <== pub_gen.gen[0];
     pub_in_mul.gen[1] <== pub_gen.gen[1];
 
-    component pub_out_rng = RangeCheck64();
-    pub_out_rng.v <== public_out;
-
-    component pub_out_mul = ValueScalarMul();
-    for (var i = 0; i < 64; i++) {
-        pub_out_mul.bits[i] <== pub_out_rng.bits[i];
-    }
+    component pub_out_mul = ValueTimesGen();
+    pub_out_mul.value  <== public_out;
     pub_out_mul.gen[0] <== pub_gen.gen[0];
     pub_out_mul.gen[1] <== pub_gen.gen[1];
 
-    // Per-asset point balance.
+    // -------------------------------------------------------------------------
+    // Value conservation
+    // -------------------------------------------------------------------------
+    component vbal = PerAssetValueBalance(N_IN, N_OUT);
+    for (var i = 0; i < N_IN; i++) {
+        vbal.in_asset[i] <== in_asset[i];
+        vbal.in_value[i] <== in_value[i];
+    }
+    for (var j = 0; j < N_OUT; j++) {
+        vbal.out_asset[j] <== out_asset[j];
+        vbal.out_value[j] <== out_value[j];
+    }
+    vbal.public_asset_id <== public_asset_id;
+    vbal.public_in       <== public_in;
+    vbal.public_out      <== public_out;
+
     component bal = PerAssetPointBalance(N_IN, N_OUT);
     for (var i = 0; i < N_IN; i++) {
         bal.in_cv[i][0] <== in_cv[i][0];
@@ -171,7 +200,9 @@ template Transact23(DEPTH, N_IN, N_OUT) {
     bal.pub_out_pt[0] <== pub_out_mul.out[0];
     bal.pub_out_pt[1] <== pub_out_mul.out[1];
 
-    // PI compression via generalized compressor.
+    // -------------------------------------------------------------------------
+    // Public-input compression → (z, y)
+    // -------------------------------------------------------------------------
     component pe = TransactCompressN(N_IN, N_OUT);
     pe.z <== z;
     pe.merkle_root <== merkle_root;
@@ -197,10 +228,6 @@ template Transact23(DEPTH, N_IN, N_OUT) {
     pe.chain_id          <== chain_id;
     pe.payer_address     <== payer_address;
     pe.relayer_address   <== relayer_address;
+    pe.out_aux_digest    <== out_aux_digest;
     y <== pe.y;
 }
-
-// Transact23(DEPTH=10, N_IN=2, N_OUT=3). GAMMA is subscription-time parameter.
-component main {
-    public [ z ]
-} = Transact23(10, 2, 3);

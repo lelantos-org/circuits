@@ -14,11 +14,10 @@ concurrency:
 
 jobs:
   build:
-    runs-on: [self-hosted]
+    runs-on: [ubuntu-latest]
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: read
     env:
       CIRCOM_VERSION: v2.2.3
     steps:
@@ -33,51 +32,18 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Cache cargo registry + git
-        uses: actions/cache@v4
+      - name: Setup circom
+        uses: ./.github/actions/setup-circom
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-circom-${{ env.CIRCOM_VERSION }}
-
-      - name: Cache circom binary
-        id: cache-circom
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/bin/circom
-          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install circom
-        if: steps.cache-circom.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          os=$(uname -s)
-          arch=$(uname -m)
-          case "$os-$arch" in
-            Linux-x86_64)  asset=circom-linux-amd64 ;;
-            Darwin-x86_64) asset=circom-macos-amd64 ;;
-            *)             asset="" ;;
-          esac
-          if [ -n "$asset" ]; then
-            curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/${asset}" \
-              -o "$HOME/.local/bin/circom"
-            chmod +x "$HOME/.local/bin/circom"
-          else
-            # No upstream prebuilt for this os/arch (e.g. arm64). Build from source.
-            cargo install --git https://github.com/iden3/circom --tag "${CIRCOM_VERSION}" --root "$HOME/.local" circom
-          fi
-
-      - name: Add circom to PATH
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Verify circom
-        run: circom --version
+          version: ${{ env.CIRCOM_VERSION }}
 
       - name: Install npm dependencies
         run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compile circuit
-        run: just compile
+      # All three deployed shapes. 3x3 and tree_update_batch are otherwise only
+      # compiled indirectly — by `just vectors-check` and by circom_tester inside
+      # the mocha suite — neither of which runs the production
+      # `--r1cs --wasm --sym` path or prints constraint counts. This is the only
+      # job that would notice a constraint blowup pushing a circuit past its ptau.
+      - name: Compile circuits (2x2, 3x3, tree_update_batch)
+        run: just compile compile-3x3 compile-batch

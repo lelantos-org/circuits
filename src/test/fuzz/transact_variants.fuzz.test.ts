@@ -3,10 +3,11 @@
 // Existing [src/test/fuzz/transact.fuzz.test.ts](./transact.fuzz.test.ts)
 // covers balanced random witnesses, unbalanced mutations, ghost-note
 // asset, wrong-nsk, and value-overflow. This file adds:
-//   - role symmetry: swapping the two inputs (or the two outputs) must
-//     still produce a verifying witness — the 2-in / 2-out circuit is
-//     commutative in slot order, and any asymmetry would be a soundness
-//     hole on the spender's side;
+//   - role symmetry: which real note occupies which input/output slot is
+//     free — an honest rebuild after swapping slots must still verify. (A raw
+//     JSON swap does not verify: output rho is bound to (nullifier[0],
+//     out_index), so slot order feeds the derivation. That binding is the F1
+//     faerie-gold defense, not a soundness hole.)
 //   - public-value boundary: publicIn / publicOut at 2^64 - 1 (max) and
 //     at exactly 2^64 (overflow);
 //   - path-element perturbation: mutating a random level of one input's
@@ -54,47 +55,6 @@ async function buildBalanced(
     return { input, inputs: [inA, inB], outputs: [outA, outB], root };
 }
 
-// Swap the two input slots inside a built circom-input dict. Touches every
-// per-input array AND the public-input-bound `nullifier` / `in_cv` slots.
-function swapInputs(input: any): any {
-    const out = { ...input };
-    const swap2 = <T>(arr: T[]): T[] => [arr[1], arr[0]];
-    out.nullifier = swap2(input.nullifier);
-    out.in_cv = swap2(input.in_cv);
-    out.in_asset = swap2(input.in_asset);
-    out.in_value = swap2(input.in_value);
-    out.in_pk = swap2(input.in_pk);
-    out.in_rho = swap2(input.in_rho);
-    out.in_rcm = swap2(input.in_rcm);
-    out.in_nsk = swap2(input.in_nsk);
-    out.in_rcv = swap2(input.in_rcv);
-    out.in_rcv_dep = swap2(input.in_rcv_dep);
-    out.in_path_elements = swap2(input.in_path_elements);
-    out.in_path_indices = swap2(input.in_path_indices);
-    out.in_is_dummy = swap2(input.in_is_dummy);
-    return out;
-}
-
-// Swap the two output slots — every per-output array.
-function swapOutputs(input: any): any {
-    const out = { ...input };
-    const swap2 = <T>(arr: T[]): T[] => [arr[1], arr[0]];
-    out.out_cm = swap2(input.out_cm);
-    out.out_cv = swap2(input.out_cv);
-    out.out_cv_dep = swap2(input.out_cv_dep);
-    out.out_asset = swap2(input.out_asset);
-    out.out_value = swap2(input.out_value);
-    out.out_pk = swap2(input.out_pk);
-    out.out_rho = swap2(input.out_rho);
-    out.out_rcm = swap2(input.out_rcm);
-    out.out_rcv = swap2(input.out_rcv);
-    out.out_rcv_dep = swap2(input.out_rcv_dep);
-    out.out_clue_bits = swap2(input.out_clue_bits);
-    out.out_clue_Rx = swap2(input.out_clue_Rx);
-    out.out_clue_Ry = swap2(input.out_clue_Ry);
-    return out;
-}
-
 describe("transact_2x2 variants [fuzz]", function () {
     this.timeout(3_600_000);
 
@@ -106,33 +66,45 @@ describe("transact_2x2 variants [fuzz]", function () {
         circuit = await loadCircuit(CIRCUIT);
     });
 
-    it("input-role swap preserves witness validity (slot commutativity)", async () => {
+    it("input-role swap preserves witness validity (honest rebuild)", async () => {
+        // Output rho is bound to (nullifier[0], out_index), so swapping input
+        // slots changes nullifier[0] and thus the honestly-derived output
+        // rho/cm; a raw JSON swap does not verify. The invariant is that which
+        // real note occupies which input slot is free, provided the witness is
+        // rebuilt honestly. Both arrangements must verify.
         await fc.assert(fc.asyncProperty(
             arbBalancedSplit(), arbNsk(), arbNsk(),
             async ({ v1, v2, o1, o2 }, aliceNsk, bobNsk) => {
-                const { input } = await buildBalanced(
+                const { input, inputs, outputs, root } = await buildBalanced(
                     tx, v1, v2, o1, o2, aliceNsk, bobNsk,
                     101n, 102n, 103n, 104n,
                 );
-                // Original witness must pass.
                 await circuit.calculateWitness(input, true);
-                // Swapping the two input slots must also pass.
-                const swapped = swapInputs(input);
+                const swapped = tx.build({
+                    publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+                    inputs: [inputs[1], inputs[0]], outputs, merkleRoot: root,
+                });
                 await circuit.calculateWitness(swapped, true);
             },
         ), fcParams);
     });
 
-    it("output-role swap preserves witness validity", async () => {
+    it("output-role swap preserves witness validity (honest rebuild)", async () => {
+        // Rho is index-bound, so swapping output slots requires re-deriving each
+        // slot's rho (honest rebuild), not a raw JSON swap. Both arrangements
+        // must verify.
         await fc.assert(fc.asyncProperty(
             arbBalancedSplit(), arbNsk(), arbNsk(),
             async ({ v1, v2, o1, o2 }, aliceNsk, bobNsk) => {
-                const { input } = await buildBalanced(
+                const { input, inputs, outputs, root } = await buildBalanced(
                     tx, v1, v2, o1, o2, aliceNsk, bobNsk,
                     201n, 202n, 203n, 204n,
                 );
                 await circuit.calculateWitness(input, true);
-                const swapped = swapOutputs(input);
+                const swapped = tx.build({
+                    publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
+                    inputs, outputs: [outputs[1], outputs[0]], merkleRoot: root,
+                });
                 await circuit.calculateWitness(swapped, true);
             },
         ), fcParams);

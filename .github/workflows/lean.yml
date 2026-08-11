@@ -1,0 +1,79 @@
+name: lean
+
+on:
+  pull_request:
+    paths:
+      - 'lean/**'
+      - 'src/**'
+      - '.github/workflows/lean.yml'
+  push:
+    branches: [main]
+    # Same filter as `pull_request`. Without it a docs-only push to main ran the
+    # full 60-minute job, and on push `leanchecker` is enabled — the most
+    # expensive configuration, for a change that cannot affect any proof.
+    paths:
+      - 'lean/**'
+      - 'src/**'
+      - '.github/workflows/lean.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lean:
+    runs-on: [ubuntu-latest]
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: lean
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discharge the arithmetic axioms
+        run: python3 scripts/check-prime.py
+
+      # Installs elan from `lean-toolchain`, restores the `.lake` cache, pulls the
+      # prebuilt Mathlib oleans (`lake exe cache get`) instead of compiling Mathlib
+      # from source, and builds. It exports elan on `$GITHUB_PATH`, so the `lake env`
+      # steps below work unchanged.
+      - name: Build
+        id: lean
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: lean
+          build-args: Lelantos
+          # There is no `test` or `lint` target; do not let auto-config invent one.
+          test: false
+          lint: false
+          # An independent re-check of the whole environment by the kernel: it catches
+          # a proof that only type-checks because of an elaborator bug. It re-checks
+          # Mathlib too, so it is too slow to gate every PR on.
+          leanchecker: ${{ github.event_name == 'push' }}
+
+      # The proofs are worthless if any of them is admitted. `check-axioms.sh` would
+      # catch a `sorryAx` reaching a top-level theorem; this also catches a `sorry`
+      # sitting in a file that nothing imports.
+      - name: No `sorry`
+        run: |
+          if grep -rn '\bsorry\b' Lelantos/ Lelantos.lean; then
+            echo "FAIL: a proof is admitted with sorry"
+            exit 1
+          fi
+          echo "OK: no sorry"
+
+      # The only authoritative statement of what the development assumes.
+      - name: Trusted base unchanged
+        run: ./scripts/check-axioms.sh
+
+      # The public-input layout is the highest-risk hand transcription in the development.
+      # This dumps one layout per deployed shape. `expected/layout-2x2.txt` is additionally
+      # what `src/test/formal/layout_parity.test.ts` checks the SDK against, so it has to be
+      # verified against Lean here or the chain has a broken link.
+      - name: Public-input layout unchanged
+        run: ./scripts/dump-layout.sh

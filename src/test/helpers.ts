@@ -1,52 +1,27 @@
-// Helpers for building MASP test inputs that match circuits/2x2.circom.
+// Single import path for the circuit test suite.
 //
-// Crypto primitives + witness builder live in `@lelantos-org/sdk` so circuit
-// tests, the wallet, and Foundry fixture generators all see the same
-// shapes byte-for-byte. Do NOT re-implement here — that would silently
-// divert SDK from circuit and is exactly the bug this layout prevents.
+// Primitives and witness builders live in `./ref`, transcribed from the circom
+// under `src/lib/`. This package has no dependency on `@lelantos-org/sdk`;
+// agreement with the SDK is established through the vectors under `vectors/`,
+// which are generated from `./ref`.
+//
+// Primitives belong in `./ref` rather than in individual test files, since the
+// published vectors are generated from that directory.
 
-import {
-    Poseidon,
-    Jubjub,
-    H_BASE,
-    deriveIvk,
-    derivePk,
-    derivePkFromIvk,
-    deriveNk,
-    buildNoteCommitment,
-    buildNullifier,
-    buildNullifierFromNsk,
-    MerkleTree,
-    type Field,
-    type Point,
-} from "@lelantos-org/sdk/crypto";
+export * from "./ref/index.js";
 
-export { Poseidon, Jubjub, H_BASE, deriveIvk, derivePk, derivePkFromIvk, deriveNk, buildNullifier, MerkleTree };
-export type { Field, Point };
+import { buildNoteCommitment, buildNullifierFromNsk, type Field, type Poseidon } from "./ref/index.js";
 
-export {
-    toCircomInput,
-    dummyOutput,
-    dummyInputAt,
-    type BuildOpts,
-} from "@lelantos-org/sdk/bundle";
-export type { Note, SpentNote } from "@lelantos-org/sdk";
-
-export {
-    FMD_DEFAULT_GAMMA,
-    fmdGenDetectionKey,
-    fmdFlagKeyFromDetection,
-    fmdFlag,
-    BABYJUB_SUBGROUP_ORDER,
-} from "@lelantos-org/sdk";
-
-// Legacy names — circuit tests historically used `commit` / `nullifier`.
-// Keep them as aliases over the SDK so existing tests stay green without
-// touching their imports.
-export function commit(P: Poseidon, n: { asset: Field; value: Field; pk: Field; rho: Field; rcm: Field }): Field {
+// Short aliases used throughout the suite.
+export function commit(
+    P: Poseidon,
+    n: { asset: Field; value: Field; pk: Field; rho: Field; rcm: Field },
+): Field {
     return buildNoteCommitment(P, n);
 }
-export function nullifier(P: Poseidon, nsk: Field, rho: Field): Field {
-    return buildNullifierFromNsk(P, nsk, rho);
-}
 
+// nf = Poseidon(TAG_NF, nk, rho, cm) — cm is in the preimage so a rho
+// collision alone cannot brick a note (see Nullifier in lib/note.circom).
+export function nullifier(P: Poseidon, nsk: Field, rho: Field, cm: Field): Field {
+    return buildNullifierFromNsk(P, nsk, rho, cm);
+}

@@ -10,7 +10,7 @@
 //                 TRANSACT, TRANSACT_VARIANTS
 
 import * as fc from "fast-check";
-import { BN254_FR } from "@lelantos-org/sdk/crypto";
+import { BN254_FR } from "../helpers";
 
 // FUZZ env: light=5, medium=20 (default), heavy=100.
 const FUZZ = (process.env.FUZZ || "medium").toLowerCase();
@@ -27,8 +27,7 @@ export const MAX_VALUE = (1n << 64n) - 1n;
 // BN254 scalar field modulus — used by every gadget that constrains a Field.
 export const R = BN254_FR;
 
-// Canonical-positive modulo. Centralized so fuzz files don't redefine
-// per-suite (previously duped in clue / hash_to_bit / poly_eval).
+// Canonical-positive modulo, shared so fuzz suites do not each redefine it.
 export const mod = (a: bigint, p: bigint): bigint => {
     const r = a % p;
     return r < 0n ? r + p : r;
@@ -98,7 +97,7 @@ export const arbDistinctInt = (min: number, max: number): fc.Arbitrary<[number, 
         }),
     );
 
-// Per-suite scaling for genuinely slow suites; env override always wins.
+// Per-suite scaling for slow suites; env override always wins.
 const SUITE_SCALE: Record<string, number> = {
     FRONTIER: 0.25,
     TRANSACT_VARIANTS: 0.5,

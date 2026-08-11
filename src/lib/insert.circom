@@ -5,21 +5,22 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 include "tags.circom";
 include "common.circom";
 
-// Quaternary (arity-4) incremental insert. Mirrors on-chain
-// CommitmentTree._insert for off-chain tree advancement.
+// Quaternary (arity-4) incremental insert, mirroring the on-chain
+// CommitmentTree._insert so the circuit can advance the tree off-chain.
 //
-// Per-level slot-fill, digit ∈ {0..3} (cur = running node, f = frontier,
-// z = zeros[level]):
+// Per level, with digit ∈ {0..3}, cur the running node, f the frontier and
+// z = zeros[level]:
+//
 //                      slot 0     slot 1     slot 2     slot 3
-//   c0                 cur        f[0]       f[0]       f[0]
-//   c1                 z          cur        f[1]       f[1]
-//   c2                 z          z          cur        f[2]
-//   c3                 z          z          z          cur
+//   digit = 0          cur        z          z          z
+//   digit = 1          f[0]       cur        z          z
+//   digit = 2          f[0]       f[1]       cur        z
+//   digit = 3          f[0]       f[1]       f[2]       cur
 //
-// Frontier writes (slots 0..2): frontier_out[k] = (k == digit) ? cur : f[k].
-// idx_digit range-checked to {0..3} via PathIndexSelectors.
+// Frontier writes cover slots 0..2: frontier_out[k] = (k == digit) ? cur : f[k].
+// PathIndexSelectors range-checks idx_digit to {0..3}.
 
-// One level: parent hash + updated frontier.
+// One level: parent hash plus the updated frontier.
 template QuaternaryInsertLevel() {
     signal input cur;
     signal input frontier_in[3];
@@ -29,49 +30,44 @@ template QuaternaryInsertLevel() {
     signal output cur_next;
     signal output frontier_out[3];
 
-    // s[k] = 1 iff idx_digit == k (also range-checks idx_digit).
+    // s[k] = 1 iff idx_digit == k; also range-checks idx_digit.
     component sel = PathIndexSelectors();
     sel.path_index <== idx_digit;
-    signal s0; signal s1; signal s2; signal s3;
-    s0 <== sel.s[0];
-    s1 <== sel.s[1];
-    s2 <== sel.s[2];
-    s3 <== sel.s[3];
 
     // c0 = s0·cur + (1-s0)·f[0]
     signal c0_cur;
     signal c0_sib;
-    c0_cur <== s0 * cur;
-    c0_sib <== (1 - s0) * frontier_in[0];
     signal c0;
+    c0_cur <== sel.s[0] * cur;
+    c0_sib <== (1 - sel.s[0]) * frontier_in[0];
     c0 <== c0_cur + c0_sib;
 
     // c1 = s0·z + s1·cur + (s2+s3)·f[1]
     signal c1_z;
     signal c1_cur;
     signal c1_sib;
-    c1_z   <== s0 * zero;
-    c1_cur <== s1 * cur;
-    c1_sib <== (s2 + s3) * frontier_in[1];
     signal c1;
+    c1_z   <== sel.s[0] * zero;
+    c1_cur <== sel.s[1] * cur;
+    c1_sib <== (sel.s[2] + sel.s[3]) * frontier_in[1];
     c1 <== c1_z + c1_cur + c1_sib;
 
     // c2 = (s0+s1)·z + s2·cur + s3·f[2]
     signal c2_z;
     signal c2_cur;
     signal c2_sib;
-    c2_z   <== (s0 + s1) * zero;
-    c2_cur <== s2 * cur;
-    c2_sib <== s3 * frontier_in[2];
     signal c2;
+    c2_z   <== (sel.s[0] + sel.s[1]) * zero;
+    c2_cur <== sel.s[2] * cur;
+    c2_sib <== sel.s[3] * frontier_in[2];
     c2 <== c2_z + c2_cur + c2_sib;
 
     // c3 = (s0+s1+s2)·z + s3·cur
     signal c3_z;
     signal c3_cur;
-    c3_z   <== (s0 + s1 + s2) * zero;
-    c3_cur <== s3 * cur;
     signal c3;
+    c3_z   <== (sel.s[0] + sel.s[1] + sel.s[2]) * zero;
+    c3_cur <== sel.s[3] * cur;
     c3 <== c3_z + c3_cur;
 
     component h = Poseidon(5);
@@ -82,20 +78,24 @@ template QuaternaryInsertLevel() {
     h.inputs[4] <== c3;
     cur_next <== h.out;
 
-    // Frontier writes (slots 0..2): out[k] = s[k]·cur + (1-s[k])·f[k].
-    signal sk[3];
-    sk[0] <== s0;
-    sk[1] <== s1;
-    sk[2] <== s2;
-    signal w_cur[3];
-    signal w_sib[3];
-    for (var k = 0; k < 3; k++) {
-        w_cur[k] <== sk[k] * cur;
-        w_sib[k] <== (1 - sk[k]) * frontier_in[k];
-        frontier_out[k] <== w_cur[k] + w_sib[k];
-    }
+    // frontier_out[k] = s[k]·cur + (1-s[k])·f[k] for slots 0..2.
+    //
+    // s[k]·cur is already computed above as c0_cur / c1_cur / c2_cur, and
+    // (1-s[0])·f[0] as c0_sib, so slot 0 is a pure linear combination and slots
+    // 1..2 need only their own sibling product. The k=1,2 sibling terms genuinely
+    // differ from the child muxes — c1_sib is (s2+s3)·f[1] but slot 1 needs
+    // (1-s1)·f[1] = (s0+s2+s3)·f[1], likewise for slot 2 — so those two stay.
+    signal w_sib1;
+    signal w_sib2;
+    w_sib1 <== (1 - sel.s[1]) * frontier_in[1];
+    w_sib2 <== (1 - sel.s[2]) * frontier_in[2];
+
+    frontier_out[0] <== c0_cur + c0_sib;
+    frontier_out[1] <== c1_cur + w_sib1;
+    frontier_out[2] <== c2_cur + w_sib2;
 }
 
+// Insert one leaf, returning the new root and frontier.
 template QuaternaryInsert(DEPTH) {
     signal input leaf;
     signal input idx_digit[DEPTH];

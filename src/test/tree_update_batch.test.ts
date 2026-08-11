@@ -1,102 +1,87 @@
 // Tests for `tree_update_batch.circom`. Covers:
-//   - per-pair leaf format leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
-//   - per-pair Pedersen aggregate (deposit mode) cv_dep_0 + cv_dep_1
-//                                = pair_public_in · V^pair_asset + rcv_total · H
+//   - per-leaf format leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
+//   - per-leaf deposit binding cv_dep = leaf_public_in · V^leaf_asset + rcv · H
 //   - C-1 regression: cross-asset / value-inflation rejection
+//   - odd leaf counts (1, 3, 15) and leaf-granular multiplexing
 //   - Padding zero constraints
 //
-// MAX_N = 8 ⇒ 16 leaves max (halved from prior 16). Tests stay at small
-// actual_count for runtime; one larger case verifies multiplex logic.
+// MAX_L = 8 leaves max, counted individually: actual_count is a LEAF count,
+// so a batch may commit an odd number of leaves. Tests stay at small
+// actual_count for runtime; larger cases verify multiplex logic.
 
-import { Poseidon, Jubjub, MerkleTree, type Field, type Point } from "./helpers";
-import { fiatShamirZ, hornerEval } from "@lelantos-org/sdk";
+import {
+    Poseidon,
+    Jubjub,
+    MerkleTree,
+    buildLeaf,
+    buildNoteCommitment,
+    fiatShamirZ,
+    hornerEval,
+    type Field,
+    type Point,
+} from "./helpers";
 import { loadCircuit, srcPath } from "./lib/circuit";
-import { treeUpdateBatchInputJson, flattenTreeUpdateBatch } from "./lib/inputs";
+import { treeUpdateBatchInputJson, treeUpdateBatchCoeffs, padToSlots } from "./lib/inputs";
 import { expectWitnessFails } from "./lib/expect";
+import { expect } from "chai";
 
 const DEPTH = 10;
-const MAX_N = 8;
-const SLOTS = 2 * MAX_N;
-const TAG_LEAF = 10n;
+const MAX_L = 8;
 const WRAPPER = srcPath("tree_update_batch.circom");
 
-interface PairWitness {
-    cm0: Field;
-    cm1: Field;
-    cvDep0: Point;
-    cvDep1: Point;
-    pairAsset: Field;
-    pairPublicIn: Field;
+interface LeafWitness {
+    cm: Field;
+    cvDep: Point;
+    leafAsset: Field;
+    leafPublicIn: Field;
     isDeposit: 0 | 1;
-    rcvTotal: Field;
+    rcv: Field;
 }
 
-function padToSlots<T>(real: T[], total: number, zero: T): T[] {
-    const out = real.slice();
-    while (out.length < total) out.push(zero);
-    return out;
-}
-
-function buildPairWitness(opts: {
+function buildLeafWitness(opts: {
     J: Jubjub;
-    asset: Field;
-    val0: Field;
-    val1: Field;
-    pk: Field;
-    rho0: Field;
-    rho1: Field;
-    rcm0: Field;
-    rcm1: Field;
-    rcvDep0: Field;
-    rcvDep1: Field;
     P: Poseidon;
+    asset: Field;
+    val: Field;
+    pk: Field;
+    rho: Field;
+    rcm: Field;
+    rcvDep: Field;
     isDeposit: 0 | 1;
-}): PairWitness {
-    const { J, P, asset, val0, val1, pk, rho0, rho1, rcm0, rcm1, rcvDep0, rcvDep1, isDeposit } = opts;
-    const cm0 = P.hash([asset * (1n << 64n) + val0, pk, rho0, rcm0]);
-    const cm1 = P.hash([asset * (1n << 64n) + val1, pk, rho1, rcm1]);
+}): LeafWitness {
+    const { J, P, asset, val, pk, rho, rcm, rcvDep, isDeposit } = opts;
+    const cm = buildNoteCommitment(P, { asset, value: val, pk, rho, rcm });
     const assetGen = J.hashToAssetGen(asset);
-    const cvDep0 = J.valueCommit(val0, assetGen, rcvDep0);
-    const cvDep1 = J.valueCommit(val1, assetGen, rcvDep1);
-    const pairPublicIn = isDeposit === 1 ? val0 + val1 : 0n;
-    const pairAsset = isDeposit === 1 ? asset : 0n;
-    const rcvTotal = isDeposit === 1 ? rcvDep0 + rcvDep1 : 0n;
+    const cvDep = J.valueCommit(val, assetGen, rcvDep);
+    // A deposit leaf is pinned directly: cv_dep = val·V^asset + rcv·H, so the
+    // claimed public_in must be exactly this leaf's value.
     return {
-        cm0,
-        cm1,
-        cvDep0,
-        cvDep1,
-        pairAsset,
-        pairPublicIn,
+        cm,
+        cvDep,
+        leafAsset: isDeposit === 1 ? asset : 0n,
+        leafPublicIn: isDeposit === 1 ? val : 0n,
         isDeposit,
-        rcvTotal,
+        rcv: rcvDep,
     };
 }
 
-function leafOf(P: Poseidon, cm: Field, cvDep: Point): Field {
-    return P.hash([TAG_LEAF, cm, cvDep[0], cvDep[1]]);
-}
-
-/// Compact pair-witness factory for tests that don't care about specific
+/// Compact leaf-witness factory for tests that don't care about specific
 /// blinder / pk values. Caller supplies the discriminating fields only.
-function simplePair(opts: {
+function simpleLeaf(opts: {
     J: Jubjub;
     P: Poseidon;
-    val0: Field;
-    val1?: Field;
+    val: Field;
     isDeposit: 0 | 1;
     asset?: Field;
     pk?: Field;
-}): PairWitness {
-    return buildPairWitness({
+}): LeafWitness {
+    return buildLeafWitness({
         J: opts.J,
         P: opts.P,
         asset: opts.asset ?? 7n,
-        val0: opts.val0,
-        val1: opts.val1 ?? 0n,
+        val: opts.val,
         pk: opts.pk ?? 0xabcn,
-        rho0: 1n, rho1: 2n, rcm0: 3n, rcm1: 4n,
-        rcvDep0: 5n, rcvDep1: 6n,
+        rho: 1n, rcm: 3n, rcvDep: 5n,
         isDeposit: opts.isDeposit,
     });
 }
@@ -104,56 +89,61 @@ function simplePair(opts: {
 /// Re-derive Fiat-Shamir (z, y) after tampering any PolyEval-bound field.
 /// Use after mutating oldRoot / newRoot / cms / etc. on `w`.
 function rebindFiatShamir(w: ReturnType<typeof buildHonest>) {
-    const coeffs = flattenTreeUpdateBatch({
+    const coeffs = treeUpdateBatchCoeffs({
         oldRoot: w.oldRoot, newRoot: w.newRoot,
         startIndex: w.startIndex, actualCount: w.actualCount,
         cms: w.cms, cvDep: w.cvDep,
-        pairAsset: w.pairAsset, pairPublicIn: w.pairPublicIn,
+        leafAsset: w.leafAsset, leafPublicIn: w.leafPublicIn,
         isDeposit: w.isDeposit,
     });
     w.z = fiatShamirZ(coeffs);
     w.y = hornerEval(coeffs, w.z);
 }
 
-function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, pairs: PairWitness[]) {
+/// Generate the witness, check every constraint, and — crucially — assert the
+/// circuit's `y` output equals the reference Horner evaluation over the
+/// coefficient vector. `z` alone does not pin the layout: a permuted
+/// `BatchCompress` would simply produce a different, still-satisfiable
+/// challenge. `y` is what binds the slot order to `lib/inputs.ts` (and through
+/// it to PubInputs.sol :: compress(TreeUpdateBatch)).
+async function expectHonest(circuit: any, w: ReturnType<typeof buildHonest>) {
+    const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
+    await circuit.checkConstraints(witness);
+    // witness[0] is the constant 1; witness[1] is the first (only) output, y.
+    expect(witness[1].toString()).to.equal(w.y.toString(), "circuit y must match reference PolyEval");
+    return witness;
+}
+
+function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, leaves: LeafWitness[]) {
     const tree = new MerkleTree(P, DEPTH);
     for (let i = 0; i < prefilled; i++) tree.insert(BigInt(0xdead + i));
     const oldRoot = tree.root();
     const frontier = tree.frontier();
 
-    for (const p of pairs) {
-        tree.insert(leafOf(P, p.cm0, p.cvDep0));
-        tree.insert(leafOf(P, p.cm1, p.cvDep1));
+    for (const l of leaves) {
+        tree.insert(buildLeaf(P, l.cm, l.cvDep));
     }
     const newRoot = tree.root();
 
     const startIndex = prefilled;
-    const actualCount = pairs.length;
+    const actualCount = leaves.length;
 
-    const cms: Field[] = [];
-    const cvDep: Point[] = [];
-    for (const p of pairs) {
-        cms.push(p.cm0);
-        cms.push(p.cm1);
-        cvDep.push(p.cvDep0);
-        cvDep.push(p.cvDep1);
-    }
-    const cmsPadded = padToSlots(cms, SLOTS, 0n);
-    const cvDepPadded = padToSlots(cvDep, SLOTS, [0n, 0n] as Point);
-    const pairAssetPadded = padToSlots(pairs.map(p => p.pairAsset), MAX_N, 0n);
-    const pairPublicInPadded = padToSlots(pairs.map(p => p.pairPublicIn), MAX_N, 0n);
-    const isDepositPadded = padToSlots(pairs.map(p => p.isDeposit as number), MAX_N, 0);
-    const rcvTotalPadded = padToSlots(pairs.map(p => p.rcvTotal), MAX_N, 0n);
+    const cmsPadded = padToSlots(leaves.map(l => l.cm), MAX_L, 0n);
+    const cvDepPadded = padToSlots(leaves.map(l => l.cvDep), MAX_L, [0n, 0n] as Point);
+    const leafAssetPadded = padToSlots(leaves.map(l => l.leafAsset), MAX_L, 0n);
+    const leafPublicInPadded = padToSlots(leaves.map(l => l.leafPublicIn), MAX_L, 0n);
+    const isDepositPadded = padToSlots(leaves.map(l => l.isDeposit as number), MAX_L, 0);
+    const rcvPadded = padToSlots(leaves.map(l => l.rcv), MAX_L, 0n);
 
-    const coeffs = flattenTreeUpdateBatch({
+    const coeffs = treeUpdateBatchCoeffs({
         oldRoot,
         newRoot,
         startIndex,
         actualCount,
         cms: cmsPadded,
         cvDep: cvDepPadded,
-        pairAsset: pairAssetPadded,
-        pairPublicIn: pairPublicInPadded,
+        leafAsset: leafAssetPadded,
+        leafPublicIn: leafPublicInPadded,
         isDeposit: isDepositPadded,
     });
     const z = fiatShamirZ(coeffs);
@@ -166,10 +156,10 @@ function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, pairs: PairWitne
         actualCount,
         cms: cmsPadded,
         cvDep: cvDepPadded,
-        pairAsset: pairAssetPadded,
-        pairPublicIn: pairPublicInPadded,
+        leafAsset: leafAssetPadded,
+        leafPublicIn: leafPublicInPadded,
         isDeposit: isDepositPadded,
-        rcvTotal: rcvTotalPadded,
+        rcv: rcvPadded,
         frontier,
         z,
         y,
@@ -189,76 +179,43 @@ describe("tree_update_batch", function () {
         circuit = await loadCircuit(WRAPPER);
     });
 
-    it("honest deposit: 1 active pair, isDeposit=1, aggregate verifies", async () => {
-        const asset = 7n;
-        const pair = buildPairWitness({
+    it("honest deposit: 1 active leaf, isDeposit=1, binding verifies", async () => {
+        const leaf = buildLeafWitness({
             J,
             P,
-            asset,
-            val0: 1000n,
-            val1: 0n,
+            asset: 7n,
+            val: 1000n,
             pk: 0xabcn,
-            rho0: 1n,
-            rho1: 2n,
-            rcm0: 3n,
-            rcm1: 4n,
-            rcvDep0: 5n,
-            rcvDep1: 6n,
+            rho: 1n,
+            rcm: 3n,
+            rcvDep: 5n,
             isDeposit: 1,
         });
-        const w = buildHonest(P, J, 0, [pair]);
-        const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
-        await circuit.checkConstraints(witness);
+        const w = buildHonest(P, J, 0, [leaf]);
+        await expectHonest(circuit, w);
     });
 
-    it("honest spend: 1 active pair, isDeposit=0, aggregate skipped", async () => {
-        const pair = buildPairWitness({
-            J,
-            P,
-            asset: 7n,
-            val0: 100n,
-            val1: 50n,
-            pk: 0xdadn,
-            rho0: 11n,
-            rho1: 22n,
-            rcm0: 33n,
-            rcm1: 44n,
-            rcvDep0: 55n,
-            rcvDep1: 66n,
-            isDeposit: 0,
-        });
-        const w = buildHonest(P, J, 0, [pair]);
-        const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
-        await circuit.checkConstraints(witness);
+    it("honest spend: 2 active leaves, isDeposit=0, binding skipped", async () => {
+        const leaves = [
+            buildLeafWitness({ J, P, asset: 7n, val: 100n, pk: 0xdadn, rho: 11n, rcm: 33n, rcvDep: 55n, isDeposit: 0 }),
+            buildLeafWitness({ J, P, asset: 7n, val: 50n, pk: 0xdadn, rho: 22n, rcm: 44n, rcvDep: 66n, isDeposit: 0 }),
+        ];
+        const w = buildHonest(P, J, 0, leaves);
+        await expectHonest(circuit, w);
     });
 
-    it("C-1 regression: deposit with mismatched aggregate (wrong asset) is rejected", async () => {
-        // Attacker pays with asset=7 (publicIn=1) but cv_dep_0 commits to a
-        // different asset's value. The circuit's per-pair Pedersen aggregate
-        // catches this since V^7 and V^99 are independent generators.
-        const honest = buildPairWitness({
-            J,
-            P,
-            asset: 7n,
-            val0: 1n,
-            val1: 0n,
-            pk: 0xeen,
-            rho0: 1n,
-            rho1: 2n,
-            rcm0: 3n,
-            rcm1: 4n,
-            rcvDep0: 100n,
-            rcvDep1: 200n,
-            isDeposit: 1,
-        });
+    it("C-1 regression: deposit with mismatched binding (wrong asset) is rejected", async () => {
+        // Attacker pays with asset=7 (publicIn=1) but cv_dep commits to a
+        // different asset's value. The per-leaf Pedersen binding catches this
+        // since V^7 and V^99 are independent generators.
+        const honest = simpleLeaf({ J, P, val: 1n, isDeposit: 1, asset: 7n });
         const fakeAssetGen = J.hashToAssetGen(99n);
-        const fakeCvDep0 = J.valueCommit(1_000_000n, fakeAssetGen, honest.rcvTotal);
-        const tampered: PairWitness = {
+        const tampered: LeafWitness = {
             ...honest,
-            cvDep0: fakeCvDep0,
+            cvDep: J.valueCommit(1_000_000n, fakeAssetGen, honest.rcv),
         };
         const w = buildHonest(P, J, 0, [tampered]);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
     // ===== Frontier-binding regression coverage (H-1 fix) =====
@@ -270,139 +227,155 @@ describe("tree_update_batch", function () {
     it("frontier binding: honest non-zero start_index passes", async () => {
         // start_index = 5 ⇒ digits [1,1,0,...]. Exercises pre/eq branches
         // at low levels.
-        const w = buildHonest(P, J, 5, [simplePair({ J, P, val0: 42n, isDeposit: 1 })]);
-        const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
-        await circuit.checkConstraints(witness);
+        const w = buildHonest(P, J, 5, [simpleLeaf({ J, P, val: 42n, isDeposit: 1 })]);
+        await expectHonest(circuit, w);
     });
 
     it("frontier binding: large prefill (start_index=21) honest passes", async () => {
         // 21 = 0b010101 ⇒ digits [1,1,1,0,...]. Non-trivial frontier at
         // the three lowest levels.
-        const w = buildHonest(P, J, 21, [simplePair({ J, P, val0: 9n, isDeposit: 1 })]);
-        const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
-        await circuit.checkConstraints(witness);
+        const w = buildHonest(P, J, 21, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
+        await expectHonest(circuit, w);
     });
 
     it("frontier binding: corrupted frontier entry rejected", async () => {
         // Honest oldRoot + cms but tampered frontier ⇒ FrontierRoot rebuild
         // diverges from old_root ⇒ `old_root === frontier_root.root` fails.
-        const w = buildHonest(P, J, 8, [simplePair({ J, P, val0: 1000n, isDeposit: 1 })]);
+        const w = buildHonest(P, J, 8, [simpleLeaf({ J, P, val: 1000n, isDeposit: 1 })]);
         w.frontier[1][1] = w.frontier[1][1] + 1n;
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
     it("frontier binding: empty-tree frontier with wrong oldRoot rejected", async () => {
         // Frontier honest (all-zeros for empty tree) but oldRoot lied about.
         // FrontierRoot rebuilds the genuine empty-tree root; equality check
         // catches the mismatch.
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.oldRoot = w.oldRoot + 1n;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    // ===== Multi-pair / capacity coverage (B) =====
+    // ===== Multi-leaf / odd-count / capacity coverage (B) =====
     //
-    // Prior tests use actual_count = 1; these exercise the multiplexed
-    // frontier / root threading through up to MAX_N = 8 pairs.
+    // actual_count is a leaf count, so odd batches are first-class. These
+    // exercise the multiplexed frontier / root threading up to MAX_L = 16.
 
-    it("honest 2-pair deposit batch passes", async () => {
-        const pairs = [
-            simplePair({ J, P, val0: 11n, val1: 22n, isDeposit: 1, asset: 7n, pk: 0xaa1n }),
-            simplePair({ J, P, val0: 33n, val1: 44n, isDeposit: 1, asset: 7n, pk: 0xaa2n }),
+    it("honest 2-leaf deposit batch passes", async () => {
+        const leaves = [
+            simpleLeaf({ J, P, val: 33n, isDeposit: 1, asset: 7n, pk: 0xaa1n }),
+            simpleLeaf({ J, P, val: 77n, isDeposit: 1, asset: 7n, pk: 0xaa2n }),
         ];
-        const w = buildHonest(P, J, 0, pairs);
-        const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
-        await circuit.checkConstraints(witness);
+        const w = buildHonest(P, J, 0, leaves);
+        await expectHonest(circuit, w);
     });
 
-    it("honest full-batch (actual_count = MAX_N = 8) passes", async () => {
-        const pairs: PairWitness[] = [];
-        for (let i = 0; i < MAX_N; i++) {
-            pairs.push(simplePair({ J, P, val0: BigInt(100 + i), val1: BigInt(200 + i), isDeposit: 1, pk: BigInt(0xbe00 + i) }));
+    it("honest odd batch: 3 leaves (3x3 transact output shape) passes", async () => {
+        // A 3-output transact bundle emits three commitments, so the batch must
+        // accept an odd leaf count.
+        const leaves = [
+            simpleLeaf({ J, P, val: 11n, isDeposit: 0, pk: 0xb01n }),
+            simpleLeaf({ J, P, val: 22n, isDeposit: 0, pk: 0xb02n }),
+            simpleLeaf({ J, P, val: 33n, isDeposit: 0, pk: 0xb03n }),
+        ];
+        const w = buildHonest(P, J, 0, leaves);
+        await expectHonest(circuit, w);
+    });
+
+    it("honest odd batch: 7 leaves passes", async () => {
+        const leaves: LeafWitness[] = [];
+        for (let i = 0; i < 7; i++) {
+            leaves.push(simpleLeaf({ J, P, val: BigInt(300 + i), isDeposit: 1, pk: BigInt(0xbe00 + i) }));
         }
-        const w = buildHonest(P, J, 0, pairs);
-        const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
-        await circuit.checkConstraints(witness);
+        const w = buildHonest(P, J, 0, leaves);
+        await expectHonest(circuit, w);
     });
 
-    it("mixed deposit + spend pairs in same batch passes", async () => {
-        const pairs = [
-            simplePair({ J, P, val0: 50n, isDeposit: 1, pk: 0xc01n }),
-            simplePair({ J, P, val0: 7n, val1: 3n, isDeposit: 0, pk: 0xc02n }),
-            simplePair({ J, P, val0: 100n, isDeposit: 1, pk: 0xc03n }),
+    it("honest full-batch (actual_count = MAX_L = 8) passes", async () => {
+        const leaves: LeafWitness[] = [];
+        for (let i = 0; i < MAX_L; i++) {
+            leaves.push(simpleLeaf({ J, P, val: BigInt(300 + 2 * i), isDeposit: 1, pk: BigInt(0xbf00 + i) }));
+        }
+        const w = buildHonest(P, J, 0, leaves);
+        await expectHonest(circuit, w);
+    });
+
+    it("mixed deposit + spend leaves in same batch passes", async () => {
+        const leaves = [
+            simpleLeaf({ J, P, val: 50n, isDeposit: 1, pk: 0xc01n }),
+            simpleLeaf({ J, P, val: 7n, isDeposit: 0, pk: 0xc02n }),
+            simpleLeaf({ J, P, val: 100n, isDeposit: 1, pk: 0xc03n }),
         ];
-        const w = buildHonest(P, J, 0, pairs);
-        const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
-        await circuit.checkConstraints(witness);
+        const w = buildHonest(P, J, 0, leaves);
+        await expectHonest(circuit, w);
     });
 
-    it("honest 2-pair batch at non-zero start_index passes", async () => {
+    it("honest odd batch at non-zero start_index passes", async () => {
         // Exercises FrontierRoot + insert chain at start_index = 13
-        // (digits [1, 3, 0, ...]); inserts land at indices 13..16, crossing
+        // (digits [1, 3, 0, ...]); inserts land at indices 13..15, crossing
         // a level-1 carry.
-        const pairs = [
-            simplePair({ J, P, val0: 1n, val1: 2n, isDeposit: 1, pk: 0xd01n }),
-            simplePair({ J, P, val0: 3n, val1: 4n, isDeposit: 1, pk: 0xd02n }),
+        const leaves = [
+            simpleLeaf({ J, P, val: 3n, isDeposit: 1, pk: 0xd01n }),
+            simpleLeaf({ J, P, val: 7n, isDeposit: 1, pk: 0xd02n }),
+            simpleLeaf({ J, P, val: 9n, isDeposit: 1, pk: 0xd03n }),
         ];
-        const w = buildHonest(P, J, 13, pairs);
-        const witness = await circuit.calculateWitness(treeUpdateBatchInputJson(w), true);
-        await circuit.checkConstraints(witness);
+        const w = buildHonest(P, J, 13, leaves);
+        await expectHonest(circuit, w);
     });
 
     // ===== Padding hole coverage (C) =====
     //
-    // Section 3 of tree_update_batch.circom asserts (1 - active[i]) * X === 0
-    // for every per-pair field. Each entry below tampers ONE inactive-slot
-    // field and expects rejection.
+    // Section 3 of tree_update_batch.circom asserts (1 - active[k]) * X === 0
+    // for every per-leaf field. Each entry below tampers ONE inactive-slot
+    // field and expects rejection. With actual_count = 1, slot 1 is inactive.
 
     it("padding: non-zero cv_dep_x in inactive slot is rejected", async () => {
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 9n, isDeposit: 1 })]);
-        w.cvDep[2] = [1n, w.cvDep[2][1]];   // slot 2 is inactive (pair 1)
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
+        w.cvDep[1] = [1n, w.cvDep[1][1]];
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
     it("padding: non-zero cv_dep_y in inactive slot is rejected", async () => {
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 9n, isDeposit: 1 })]);
-        w.cvDep[3] = [w.cvDep[3][0], 1n];
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
+        w.cvDep[2] = [w.cvDep[2][0], 1n];
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    it("padding: non-zero pair_asset in inactive slot is rejected", async () => {
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 9n, isDeposit: 1 })]);
-        w.pairAsset[1] = 42n;
+    it("padding: non-zero leaf_asset in inactive slot is rejected", async () => {
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
+        w.leafAsset[1] = 42n;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    it("padding: non-zero pair_public_in in inactive slot is rejected", async () => {
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 9n, isDeposit: 1 })]);
-        w.pairPublicIn[1] = 99n;
+    it("padding: non-zero leaf_public_in in inactive slot is rejected", async () => {
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
+        w.leafPublicIn[1] = 99n;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
     it("padding: non-zero is_deposit in inactive slot is rejected", async () => {
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 9n, isDeposit: 1 })]);
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
         w.isDeposit[1] = 1;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    it("padding: non-zero rcv_total in inactive slot is rejected", async () => {
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 9n, isDeposit: 1 })]);
-        w.rcvTotal[1] = 7n;
-        // rcv_total is not in PolyEval ⇒ Fiat-Shamir unchanged.
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+    it("padding: non-zero rcv in inactive slot is rejected", async () => {
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
+        w.rcv[1] = 7n;
+        // rcv is not in PolyEval ⇒ Fiat-Shamir unchanged.
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
     it("padding: non-zero cm in inactive slot is rejected", async () => {
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 50n, pk: 0xfn, isDeposit: 1 })]);
-        w.cms[2] = 0xbadcafen;
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 50n, pk: 0xfn, isDeposit: 1 })]);
+        w.cms[1] = 0xbadcafen;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
     // ===== Other negative coverage (D) =====
@@ -411,61 +384,83 @@ describe("tree_update_batch", function () {
         // Circuit decomposes (actual_count - 1) in COUNT_BITS=3 bits ⇒
         // actual_count=0 yields -1, a 254-bit field element that Num2Bits
         // cannot fit.
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.actualCount = 0;
         // Zero out the would-be-active slot fields so only the count check fires.
-        w.cms[0] = 0n; w.cms[1] = 0n;
-        w.cvDep[0] = [0n, 0n]; w.cvDep[1] = [0n, 0n];
-        w.pairAsset[0] = 0n; w.pairPublicIn[0] = 0n;
-        w.isDeposit[0] = 0; w.rcvTotal[0] = 0n;
+        w.cms[0] = 0n;
+        w.cvDep[0] = [0n, 0n];
+        w.leafAsset[0] = 0n; w.leafPublicIn[0] = 0n;
+        w.isDeposit[0] = 0; w.rcv[0] = 0n;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    it("FAILS when actual_count > MAX_N (Num2Bits(COUNT_BITS) rejects 8)", async () => {
+    it("FAILS when actual_count > MAX_L (Num2Bits(COUNT_BITS) rejects 8)", async () => {
         // COUNT_BITS=3 bounds (actual_count - 1) ∈ [0, 7] ⇒ actual_count ≤ 8.
         // Setting actual_count = 9 ⇒ (9-1)=8 ⇒ Num2Bits(3) fails.
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.actualCount = 9;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
     it("FAILS when is_deposit is non-boolean (=2)", async () => {
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.isDeposit[0] = 2;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    it("FAILS when pair_public_in exceeds 2^64 (RangeCheck64)", async () => {
-        // Build an honest witness then override pair_public_in past 2^64;
-        // the deposit-side RangeCheck64 fails. Must also rebuild aggregate
-        // consistency — easiest: keep cv_dep / rcv_total as-is so the
-        // RangeCheck fires before the BabyAdd equality.
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 1n, isDeposit: 1 })]);
-        w.pairPublicIn[0] = 1n << 64n;
+    it("FAILS when leaf_public_in exceeds 2^64 (RangeCheck64)", async () => {
+        // Build an honest witness then override leaf_public_in past 2^64;
+        // the deposit-side RangeCheck64 fails.
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
+        w.leafPublicIn[0] = 1n << 64n;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    it("FAILS on C-1' value-inflation: same asset, wrong value sum", async () => {
-        // Honest path: cv_dep_0 + cv_dep_1 = pair_public_in · V^asset + rcv_total · H.
-        // Tamper: bump pair_public_in to a smaller-than-real value while
-        // keeping cv_deps real ⇒ aggregate equality fails.
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 100n, val1: 50n, isDeposit: 1 })]);
-        // Honest pair_public_in == 100+50 = 150. Inflate the claim to 200.
-        w.pairPublicIn[0] = 200n;
+    it("FAILS on C-1' value inflation: same asset, wrong claimed value", async () => {
+        // Honest path: cv_dep = leaf_public_in · V^asset + rcv · H.
+        // Tamper: inflate the claim while keeping cv_dep real ⇒ equality fails.
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 150n, isDeposit: 1 })]);
+        w.leafPublicIn[0] = 200n;
         rebindFiatShamir(w);
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 
-    it("FAILS when rcv_total is tampered (deposit aggregate binding)", async () => {
-        // Honest: cv_dep_0 + cv_dep_1 = pair_public_in·V + rcv_total·H.
-        // Tamper rcv_total ⇒ rhs shifts by Δ·H ≠ 0 ⇒ point equality fails.
-        // rcv_total is NOT in PolyEval so Fiat-Shamir is unchanged.
-        const w = buildHonest(P, J, 0, [simplePair({ J, P, val0: 100n, val1: 50n, isDeposit: 1 })]);
-        w.rcvTotal[0] = w.rcvTotal[0] + 1n;
-        await expectWitnessFails(() => circuit.calculateWitness(treeUpdateBatchInputJson(w), true));
+    it("FAILS on C-1'' split: value moved between two deposit leaves", async () => {
+        // A binding over an aggregate of leaves would fix only Σvalue mod the
+        // subgroup order, letting an attacker claim public_in = 1 while loading
+        // leaf 0 with 2^63 and leaving leaf 1 to absorb the negative remainder.
+        // Per-leaf binding makes the split unexpressible:
+        // leaf 0's own equality already fails.
+        const asset = 7n;
+        const assetGen = J.hashToAssetGen(asset);
+        const honest = simpleLeaf({ J, P, val: 1n, isDeposit: 1, asset });
+        const tampered: LeafWitness = {
+            ...honest,
+            cvDep: J.valueCommit(1n << 63n, assetGen, honest.rcv),
+        };
+        const w = buildHonest(P, J, 0, [tampered]);
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
+    });
+
+    it("FAILS when rcv is tampered (deposit binding)", async () => {
+        // Honest: cv_dep = leaf_public_in·V + rcv·H. Tamper rcv ⇒ rhs shifts
+        // by Δ·H ≠ 0 ⇒ point equality fails. rcv is NOT in PolyEval so
+        // Fiat-Shamir is unchanged.
+        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 150n, isDeposit: 1 })]);
+        w.rcv[0] = w.rcv[0] + 1n;
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
+    });
+
+    it("FAILS when a deposit leaf's value disagrees with its claimed public_in", async () => {
+        // Splitting a deposit across leaves is not expressible: each deposit
+        // leaf declares its own public_in and must open to exactly that.
+        const honest = simpleLeaf({ J, P, val: 100n, isDeposit: 1 });
+        const tampered: LeafWitness = { ...honest, leafPublicIn: 50n };
+        const w = buildHonest(P, J, 0, [tampered]);
+        await expectWitnessFails(circuit, treeUpdateBatchInputJson(w));
     });
 });

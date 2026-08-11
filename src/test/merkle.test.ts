@@ -1,9 +1,15 @@
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+
 import { expect } from "chai";
 
 import { Poseidon, MerkleTree, Field } from "./helpers";
 import { fixturePath, loadCircuit } from "./lib/circuit";
 import { merkleInputJson } from "./lib/inputs";
 import { expectWitnessFails, witnessMatchesRoot } from "./lib/expect";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const TAG_MERKLE: Field = 5n;
 const ARITY = 4;
@@ -136,5 +142,55 @@ describe("quaternary merkle tree", function () {
             z = P.hash([TAG_MERKLE, z, z, z, z]);
         }
         expect(zeros[DEPTH]).to.equal(z);
+    });
+});
+
+// EMPTY_SUBTREE(d) in lib/common.circom is a hardcoded table rather than an
+// in-circuit Poseidon chain, because circom does not constant-fold Poseidon and
+// tree_update_batch instantiates EmptySubtreeHashes 17 times. These tests are
+// what make the table safe: they read the constants out of the circom source
+// itself, so a typo fails CI instead of silently shifting every empty subtree.
+describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
+    this.timeout(60000);
+
+    // Genesis root asserted by CommitmentTree.EMPTY_ROOT in the contracts repo.
+    const CONTRACT_EMPTY_ROOT =
+        0x1308eb79d37ed29a9a2d34861692ea8c3e4fed3f555f53a8776c1256738e40a7n;
+    const TABLE_DEPTH = 10;
+
+    let table: Field[];
+    let P2: Poseidon;
+
+    before(async () => {
+        P2 = await Poseidon.build();
+
+        const src = fs.readFileSync(
+            path.join(__dirname, "..", "lib", "common.circom"),
+            "utf8",
+        );
+        const body = src.slice(src.indexOf("function EMPTY_SUBTREE"));
+        table = [];
+        for (const m of body.matchAll(/^\s*z\[(\d+)\]\s*=\s*(\d+);/gm)) {
+            table[Number(m[1])] = BigInt(m[2]);
+        }
+    });
+
+    it("parses exactly DEPTH+1 entries from the circom source", () => {
+        expect(table.length).to.equal(TABLE_DEPTH + 1);
+        for (let d = 0; d <= TABLE_DEPTH; d++) {
+            expect(table[d], `z[${d}] missing`).to.not.equal(undefined);
+        }
+    });
+
+    it("every entry equals the iterated Poseidon(TAG_MERKLE, z,z,z,z) chain", () => {
+        let z: Field = 0n;
+        for (let d = 0; d <= TABLE_DEPTH; d++) {
+            expect(table[d], `EMPTY_SUBTREE(${d})`).to.equal(z);
+            z = P2.hash([TAG_MERKLE, z, z, z, z]);
+        }
+    });
+
+    it("EMPTY_SUBTREE(10) equals CommitmentTree.EMPTY_ROOT", () => {
+        expect(table[TABLE_DEPTH]).to.equal(CONTRACT_EMPTY_ROOT);
     });
 });

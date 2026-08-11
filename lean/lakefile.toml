@@ -1,0 +1,19 @@
+name = "lelantosFormal"
+version = "0.1.0"
+keywords = ["zk", "circom", "soundness"]
+defaultTargets = ["Lelantos"]
+
+[leanOptions]
+pp.unicode.fun = true # pretty-prints `fun a ↦ b`
+relaxedAutoImplicit = false
+autoImplicit = false
+maxSynthPendingDepth = 3
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.32.2"
+
+[[lean_lib]]
+name = "Lelantos"
+globs = ["Lelantos", "Lelantos.Meta.AxiomGuard"]

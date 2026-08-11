@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: [self-hosted]
+    runs-on: [ubuntu-latest]
     timeout-minutes: 60
     permissions:
       contents: write   # required to attach SHAs to the release body
@@ -54,42 +54,10 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Cache cargo registry + git
-        uses: actions/cache@v4
+      - name: Setup circom
+        uses: ./.github/actions/setup-circom
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-circom-${{ env.CIRCOM_VERSION }}
-
-      - name: Cache circom binary
-        id: cache-circom
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/bin/circom
-          key: circom-${{ env.CIRCOM_VERSION }}-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install circom
-        if: steps.cache-circom.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          os=$(uname -s)
-          arch=$(uname -m)
-          case "$os-$arch" in
-            Linux-x86_64)  asset=circom-linux-amd64 ;;
-            Darwin-x86_64) asset=circom-macos-amd64 ;;
-            *)             asset="" ;;
-          esac
-          if [ -n "$asset" ]; then
-            curl -L "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/${asset}" \
-              -o "$HOME/.local/bin/circom"
-            chmod +x "$HOME/.local/bin/circom"
-          else
-            cargo install --git https://github.com/iden3/circom --tag "${CIRCOM_VERSION}" --root "$HOME/.local" circom
-          fi
-
-      - name: Add circom to PATH
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          version: ${{ env.CIRCOM_VERSION }}
 
       - name: Cache ptau
         uses: actions/cache@v4
@@ -102,7 +70,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build + verify 2x2 artifacts
+      - name: Build + verify 2x2 + 3x3 artifacts
         id: build
         run: |
           # Tee stdout so we keep the human-readable lines AND capture
@@ -110,19 +78,13 @@ jobs:
           just package | tee /tmp/check-artifacts.log
           # Extract the per-file SHA lines and the single-line JSON
           # summary into step outputs.
-          grep -E '^(2x2\.wasm|2x2_final\.zkey|verification_key\.json)=' /tmp/check-artifacts.log > /tmp/shas.txt
+          grep -E '^(2x2\.wasm|2x2_final\.zkey|verification_key\.json|3x3\.wasm|3x3_final\.zkey|3x3_verification_key\.json)=' /tmp/check-artifacts.log > /tmp/shas.txt
           {
               echo 'shas<<EOF'
               cat /tmp/shas.txt
               echo 'EOF'
           } >> "$GITHUB_OUTPUT"
           grep '^circuits-shas=' /tmp/check-artifacts.log >> "$GITHUB_OUTPUT"
-
-      - name: Cache ptau_20 (tree_update_batch)
-        uses: actions/cache@v4
-        with:
-          path: ptau/powersOfTau28_hez_final_20.ptau
-          key: ptau-20
 
       - name: Build tree_update_batch artifacts
         id: build_batch
@@ -142,6 +104,11 @@ jobs:
                 build/2x2.wasm \
                 build/2x2_final.zkey \
                 build/Verifier.sol \
+                build/3x3.r1cs \
+                build/3x3.wasm \
+                build/3x3_final.zkey \
+                build/3x3_verification_key.json \
+                build/Verifier3x3.sol \
                 build/tree_update_batch.r1cs \
                 build/tree_update_batch.wasm \
                 build/tree_update_batch_final.zkey \
@@ -162,6 +129,11 @@ jobs:
             build/2x2.wasm
             build/2x2_final.zkey
             build/Verifier.sol
+            build/3x3.r1cs
+            build/3x3.wasm
+            build/3x3_final.zkey
+            build/3x3_verification_key.json
+            build/Verifier3x3.sol
             build/tree_update_batch.r1cs
             build/tree_update_batch.wasm
             build/tree_update_batch_final.zkey

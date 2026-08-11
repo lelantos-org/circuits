@@ -1,0 +1,76 @@
+name: Setup circom
+description: >-
+  Install a pinned circom on PATH, with the binary and cargo artifacts cached.
+  Extracted from build/test/fuzz/publish, which carried byte-identical copies of
+  this block; a drift between them would mean CI compiled the circuits with a
+  different compiler than the release did.
+
+inputs:
+  version:
+    description: circom release tag, e.g. v2.2.3
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Only consulted on the source-build fallback below, but restoring it is
+    # cheap and saves a full crates.io fetch when that path is taken.
+    - name: Cache cargo registry + git
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-circom-${{ inputs.version }}
+
+    - name: Cache circom binary
+      id: cache-circom
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/bin/circom
+        key: circom-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install circom
+      if: steps.cache-circom.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        CIRCOM_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.local/bin"
+        os=$(uname -s)
+        arch=$(uname -m)
+        case "$os-$arch" in
+          Linux-x86_64)  asset=circom-linux-amd64 ;;
+          Darwin-x86_64) asset=circom-macos-amd64 ;;
+          *)             asset="" ;;
+        esac
+        if [ -n "$asset" ]; then
+          curl -fsSL "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/${asset}" \
+            -o "$HOME/.local/bin/circom"
+          chmod +x "$HOME/.local/bin/circom"
+        else
+          # No upstream prebuilt for this os/arch (e.g. arm64). Build from source.
+          cargo install --git https://github.com/iden3/circom --tag "${CIRCOM_VERSION}" --root "$HOME/.local" circom
+        fi
+
+    - name: Add circom to PATH
+      shell: bash
+      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    # Fails loudly if a cache entry was restored for the wrong version — the
+    # cache key covers the version, but a stale key would otherwise go unnoticed
+    # until a circuit miscompiled.
+    - name: Verify circom
+      shell: bash
+      env:
+        CIRCOM_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        circom --version
+        got=$(circom --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+        want="${CIRCOM_VERSION#v}"
+        if [ "$got" != "$want" ]; then
+          echo "::error::circom $got on PATH but $want was requested"
+          exit 1
+        fi
