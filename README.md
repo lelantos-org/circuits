@@ -1,6 +1,6 @@
 # Lelantos Circuits
 
-Groth16 prover artifacts for the Lelantos 2x2 transact circuit.
+Groth16 prover artifacts for the Lelantos transact circuit.
 
 Circuit design: [src/README.md](src/README.md). Formal verification:
 [lean/README.md](lean/README.md).

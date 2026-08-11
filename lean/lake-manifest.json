@@ -111,6 +111,6 @@
    "configFile": "lakefile.lean"
   }
  ],
- "name": "lelantosFormal",
+ "name": "lelantos",
  "lakeDir": ".lake"
 }

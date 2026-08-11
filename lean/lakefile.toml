@@ -1,4 +1,7 @@
-name = "lelantosFormal"
+# `leanchecker`, run with no arguments by `lean-action`, derives its target module
+# from the manifest package name capitalized. Keep this equal to the `lean_lib`
+# name (up to the leading case) or it looks for oleans that do not exist.
+name = "lelantos"
 version = "0.1.0"
 keywords = ["zk", "circom", "soundness"]
 defaultTargets = ["Lelantos"]
