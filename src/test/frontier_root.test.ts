@@ -102,7 +102,7 @@ describe("FrontierRoot (depth 3, lazy-root rebuild)", function () {
     it("FAILS when start_index ≥ 2^(2·DEPTH) (Num2Bits range check)", async () => {
         // start_index = 64 ⇒ 7-bit value; wrapper Num2Bits(6) rejects.
         const { frontier } = honestState(P, 0);
-        await expectWitnessFails(() => circuit.calculateWitness(frontierInputJson(64, frontier), true));
+        await expectWitnessFails(circuit, frontierInputJson(64, frontier));
     });
 
     it("swapping two frontier slots at the same level perturbs the root", async () => {

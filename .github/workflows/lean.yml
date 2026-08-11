@@ -8,6 +8,13 @@ on:
       - '.github/workflows/lean.yml'
   push:
     branches: [main]
+    # Same filter as `pull_request`. Without it a docs-only push to main ran the
+    # full 60-minute job, and on push `leanchecker` is enabled — the most
+    # expensive configuration, for a change that cannot affect any proof.
+    paths:
+      - 'lean/**'
+      - 'src/**'
+      - '.github/workflows/lean.yml'
 
 permissions:
   contents: read

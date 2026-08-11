@@ -1,0 +1,21 @@
+{
+  "schema": "lelantos.circuits.vectors/1",
+  "generator": "@lelantos-org/circuits@0.7.0",
+  "files": {
+    "transact-2x2.json": {
+      "sha256": "1619357373e837e9bca97e9a891a16e0b926fe935a4512736de9de5cb8608c7b",
+      "coeffCount": 31,
+      "layoutDigest": "0x05904e71214479c3abc5463830f4863da0ad20066c19105629e94178c394000a"
+    },
+    "transact-3x3.json": {
+      "sha256": "d49a928e3a784ce9b1330ce83aa0fe04aabdbed015bba6660ffcf85296bbbcc3",
+      "coeffCount": 42,
+      "layoutDigest": "0x144fffddb22d2b0f48e184dae825ae2332130385e95c812072b305e2c5e03e78"
+    },
+    "tree-update-batch-16.json": {
+      "sha256": "6a13147d7c16025be6f6224e96c3ec3c6de85d6eb067ca6dc2544f9b8979276a",
+      "coeffCount": 100,
+      "layoutDigest": "0xe72874627df15c011e82e74784e00b1d0d2b17391808cfb7c0c2960e8d1a20b8"
+    }
+  }
+}

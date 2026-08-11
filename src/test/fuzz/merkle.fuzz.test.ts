@@ -62,9 +62,8 @@ describe("quaternary merkle [fuzz]", function () {
             fc.integer({ min: 0, max: N_LEAVES - 1 }),
             fc.integer({ min: 0, max: DEPTH - 1 }),
             // Two distinct sibling slots in [0, ARITY-2]. pathElements[lvl]
-            // holds the ARITY-1 = 3 non-queried siblings, so valid indices
-            // are 0..2; covers 0↔2 boundary that the old adjacent-only
-            // (swapA, swapA+1) scheme missed.
+            // holds the ARITY-1 = 3 non-queried siblings, so valid indices are
+            // 0..2. Non-adjacent pairs are included, covering the 0↔2 boundary.
             arbDistinctInt(0, ARITY - 2),
             async (leaves, queryIdx, swapLevel, [a, b]) => {
                 const tree = new MerkleTree(P, DEPTH);
@@ -74,7 +73,7 @@ describe("quaternary merkle [fuzz]", function () {
                 const swapped: Field[][] = pathElements.map(lvl => lvl.slice());
                 // If siblings at (a, b) happen to share the same value the
                 // swap is a no-op; root will match honest and assertion below
-                // expects rejection — skip in that genuinely-degenerate case.
+                // expects rejection — skip in that degenerate case.
                 if (swapped[swapLevel][a] === swapped[swapLevel][b]) return;
                 [swapped[swapLevel][a], swapped[swapLevel][b]] = [swapped[swapLevel][b], swapped[swapLevel][a]];
 

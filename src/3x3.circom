@@ -23,13 +23,20 @@ include "lib/transact.circom";
 //     [41]      out_aux_digest           (contract recomputes; never read from calldata)
 // Total = 9 + 3·N_IN + 8·N_OUT = 42.
 //
-// NOT DEPLOYED. No justfile recipe compiles this shape, no test instantiates it,
-// and no trusted setup exists for it. It is kept only so `Transact` is exercised
-// at a third shape by the Lean development (lean/expected/layout-3x3.txt).
-// Deploying it requires: a compile/setup recipe, its own phase-2 ceremony, a
-// PubInputs.sol compress overload for 42 slots, a satisfying Lean witness
-// (transact3x3_sound is not yet shown non-vacuous), and extending
-// layout_parity.test.ts to this shape.
+// NOT DEPLOYED. No justfile recipe compiles this shape and no trusted setup
+// exists for it. It is kept so `Transact` is exercised at a second shape by the
+// Lean development (lean/expected/layout-3x3.txt).
+//
+// It IS compiled and satisfied off the deployment path: `scripts/gen-vectors.ts`
+// builds three witnesses for this shape, checks them against the compiled
+// circuit, and publishes `vectors/transact-3x3.json`. The generator refuses to
+// write unless the circuit's `y` equals the reference PolyEval over the 42
+// coefficients, so the layout above is pinned against the circom itself, and
+// `layout_parity.test.ts` pins the published vector against the Lean dump.
+//
+// Deploying it still requires: a compile/setup recipe, its own phase-2 ceremony,
+// a PubInputs.sol compress overload for 42 slots, and a satisfying Lean witness
+// (transact3x3_sound is not yet shown non-vacuous).
 //
 // Note §10.5's `require(nullifier[0] != nullifier[1])` must generalise to all
 // three pairs at this shape.

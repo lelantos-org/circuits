@@ -111,21 +111,29 @@ template TransactCompressN(N_IN, N_OUT) {
     y <== pe.y;
 }
 
-// TreeUpdateBatch public-input compressor: 4 + 9·MAX_N coefficients → (z, y).
+// TreeUpdateBatch public-input compressor: 4 + 6·MAX_L coefficients → (z, y).
 // Layout must match PubInputs.sol :: compress(TreeUpdateBatch).
-template BatchCompress(MAX_N) {
-    var N = 4 + 9 * MAX_N;
+//
+// Every array is indexed by leaf slot, not by pair: a batch commits to
+// actual_count individual leaves, so the deposit-binding fields
+// (leaf_asset, leaf_public_in, is_deposit) are MAX_L wide rather than MAX_L/2.
+//
+// The two uint64 blocks (leaf_asset, leaf_public_in) are adjacent and the uint8
+// block (is_deposit) follows them, so PubInputs.compress can re-mask the
+// sub-word members with two contiguous loops over the copied calldata.
+template BatchCompress(MAX_L) {
+    var N = 4 + 6 * MAX_L;
 
     signal input z;
     signal input old_root;
     signal input new_root;
     signal input start_index;
     signal input actual_count;
-    signal input cms[2 * MAX_N];
-    signal input cv_dep[2 * MAX_N][2];
-    signal input pair_asset[MAX_N];
-    signal input pair_public_in[MAX_N];
-    signal input is_deposit[MAX_N];
+    signal input cms[MAX_L];
+    signal input cv_dep[MAX_L][2];
+    signal input leaf_asset[MAX_L];
+    signal input leaf_public_in[MAX_L];
+    signal input is_deposit[MAX_L];
 
     signal output y;
 
@@ -136,25 +144,25 @@ template BatchCompress(MAX_N) {
     pe.coeffs[3] <== actual_count;
 
     var off = 4;
-    for (var i = 0; i < 2 * MAX_N; i++) {
-        pe.coeffs[off + i] <== cms[i];
+    for (var k = 0; k < MAX_L; k++) {
+        pe.coeffs[off + k] <== cms[k];
     }
-    off = off + 2 * MAX_N;
-    for (var i = 0; i < 2 * MAX_N; i++) {
-        pe.coeffs[off + 2 * i + 0] <== cv_dep[i][0];
-        pe.coeffs[off + 2 * i + 1] <== cv_dep[i][1];
+    off = off + MAX_L;
+    for (var k = 0; k < MAX_L; k++) {
+        pe.coeffs[off + 2 * k + 0] <== cv_dep[k][0];
+        pe.coeffs[off + 2 * k + 1] <== cv_dep[k][1];
     }
-    off = off + 4 * MAX_N;
-    for (var i = 0; i < MAX_N; i++) {
-        pe.coeffs[off + i] <== pair_asset[i];
+    off = off + 2 * MAX_L;
+    for (var k = 0; k < MAX_L; k++) {
+        pe.coeffs[off + k] <== leaf_asset[k];
     }
-    off = off + MAX_N;
-    for (var i = 0; i < MAX_N; i++) {
-        pe.coeffs[off + i] <== pair_public_in[i];
+    off = off + MAX_L;
+    for (var k = 0; k < MAX_L; k++) {
+        pe.coeffs[off + k] <== leaf_public_in[k];
     }
-    off = off + MAX_N;
-    for (var i = 0; i < MAX_N; i++) {
-        pe.coeffs[off + i] <== is_deposit[i];
+    off = off + MAX_L;
+    for (var k = 0; k < MAX_L; k++) {
+        pe.coeffs[off + k] <== is_deposit[k];
     }
     pe.z <== z;
     y <== pe.y;

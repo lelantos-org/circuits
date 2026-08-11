@@ -289,13 +289,10 @@ theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
 
 `transact_sound` is stated for `nIn ≤ 3`, `nOut ≤ 3` — the bound comes from
 `perAssetValueBalance_nat`, where it is what keeps each side of the balance equation below
-`p`. The repository ships exactly three shapes, and all three sit inside it. -/
+`p`. The repository ships exactly two shapes, and both sit inside it. -/
 
 /-- `Transact(10, 2, 2)` — `src/2x2.circom:28`. -/
 abbrev Transact2x2 := TxWitness 10 2 2
-
-/-- `Transact(10, 2, 3)` — `src/2x3.circom:35`. NOT DEPLOYED; see the circom header. -/
-abbrev Transact2x3 := TxWitness 10 2 3
 
 /-- `Transact(10, 3, 3)` — `src/3x3.circom:38`. NOT DEPLOYED; see the circom header. -/
 abbrev Transact3x3 := TxWitness 10 3 3
@@ -304,21 +301,12 @@ abbrev Transact3x3 := TxWitness 10 3 3
 theorem transact2x2_sound {w : Transact2x2} (h : TransactSat w) : TxWellFormed w :=
   transact_sound (by norm_num) (by norm_num) h
 
-/-- **Soundness of the deployed `2x3` instance.** -/
-theorem transact2x3_sound {w : Transact2x3} (h : TransactSat w) : TxWellFormed w :=
-  transact_sound (by norm_num) (by norm_num) h
-
 /-- **Soundness of the deployed `3x3` instance.** -/
 theorem transact3x3_sound {w : Transact3x3} (h : TransactSat w) : TxWellFormed w :=
   transact_sound (by norm_num) (by norm_num) h
 
 /-- **The `2x2` binding layer**, on the same unsatisfiable hypothesis. -/
 theorem transact2x2_binding {w : Transact2x2} (hnc : ¬ PoseidonCollision)
-    (h : TransactSat w) : TxBinding w :=
-  transact_binding hnc (by norm_num) h
-
-/-- **The `2x3` binding layer.** -/
-theorem transact2x3_binding {w : Transact2x3} (hnc : ¬ PoseidonCollision)
     (h : TransactSat w) : TxBinding w :=
   transact_binding hnc (by norm_num) h
 

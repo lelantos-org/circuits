@@ -8,8 +8,7 @@ include "value_commit.circom";
 include "poly_eval.circom";
 
 // MASP pool: N_IN-input × N_OUT-output multi-asset transact circuit.
-// The concrete shapes instantiate this template; see 2x2.circom, 2x3.circom and
-// 3x3.circom.
+// The concrete shapes instantiate this template; see 2x2.circom and 3x3.circom.
 //
 // Parameters:
 //   DEPTH — Merkle depth; capacity 4^DEPTH leaves.

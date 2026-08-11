@@ -1,22 +1,22 @@
-// `await circuit.calculateWitness(input, true)` either succeeds or throws.
-// Tests repeatedly used a try/catch+flag pattern; collapse it here.
+// Assertions over circom_tester witnesses.
 //
-// Two call forms:
-//   expectWitnessFails(circuit, input [, message])   — new API
-//   expectWitnessFails(() => circuit.calculateWitness(input, true))  — thunk API
+// `circuit.calculateWitness(input, true)` either succeeds or throws, so a
+// rejection test reduces to a try/catch and a flag.
 
+/**
+ * Assert that witness generation for `input` throws.
+ *
+ * `message` should name the constraint under test: a failure here means that
+ * constraint did not fire.
+ */
 export async function expectWitnessFails(
-    circuitOrThunk: any,
-    input?: any,
+    circuit: any,
+    input: any,
     message = "expected witness generation to fail",
 ): Promise<void> {
     let threw = false;
     try {
-        if (typeof circuitOrThunk === "function") {
-            await circuitOrThunk();
-        } else {
-            await circuitOrThunk.calculateWitness(input, true);
-        }
+        await circuit.calculateWitness(input, true);
     } catch {
         threw = true;
     }

@@ -69,9 +69,9 @@ template MulH() {
 // observer learns which leaf was spent.
 //
 // The value·gen term, however, is identical across the two. Instantiating
-// ValueCommit twice (as SpentNote/OutputNote used to) computes EscalarMulAny(64)
-// twice for the same bits and the same generator — 585 constraints of duplicated
-// work per note slot. This template computes it once and adds each blinder.
+// ValueCommit twice would compute EscalarMulAny(64) twice for the same bits and
+// the same generator — 585 constraints of duplicated work per note slot. This
+// template computes it once and adds each blinder.
 //
 // rH / rH_dep are exposed for PerAssetPointBalance.
 template ValueCommitPair() {

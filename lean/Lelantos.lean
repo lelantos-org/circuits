@@ -13,6 +13,7 @@ import Lelantos.Gadgets.Note
 import Lelantos.Gadgets.PolyEval
 import Lelantos.Gadgets.Balance
 import Lelantos.Gadgets.Merkle
+import Lelantos.Gadgets.Insert
 import Lelantos.Gadgets.ValueCommit
 import Lelantos.Gadgets.PointBalance
 
@@ -22,6 +23,9 @@ import Lelantos.Circuit.Spent
 import Lelantos.Circuit.Output
 import Lelantos.Circuit.Witness
 import Lelantos.Circuit.Transact
+
+-- The relayer batch tree-advance circuit: `src/tree_update_batch.circom`.
+import Lelantos.Circuit.TreeUpdateBatch
 
 -- Results about the finished system: which assignments exist, and which cannot.
 import Lelantos.Proofs.Completeness

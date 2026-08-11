@@ -1,6 +1,6 @@
 import { expect } from "chai";
 
-import { BN254_FR } from "@lelantos-org/sdk/crypto";
+import { BN254_FR } from "./helpers";
 import { fixturePath, loadCircuit } from "./lib/circuit";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");

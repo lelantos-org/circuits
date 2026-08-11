@@ -29,8 +29,8 @@ theorem one_lt_p : 1 < p := by unfold p; norm_num
 theorem two_lt_p : 2 < p := by unfold p; norm_num
 
 /-- `3 < p`: the largest output-slot index over the deployed shapes (`N_OUT = 3` in
-`src/2x3.circom` and `src/3x3.circom`) still injects into `F`, which is what makes
-`DeriveRho`'s `index` argument separate output slots. -/
+`src/3x3.circom`) still injects into `F`, which is what makes `DeriveRho`'s `index`
+argument separate output slots. -/
 theorem three_lt_p : 3 < p := by unfold p; norm_num
 
 /-- `2 ^ 64 < p`: this is what makes `RangeCheck64` a genuine range check rather than a

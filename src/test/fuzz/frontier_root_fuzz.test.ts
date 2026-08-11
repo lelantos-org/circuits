@@ -1,4 +1,4 @@
-// Fuzz coverage for the H-1 frontier-binding fix at DEPTH=10 / MAX_N=8.
+// Fuzz coverage for the H-1 frontier-binding fix at DEPTH=10 / MAX_L=16.
 //
 // `lib/frontier_root.circom` rebinds `frontier_in` to public `old_root` so a
 // malicious relayer cannot pair a real `oldRoot` with a forged frontier.
@@ -7,8 +7,8 @@
 // circuit at the production depth across random:
 //   - edge-digit `start_index` patterns (digits ∈ {0, 3}, i.e. minimal /
 //     maximal slot fill at each of the 10 levels);
-//   - active-pair counts `k ∈ [1, MAX_N]` (so every padding shape — none,
-//     partial, full — is fuzzed alongside the frontier rebuild);
+//   - active-leaf counts `k ∈ [1, MAX_L]`, odd counts included (so every
+//     padding shape — none, partial, full — is fuzzed alongside the rebuild);
 //   - tamper coordinates `(level, slot)` over the filled siblings.
 //
 // Property: any perturbation of a filled frontier slot must reject the
@@ -22,16 +22,23 @@
 
 import * as fc from "fast-check";
 
-import { Poseidon, Jubjub, MerkleTree, type Field, type Point } from "../helpers";
-import { fiatShamirZ, hornerEval } from "@lelantos-org/sdk";
+import {
+    Poseidon,
+    Jubjub,
+    MerkleTree,
+    buildNoteCommitment,
+    fiatShamirZ,
+    hornerEval,
+    type Field,
+    type Point,
+} from "../helpers";
 import { loadCircuit, srcPath } from "../lib/circuit";
-import { treeUpdateBatchInputJson, flattenTreeUpdateBatch } from "../lib/inputs";
+import { treeUpdateBatchInputJson, treeUpdateBatchCoeffs, padToSlots } from "../lib/inputs";
 import { expectWitnessFails } from "../lib/expect";
 import { fcParamsFor } from "./arbitraries";
 
 const DEPTH = 10;
-const MAX_N = 8;
-const SLOTS = 2 * MAX_N;
+const MAX_L = 16;
 const TAG_LEAF = 10n;
 const CAPACITY = 4 ** DEPTH;
 const WRAPPER = srcPath("tree_update_batch.circom");
@@ -41,47 +48,35 @@ const WRAPPER = srcPath("tree_update_batch.circom");
 // in the tree because each trial builds two depth-10 witnesses.
 const fcParams = fcParamsFor("FRONTIER");
 
-interface Pair {
-    cm0: Field;
-    cm1: Field;
-    cvDep0: Point;
-    cvDep1: Point;
-    pairAsset: Field;
-    pairPublicIn: Field;
+interface Leaf {
+    cm: Field;
+    cvDep: Point;
+    leafAsset: Field;
+    leafPublicIn: Field;
     isDeposit: 0 | 1;
-    rcvTotal: Field;
-    rcvDepPad: Field;
+    rcv: Field;
 }
 
-function padToSlots<T>(real: T[], total: number, zero: T): T[] {
-    const out = real.slice();
-    while (out.length < total) out.push(zero);
-    return out;
-}
-
-function buildPair(P: Poseidon, J: Jubjub, seed: number, isDeposit: 0 | 1): Pair {
+function buildLeaf(P: Poseidon, J: Jubjub, seed: number, isDeposit: 0 | 1): Leaf {
     const asset = 7n;
-    const val0 = BigInt(100 + seed);
-    // Deposit pads must carry value 0: tree_update_batch pins cv_dep1 to
-    // rcv_dep_pad·H so the pair total cannot be split between the leaves.
-    const val1 = isDeposit === 1 ? 0n : BigInt(200 + seed);
+    const val = BigInt(100 + seed);
     const pk = BigInt(0xb000 + seed);
-    const rho0 = BigInt(1 + 4 * seed);
-    const rho1 = BigInt(2 + 4 * seed);
-    const rcm0 = BigInt(3 + 4 * seed);
-    const rcm1 = BigInt(4 + 4 * seed);
-    const rcvDep0 = BigInt(11 + 7 * seed);
-    const rcvDep1 = BigInt(13 + 7 * seed);
-    const cm0 = P.hash([asset * (1n << 64n) + val0, pk, rho0, rcm0]);
-    const cm1 = P.hash([asset * (1n << 64n) + val1, pk, rho1, rcm1]);
+    const rho = BigInt(1 + 2 * seed);
+    const rcm = BigInt(3 + 2 * seed);
+    const rcv = BigInt(11 + 7 * seed);
+    const cm = buildNoteCommitment(P, { asset, value: val, pk, rho, rcm });
     const assetGen = J.hashToAssetGen(asset);
-    const cvDep0 = J.valueCommit(val0, assetGen, rcvDep0);
-    const cvDep1 = J.valueCommit(val1, assetGen, rcvDep1);
-    const pairPublicIn = isDeposit === 1 ? val0 + val1 : 0n;
-    const pairAsset = isDeposit === 1 ? asset : 0n;
-    const rcvTotal = isDeposit === 1 ? rcvDep0 + rcvDep1 : 0n;
-    const rcvDepPad = isDeposit === 1 ? rcvDep1 : 0n;
-    return { cm0, cm1, cvDep0, cvDep1, pairAsset, pairPublicIn, isDeposit, rcvTotal, rcvDepPad };
+    const cvDep = J.valueCommit(val, assetGen, rcv);
+    // A deposit leaf is pinned directly to its own value, so the claimed
+    // public_in is exactly `val`.
+    return {
+        cm,
+        cvDep,
+        leafAsset: isDeposit === 1 ? asset : 0n,
+        leafPublicIn: isDeposit === 1 ? val : 0n,
+        isDeposit,
+        rcv,
+    };
 }
 
 function leafOf(P: Poseidon, cm: Field, cvDep: Point): Field {
@@ -95,53 +90,42 @@ interface Witness {
     actualCount: number;
     cms: Field[];
     cvDep: Point[];
-    pairAsset: Field[];
-    pairPublicIn: Field[];
+    leafAsset: Field[];
+    leafPublicIn: Field[];
     isDeposit: number[];
-    rcvTotal: Field[];
-    rcvDepPad: Field[];
+    rcv: Field[];
     frontier: Field[][];
     z: Field;
     y: Field;
 }
 
-function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, pairs: Pair[]): Witness {
+function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, leaves: Leaf[]): Witness {
     const tree = new MerkleTree(P, DEPTH);
     for (let i = 0; i < prefilled; i++) tree.insert(BigInt(0xdead + i));
     const oldRoot = tree.root();
     const frontier = tree.frontier();
 
-    for (const p of pairs) {
-        tree.insert(leafOf(P, p.cm0, p.cvDep0));
-        tree.insert(leafOf(P, p.cm1, p.cvDep1));
+    for (const l of leaves) {
+        tree.insert(leafOf(P, l.cm, l.cvDep));
     }
     const newRoot = tree.root();
 
-    const cms: Field[] = [];
-    const cvDep: Point[] = [];
-    for (const p of pairs) {
-        cms.push(p.cm0);
-        cms.push(p.cm1);
-        cvDep.push(p.cvDep0);
-        cvDep.push(p.cvDep1);
-    }
-    const cmsPadded = padToSlots(cms, SLOTS, 0n);
-    const cvDepPadded = padToSlots(cvDep, SLOTS, [0n, 0n] as Point);
-    const pairAssetPadded = padToSlots(pairs.map(p => p.pairAsset), MAX_N, 0n);
-    const pairPublicInPadded = padToSlots(pairs.map(p => p.pairPublicIn), MAX_N, 0n);
-    const isDepositPadded = padToSlots(pairs.map(p => p.isDeposit as number), MAX_N, 0);
-    const rcvTotalPadded = padToSlots(pairs.map(p => p.rcvTotal), MAX_N, 0n);
-    const rcvDepPadPadded = padToSlots(pairs.map(p => p.rcvDepPad), MAX_N, 0n);
+    const cmsPadded = padToSlots(leaves.map(l => l.cm), MAX_L, 0n);
+    const cvDepPadded = padToSlots(leaves.map(l => l.cvDep), MAX_L, [0n, 0n] as Point);
+    const leafAssetPadded = padToSlots(leaves.map(l => l.leafAsset), MAX_L, 0n);
+    const leafPublicInPadded = padToSlots(leaves.map(l => l.leafPublicIn), MAX_L, 0n);
+    const isDepositPadded = padToSlots(leaves.map(l => l.isDeposit as number), MAX_L, 0);
+    const rcvPadded = padToSlots(leaves.map(l => l.rcv), MAX_L, 0n);
 
-    const coeffs = flattenTreeUpdateBatch({
+    const coeffs = treeUpdateBatchCoeffs({
         oldRoot,
         newRoot,
         startIndex: prefilled,
-        actualCount: pairs.length,
+        actualCount: leaves.length,
         cms: cmsPadded,
         cvDep: cvDepPadded,
-        pairAsset: pairAssetPadded,
-        pairPublicIn: pairPublicInPadded,
+        leafAsset: leafAssetPadded,
+        leafPublicIn: leafPublicInPadded,
         isDeposit: isDepositPadded,
     });
     const z = fiatShamirZ(coeffs);
@@ -151,14 +135,13 @@ function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, pairs: Pair[]): 
         oldRoot,
         newRoot,
         startIndex: prefilled,
-        actualCount: pairs.length,
+        actualCount: leaves.length,
         cms: cmsPadded,
         cvDep: cvDepPadded,
-        pairAsset: pairAssetPadded,
-        pairPublicIn: pairPublicInPadded,
+        leafAsset: leafAssetPadded,
+        leafPublicIn: leafPublicInPadded,
         isDeposit: isDepositPadded,
-        rcvTotal: rcvTotalPadded,
-        rcvDepPad: rcvDepPadPadded,
+        rcv: rcvPadded,
         frontier,
         z,
         y,
@@ -183,7 +166,7 @@ function tamperableLevels(digits: number[]): number[] {
     return out;
 }
 
-describe("frontier_root [fuzz, depth=10, MAX_N=8]", function () {
+describe("frontier_root [fuzz, depth=10, MAX_L=16]", function () {
     this.timeout(3_600_000);
 
     let circuit: any;
@@ -196,9 +179,9 @@ describe("frontier_root [fuzz, depth=10, MAX_N=8]", function () {
         circuit = await loadCircuit(WRAPPER);
     });
 
-    it("any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..8 pairs)", async () => {
-        // Compose digits + k together so 2·k always fits remaining capacity
-        // (drops the old `if (startIndex + 2*k > CAPACITY) return;` skip).
+    it("any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..16 leaves)", async () => {
+        // Compose digits + k together so k always fits the remaining capacity,
+        // avoiding a discard when the draw would overflow.
         // We also require at least one digit==3 so `tamperableLevels` is
         // non-empty; if the random draw gives all-zero digits we clear the
         // top level to 3 (still a valid edge-digit pattern).
@@ -210,7 +193,7 @@ describe("frontier_root [fuzz, depth=10, MAX_N=8]", function () {
                     return d;
                 })();
                 const startIndex = startIndexFromEdgeDigits(digits);
-                const headroom = Math.max(1, Math.min(MAX_N, Math.floor((CAPACITY - startIndex) / 2)));
+                const headroom = Math.max(1, Math.min(MAX_L, CAPACITY - startIndex));
                 return fc.integer({ min: 1, max: headroom }).map(k => ({ digits, k }));
             });
         // Tamper level picked uniformly over the filled subset (no levelSeed
@@ -224,16 +207,16 @@ describe("frontier_root [fuzz, depth=10, MAX_N=8]", function () {
             arbTamperLevel,
             // Which of the 3 filled slots at the chosen level to perturb.
             fc.integer({ min: 0, max: 2 }),
-            // isDeposit per active pair (Pedersen aggregate path vs spend skip).
-            fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_N, maxLength: MAX_N }),
+            // isDeposit per active leaf (Pedersen binding path vs spend skip).
+            fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
             async ({ digits, k, level }, slotIdx, depositFlags) => {
                 const startIndex = startIndexFromEdgeDigits(digits);
 
-                const pairs: Pair[] = [];
+                const leaves: Leaf[] = [];
                 for (let i = 0; i < k; i++) {
-                    pairs.push(buildPair(P, J, i, depositFlags[i]));
+                    leaves.push(buildLeaf(P, J, i, depositFlags[i]));
                 }
-                const honest = buildHonest(P, J, startIndex, pairs);
+                const honest = buildHonest(P, J, startIndex, leaves);
 
                 // Sanity: honest witness must verify. Without this, a
                 // tamper-rejection assertion below would be vacuous.
@@ -251,18 +234,19 @@ describe("frontier_root [fuzz, depth=10, MAX_N=8]", function () {
                 tampered.frontier[level][slotIdx] = tampered.frontier[level][slotIdx] + 1n;
 
                 // Rebind Fiat-Shamir (frontier is NOT in the PolyEval
-                // coefficient vector — see `flattenTreeUpdateBatch`) so the
+                // coefficient vector — see `treeUpdateBatchCoeffs`) so the
                 // failure can only come from FrontierRoot's `old_root ===
                 // rebuilt` check, not from a (z, y) mismatch.
                 await expectWitnessFails(
-                    () => circuit.calculateWitness(treeUpdateBatchInputJson(tampered), true),
+                    circuit,
+                    treeUpdateBatchInputJson(tampered),
                     `frontier perturbation at (level=${level}, slot=${slotIdx}) must reject`,
                 );
             },
         ), fcParamsFor("FRONTIER", { examples: [
             // Boundary digit patterns + tamper at extremes.
-            [{ digits: Array<number>(DEPTH).fill(3).map((_, i) => i === DEPTH - 1 ? 0 : 3), k: 1, level: 0 }, 0, Array<0 | 1>(MAX_N).fill(1)],
-            [{ digits: [...Array<number>(DEPTH - 1).fill(0), 3], k: 1, level: DEPTH - 1 }, 2, Array<0 | 1>(MAX_N).fill(0)],
+            [{ digits: Array<number>(DEPTH).fill(3).map((_, i) => i === DEPTH - 1 ? 0 : 3), k: 1, level: 0 }, 0, Array<0 | 1>(MAX_L).fill(1)],
+            [{ digits: [...Array<number>(DEPTH - 1).fill(0), 3], k: 3, level: DEPTH - 1 }, 2, Array<0 | 1>(MAX_L).fill(0)],
         ] }));
     });
 });

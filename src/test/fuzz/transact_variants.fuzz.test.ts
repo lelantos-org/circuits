@@ -4,8 +4,8 @@
 // covers balanced random witnesses, unbalanced mutations, ghost-note
 // asset, wrong-nsk, and value-overflow. This file adds:
 //   - role symmetry: which real note occupies which input/output slot is
-//     free — an honest rebuild after swapping slots must still verify. (Raw
-//     JSON swaps no longer verify: output rho is bound to (nullifier[0],
+//     free — an honest rebuild after swapping slots must still verify. (A raw
+//     JSON swap does not verify: output rho is bound to (nullifier[0],
 //     out_index), so slot order feeds the derivation. That binding is the F1
 //     faerie-gold defense, not a soundness hole.)
 //   - public-value boundary: publicIn / publicOut at 2^64 - 1 (max) and
@@ -67,11 +67,11 @@ describe("transact_2x2 variants [fuzz]", function () {
     });
 
     it("input-role swap preserves witness validity (honest rebuild)", async () => {
-        // Output rho is now bound to (nullifier[0], out_index), so swapping
-        // input slots changes nullifier[0] and thus the honestly-derived output
-        // rho/cm — a *raw* JSON swap no longer verifies. The invariant that
-        // survives: which real note occupies which input slot is free, provided
-        // the witness is rebuilt honestly. Both arrangements must verify.
+        // Output rho is bound to (nullifier[0], out_index), so swapping input
+        // slots changes nullifier[0] and thus the honestly-derived output
+        // rho/cm; a raw JSON swap does not verify. The invariant is that which
+        // real note occupies which input slot is free, provided the witness is
+        // rebuilt honestly. Both arrangements must verify.
         await fc.assert(fc.asyncProperty(
             arbBalancedSplit(), arbNsk(), arbNsk(),
             async ({ v1, v2, o1, o2 }, aliceNsk, bobNsk) => {

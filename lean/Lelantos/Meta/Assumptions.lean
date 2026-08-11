@@ -86,7 +86,6 @@ and `TxBinding` is what keeps it that way.
 
 #print axioms Lelantos.transact_sound
 #print axioms Lelantos.transact2x2_sound
-#print axioms Lelantos.transact2x3_sound
 #print axioms Lelantos.transact3x3_sound
 #print axioms Lelantos.perAssetValueBalance_nat
 #print axioms Lelantos.perAssetValueBalance_all_assets
@@ -117,5 +116,21 @@ and `TxBinding` is what keeps it that way.
 #print axioms Lelantos.transact_binding
 #print axioms Lelantos.valueCommit_opens
 #print axioms Lelantos.outputNote_cvDep_same_value
+-- `src/tree_update_batch.circom`. The chain results rest on `p_prime` alone; only the
+-- deposit binding reaches the curve gadgets, and none of them touches a hash assumption.
+#print axioms Lelantos.batch_count_range
+#print axioms Lelantos.batch_active_spec
+#print axioms Lelantos.batch_padding_zero
+#print axioms Lelantos.batch_step_inserts
+#print axioms Lelantos.batch_step_stalls
+#print axioms Lelantos.batch_advances_by_count
+#print axioms Lelantos.batch_advances_by_count_deployed
+#print axioms Lelantos.batch_count_range_deployed
+#print axioms Lelantos.batch_deposit_opens
+#print axioms Lelantos.quaternaryInsertLevel_sound
+#print axioms Lelantos.quaternaryInsert_sound
+#print axioms Lelantos.InsertsTo.unique
+#print axioms Lelantos.lessThan_sound
+
 #print axioms Lelantos.poseidon_not_injective
 #print axioms Lelantos.poseidon_collision

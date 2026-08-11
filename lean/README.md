@@ -1,9 +1,13 @@
-# `lean/` — Lean 4 soundness proof for the transact circuits
+# `lean/` — Lean 4 soundness proofs for the circuits
 
 A machine-checked development for `Transact(DEPTH, N_IN, N_OUT)`, the multi-asset transact
-circuit, covering all three shapes the repository ships — `src/2x2.circom`, `src/2x3.circom`
-and `src/3x3.circom`. The top-level theorem holds for **any** assignment satisfying the
-modeled constraint system, not only those an honest prover produces.
+circuit, and for `TreeUpdateBatch(DEPTH, MAX_L)`, the relayer batch tree-advance circuit.
+The transact half covers all three shapes the repository instantiates — `src/2x2.circom`,
+`src/2x3.circom` and `src/3x3.circom`. Only `2x2` is built and deployed; the other two are
+compiled by no recipe and have no trusted setup, and are kept so the shape-generic results
+are exercised at more than one slot count (see the NOT DEPLOYED note in each circom header).
+The top-level theorem holds for **any** assignment satisfying the modeled constraint system,
+not only those an honest prover produces.
 
 That distinction is the point. The test suite
 ([transact.test.ts](../src/test/transact.test.ts), [fuzz/](../src/test/fuzz/)) exercises the
@@ -60,7 +64,7 @@ assumptions recorded in a statement, not results — see
 | Theorem | Where | Statement |
 |---|---|---|
 | `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w`, for `N_IN ≤ 3` and `N_OUT ≤ 3` |
-| `transact2x2_sound` / `transact2x3_sound` / `transact3x3_sound` | `Circuit/Transact.lean` | the same for each deployed instance: `Transact(10,2,2)`, `Transact(10,2,3)`, `Transact(10,3,3)` |
+| `transact2x2_sound` / `transact2x3_sound` / `transact3x3_sound` | `Circuit/Transact.lean` | the same for each instantiated shape: `Transact(10,2,2)` (deployed), `Transact(10,2,3)` and `Transact(10,3,3)` (not deployed) |
 | `transact_binding` † | `Circuit/Transact.lean` | `TransactSat w → TxBinding w` |
 
 The `≤ 3` bound is not a property of the circuit — `PerAssetValueBalance` is written for
@@ -101,6 +105,50 @@ The load-bearing result, and the one with the smallest trusted base.
 | `transact_pi_binding` | `Circuit/Transact.lean` | two transactions with different public inputs share `(z, y)` for at most 30 challenges |
 | `transact_pi_binding_slot` | `Circuit/Transact.lean` | …stated per **named** public input |
 | `piSlot_slotIndex` | `Circuit/Witness.lean` | `slotIndex` inverts the coefficient layout, turning a named-field difference into a coefficient index |
+
+### `tree_update_batch.circom`
+
+`Circuit/TreeUpdateBatch.lean` splits the constraint system in two: `BatchChainSat` (the
+append machinery) and `BatchDepositSat` (the per-leaf deposit binding). The split is
+load-bearing for the trusted base — only the deposit half mentions the curve, so every
+chain result below depends on `p_prime` alone.
+
+| Theorem | Where | Statement |
+|---|---|---|
+| `batch_count_range` | `Circuit/TreeUpdateBatch.lean` | `actual_count ∈ [1, MAX_L]`; `0` is excluded because it would force a decomposition of `p − 1` |
+| `batch_active_spec` | `Circuit/TreeUpdateBatch.lean` | `active[k]` is the indicator of `k < actual_count`, hence a contiguous prefix |
+| `batch_padding_zero` | `Circuit/TreeUpdateBatch.lean` | every field of an inactive leaf is zero, so padding cannot smuggle values into the compressed PIs |
+| `batch_step_inserts` | `Circuit/TreeUpdateBatch.lean` | an active step is a genuine `InsertsTo` of that leaf over the running frontier |
+| `batch_step_stalls` | `Circuit/TreeUpdateBatch.lean` | an inactive step carries the running state through unchanged |
+| `batch_advances_by_count` | `Circuit/TreeUpdateBatch.lean` | **both halves at once: every step below `actual_count` is a real insert, and `new_root` is the running root at `actual_count`** — the formal content of "odd counts work" |
+| `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(10, 16)`, `COUNT_BITS = 4` |
+| `batch_bounds_deployed` | `Circuit/TreeUpdateBatch.lean` | the two side conditions are simultaneously satisfiable at the deployed shape, so the results above are not conditional on an impossible hypothesis |
+| `batch_deposit_opens` | `Circuit/TreeUpdateBatch.lean` | an active deposit leaf's `cv_dep` opens to exactly `leaf_public_in` units of `leaf_asset` |
+| `quaternaryInsertLevel_sound` | `Gadgets/Insert.lean` | the level arithmetic is the fill table: `cur` at the digit, frontier left, empty-subtree hash right — and the frontier update is a *different* mux, also proved |
+| `quaternaryInsert_sound` | `Gadgets/Insert.lean` | a satisfying assignment is an `InsertsTo`, with every digit quaternary |
+| `InsertsTo.unique` | `Gadgets/Insert.lean` | the insert is a **function** of `(leaf, digits, frontier)` — same inputs, same root and frontier |
+| `lessThan_sound` | `Gadgets/Comparators.lean` | circomlib `LessThan(n)` is the comparison indicator, given both operands are `n`-bit |
+
+`InsertsTo` is the abstract meaning of an append, the counterpart of `MerkleMember`, and
+`InsertsTo.unique` is what keeps it from being the near-tautology `MerkleMember` is. There
+the chain is merely witnessed, and only Poseidon collision resistance ties it to the root
+(`merkleMember_inj`, a † row). Here `chain 0 = leaf` plus the step equation determine every
+node outright, so the root is pinned by plain induction — **no hash assumption**, which is
+why none of the batch rows carry a †.
+
+`batch_active_spec` is the one to read. `batch_advances_by_count` has two halves — every
+step below `actual_count` is a real insert, and nothing is folded in past it — and neither
+half alone says what is wanted: both would hold of a non-monotone `active` that appended
+leaf `k` at tree position `start_index + k` while position `start_index + k − 1` was never
+filled. It is the *contiguity* of the active prefix that rules that out. The statement never
+mentions the parity of `actual_count`, which is the whole point of the leaf-granular
+design.
+
+`batch_deposit_opens` is stated per leaf, with no aggregate anywhere in it. The earlier
+pair-granular form bound only `cv_dep[2i] + cv_dep[2i+1]`, which fixes `Σvalue` modulo the
+subgroup order `ell` and not the split between the two leaves; that gap is what the pad-leaf
+constraint existed to close. Binding each leaf on its own removes the gap rather than
+patching it, and the Lean statement shows the difference: it mentions one leaf.
 
 ### Hash binding †
 
@@ -189,8 +237,23 @@ development may derive conservation from the point equation.
 
 * **Groth16 knowledge soundness.** The theorems concern R1CS satisfaction, not the on-chain
   verifier. Bridging that gap is a separate, much larger development.
-* **`tree_update_batch.circom`.** The deposit-binding defences C-1′ and C-1″ live there; only
-  the transact half of deposit binding (`outputNote_cvDep_binds`) is covered.
+* **`FrontierRoot` (`src/lib/frontier_root.circom`).** The batch chain results take
+  `frontier_in` as given: they say what the circuit does *with* the frontier, not that the
+  frontier is the honest one for `old_root`. The constraint `old_root === frontier_root.root`
+  is what stops a relayer pairing a real `old_root` with a forged frontier — a permanent-DoS
+  vector — and it is modelled nowhere. This is the largest remaining gap in the batch proof.
+* **`BabyCheck` on `cv_dep` (`tree_update_batch.circom` step 6).** The development has no
+  curve equation, only the opaque `coords` / `babyAdd` interface, so "the point is on the
+  curve" is not expressible. `batch_deposit_opens` gets its point structure from the
+  value-commitment gadget instead.
+* **`BatchCompress` slot order.** `polyEval_sound` and `polyEval_binding` cover the Horner
+  chain for any coefficient vector, but the batch layout (`4 + 6·MAX_L`) is pinned against
+  `PubInputs.sol` by `src/test/tree_update_batch.test.ts`, not in Lean. `dump-layout.sh`
+  covers the transact layouts only.
+* **Non-vacuity of the batch results.** `Proofs/Completeness.lean` exhibits satisfying
+  assignments for the transact circuit only; no `BatchChainSat` witness is constructed, so
+  read literally the batch theorems could be vacuous. The circuit is exercised concretely by
+  `src/test/tree_update_batch.test.ts` instead.
 * **Non-vacuity at the `2x3` and `3x3` shapes.** Soundness is proved for all three deployed
   shapes, but the three satisfying assignments in `Proofs/Completeness.lean` are all built at
   `2x2`. Read literally, `transact2x3_sound` and `transact3x3_sound` could be vacuous.

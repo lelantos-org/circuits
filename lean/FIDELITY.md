@@ -43,7 +43,9 @@ Known deliberate omissions, all in the safe direction:
 ## Defence 1 — constraint-by-constraint table
 
 Every `===` / `<==` written in `src/lib/*.circom` — the transitive closure of `src/2x2.circom`
-minus `node_modules/circomlib` — appears in the tables below. The three top-level files do
+and `src/tree_update_batch.circom`, minus `node_modules/circomlib` — appears in the tables
+below, with one stated exception: `src/lib/frontier_root.circom` is **not** modelled, so its
+constraints have no rows here. See "What is not proved" in [README.md](README.md). The three top-level files do
 nothing but instantiate `Transact(10, 2, 2)`, `Transact(10, 2, 3)` and `Transact(10, 3, 3)`;
 the wiring they used to hold now lives in `src/lib/transact.circom`, and the tables cite that
 file as `transact:`.
@@ -117,6 +119,63 @@ assetMul 3 = 2 · assetMul 2`) is checked against the real gadget at runtime by
 | `merkle:107` `is_dummy*(is_dummy-1) === 0` | `MerkleProofOrDummySat.dummy_bit` |
 | `merkle:119` `diff <== root' - root` | `MerkleProofOrDummySat.diff_def` |
 | `merkle:120` `(1-is_dummy)*diff === 0` | `MerkleProofOrDummySat.matches_root` |
+
+### `src/lib/insert.circom`
+
+| circom | Lean |
+|---|---|
+| `:34-35` `PathIndexSelectors(idx_digit)` | `QuaternaryInsertLevelSat.selectors` |
+| `:41-43` `c0 = s0·cur + (1-s0)·f[0]` | `QuaternaryInsertLevelSat.c0_def` |
+| `:50-53` `c1 = s0·z + s1·cur + (s2+s3)·f[1]` | `QuaternaryInsertLevelSat.c1_def` |
+| `:60-63` `c2 = (s0+s1)·z + s2·cur + s3·f[2]` | `QuaternaryInsertLevelSat.c2_def` |
+| `:69-71` `c3 = (s0+s1+s2)·z + s3·cur` | `QuaternaryInsertLevelSat.c3_def` |
+| `:73-79` `cur_next = Poseidon(TAG_MERKLE, c0..c3)` | `QuaternaryInsertLevelSat.out_def` |
+| `:93-95` `frontier_out[0..2]` | `QuaternaryInsertLevelSat.fout0_def` … `fout2_def` |
+| `:111` `cur[0] <== leaf` | `QuaternaryInsertSat.base` |
+| `:113-125` level chain | `QuaternaryInsertSat.level` |
+| `:127` `root <== cur[DEPTH]` | `QuaternaryInsertSat.top` |
+
+The child mux and the frontier mux are transcribed as separate fields on purpose: they differ
+at slots 1 and 2 (`(s2+s3)·f[1]` versus `(1-s1)·f[1]`), which the circom comment at `:81-87`
+flags. Collapsing them in the model would make a real edit invisible.
+
+### `src/tree_update_batch.circom`
+
+Split across two Lean structures — `BatchChainSat` and `BatchDepositSat` — so that the
+append results reach no curve axiom.
+
+| circom | Lean |
+|---|---|
+| `:79-80` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchChainSat.count_bits` |
+| `:85-90` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchChainSat.active_def` |
+| `:95` `(1-active)*cms === 0` | `BatchChainSat.pad_cm` |
+| `:96-97` `(1-active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
+| `:98-101` `(1-active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
+| `:108` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
+| `:109-110` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
+| `:117-122` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
+| `:131-133` `BabyCheck(cv_dep.x, cv_dep.y + (1-active))` | **absent** — no curve equation in the model |
+| `:145` `active_dep <== active * is_deposit` | `BatchDepositSat.active_dep_def` |
+| `:147-148` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
+| `:151-154` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
+| `:157-158` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
+| `:160-164` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
+| `:166-167` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
+| `:172-184` `FrontierRoot` and `old_root === frontier_root.root` | **absent** — see README |
+| `:211-212` `Num2Bits(2·DEPTH)(start_index + k)` | `BatchChainSat.idx_bits` |
+| `:214-216` `idx_dig` from the bit pairs | `BatchChainSat.idx_dig` |
+| `:219-226` `QuaternaryInsert(DEPTH)` per leaf | `BatchChainSat.insert` |
+| `:197-201` `fr[0] <== frontier_in` | `BatchChainSat.fr_base` |
+| `:202` `running_root[0] <== old_root` | `BatchChainSat.root_base` |
+| `:231-233` frontier mux | `BatchChainSat.fr_mux` |
+| `:237-239` root mux | `BatchChainSat.root_mux` |
+| `:243` `new_root === running_root[MAX_L]` | `BatchChainSat.new_root_def` |
+| `:246-259` `BatchCompress(MAX_L)` | **absent** — `PolyEval` is proved generically; the slot order is pinned by `src/test/tree_update_batch.test.ts` |
+
+Three rows are deliberately empty. `BabyCheck` and `FrontierRoot` are genuine gaps, not
+simplifications, and both are listed in the README. `BatchCompress` is covered generically by
+`polyEval_sound` / `polyEval_binding`; what Lean does not pin is the *order* of the 100
+coefficients, which the TypeScript suite asserts against the circuit's own `y` output.
 
 ### `src/lib/note.circom`
 

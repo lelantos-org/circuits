@@ -16,6 +16,4 @@ rev = "v4.32.2"
 
 [[lean_lib]]
 name = "Lelantos"
-# `Lelantos.Meta.AxiomGuard` is not imported by anything (it imports the whole library), so it
-# has to be named here or `lake build` would skip it and the guard would never run.
 globs = ["Lelantos", "Lelantos.Meta.AxiomGuard"]

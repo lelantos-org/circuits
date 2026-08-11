@@ -7,7 +7,7 @@ subgroup. The package exports two Groth16 entry points:
 | Circuit | Instantiation | Purpose |
 |---|---|---|
 | [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` | Pool transact circuit: up to 2 shielded inputs, 2 shielded outputs per proof. |
-| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 8)` | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 8 pairs (16 leaves). See §14. |
+| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 16)` | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 16 leaves, any count (odd included). See §14. |
 
 The transact circuit operates on a quaternary Merkle tree of depth 10
 (`4^10 = 1,048,576` leaves). Each output carries an off-circuit FMD
@@ -32,6 +32,13 @@ as Edwards-point equality across the spent and output bundles.
 > point balance. See [`lean/README.md`](../lean/README.md) for what is and is not
 > covered, and [`lean/FIDELITY.md`](../lean/FIDELITY.md) for how faithfully the Lean
 > model tracks this source.
+>
+> `tree_update_batch.circom` is covered too, as of the leaf-granular rewrite:
+> `batch_advances_by_count` proves `new_root` is the root after exactly `actual_count`
+> appends — for any count, odd included — and `batch_deposit_opens` proves the per-leaf
+> deposit binding of §14. Both are insensitive to the parity of `actual_count`, which is
+> what the pair-to-leaf change was for. `FrontierRoot` and the `BabyCheck` on `cv_dep` are
+> **not** modelled; see [`lean/README.md`](../lean/README.md) for that gap.
 
 ---
 
@@ -64,17 +71,15 @@ enforces the following properties for every accepted transaction:
   Poseidon nullifiers; unused output slots are real `value=0` notes
   whose commitment is a real Poseidon hash. No `bytes32(0)` sentinel
   leaks the transaction shape.
-- **Deposit binding.** For every deposit-mode pair in
-  `tree_update_batch`, the Pedersen aggregate
-  `cv_dep[2i] + cv_dep[2i+1] == pair_public_in[i] · V^pair_asset[i] +
-  rcv_total[i] · H`, **together with** the pad-leaf constraint
-  `cv_dep[2i+1] == rcv_dep_pad[i] · H`, pins each leaf individually:
-  leaf `2i` to exactly `pair_public_in` units and leaf `2i+1` to zero.
-  The aggregate alone would fix only `Σvalue` mod the subgroup order
-  (§14). Each spend of those
-  leaves later recomputes the same `cv_dep` from `(asset, value,
-  rcv_dep)`, so substituting `(asset, value)` at spend time is
-  infeasible.
+- **Deposit binding.** For every deposit-mode leaf in
+  `tree_update_batch`, the Pedersen equality
+  `cv_dep[k] == leaf_public_in[k] · V^leaf_asset[k] + rcv[k] · H` pins
+  that leaf to exactly `leaf_public_in` units of `leaf_asset`. Binding
+  each leaf on its own is what makes this tight: an aggregate over
+  several leaves would fix only `Σvalue` mod the subgroup order, and
+  hence not the split (§14). Each spend of those leaves later
+  recomputes the same `cv_dep` from `(asset, value, rcv_dep)`, so
+  substituting `(asset, value)` at spend time is infeasible.
 - **FMD clue binding.** Each output carries a sender-computed FMD2
   clue `(R, clue_bits)` passed as off-circuit witnesses and bound into
   the proof via PolyEval (§7a). A relayer cannot corrupt `R` or
@@ -438,10 +443,12 @@ clue_bits = pack(1 - bit_i for i in [GAMMA])     (sender flips; receiver ⊕ == 
 ```
 
 `legendre_bit(h)` is computed off-circuit via `fmdLegendreWitness` in
-[`sdk/src/crypto/sqrt.ts`](../../sdk/src/crypto/sqrt.ts), using the
-4-constraint [`HashToBit()`](reference/hash_to_bit.circom) structure as a
-reference (`Z = 5` QNR, synced with `FMD_LEGENDRE_QNR` in
-[`sdk/src/crypto/tags.ts`](../../sdk/src/crypto/tags.ts)).
+[`sdk/src/crypto/sqrt.ts`](../../sdk/src/crypto/sqrt.ts): for nonzero `h`,
+`bit = 1` iff `h` is a quadratic residue (`h = y²`), else `bit = 0` and
+`h = y²·Z` for the fixed non-residue `Z = 5` (synced with
+`FMD_LEGENDRE_QNR` in
+[`sdk/src/crypto/tags.ts`](../../sdk/src/crypto/tags.ts)). Exactly one of
+`{h, h·Z⁻¹}` is a residue, so the bit is well-defined.
 
 `clue_bits` is a single field element; the contract masks upper bits
 via `CLUE_BITS_MASK = 0x3FFF`. `GAMMA` is a subscription-time
@@ -603,20 +610,26 @@ for current counts.
 | FMD clue signals | 0 (off-circuit, §7a) |
 | `PolyEval(30)` Horner chain | ~30 |
 
-### `TreeUpdateBatch(10, 8)`
+### `TreeUpdateBatch(10, 16)`
 
 ```
-constraints:     348,269
-wires:           348,069
+constraints:     252,672
+wires:           252,368
 public inputs:   1     (z)
 public outputs:  1     (y)
-private inputs:  114
+private inputs:  146
 ```
 
-Dominated by MAX_N pairs × 2 inserts × 10 Merkle levels of
-`Poseidon(5)`, plus the `MAX_N` deposit-binding Pedersen aggregates
-(each: `HashToAssetGen` + `ValueScalarMul` + `MulH` + `BabyAdd`s).
-`FrontierRoot` adds ~8.7k constraints. `PolyEval(76)` is negligible.
+Dominated by MAX_L single-leaf inserts × 10 Merkle levels of
+`Poseidon(5)`, plus the `MAX_L` deposit-binding Pedersen equalities
+(each: `HashToAssetGen` + `ValueScalarMul` + `MulH` + `BabyAdd`).
+`FrontierRoot` adds ~8.7k constraints. `PolyEval(100)` is negligible.
+
+Going leaf-granular cost ~14k constraints over the previous
+pair-granular `TreeUpdateBatch(10, 8)` (238,751 measured with the same
+toolchain): the insert count is unchanged at 16, the deposit bindings
+double from 8 to 16, and the per-pair aggregate — a second `MulH` for
+the pad blinder plus the pair-sum `BabyAdd`s — is removed.
 
 ---
 
@@ -625,10 +638,9 @@ Dominated by MAX_N pairs × 2 inserts × 10 Merkle levels of
 | File | Role |
 |---|---|
 | [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` — main 2-in × 2-out transact circuit. |
-| [`2x3.circom`](2x3.circom) | `Transact(10, 2, 3)` — 2-in × 3-out shape. |
 | [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` — 3-in × 3-out shape. |
 | [`tree_update_batch.circom`](tree_update_batch.circom) | Relayer batch tree-advance circuit (frontier-bound). See §14. |
-| [`lib/transact.circom`](lib/transact.circom) | `Transact(DEPTH, N_IN, N_OUT)` — the shared transact template all three shapes instantiate. |
+| [`lib/transact.circom`](lib/transact.circom) | `Transact(DEPTH, N_IN, N_OUT)` — the shared transact template both shapes instantiate. |
 | [`lib/tags.circom`](lib/tags.circom) | Domain-separation tag constants and `2^64`. |
 | [`lib/common.circom`](lib/common.circom) | `PathIndexSelectors`, `EmptySubtreeHashes` — shared between merkle / insert / frontier_root. |
 | [`lib/note.circom`](lib/note.circom) | Note commitment, key derivation, nullifier. |
@@ -640,13 +652,12 @@ Dominated by MAX_N pairs × 2 inserts × 10 Merkle levels of
 | [`lib/output.circom`](lib/output.circom) | `OutputNote` — per-slot cm / range / cv / cv_dep binding. |
 | [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsertLevel` + `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO. |
 | [`lib/frontier_root.circom`](lib/frontier_root.circom) | `FrontierRoot(DEPTH)` — rebuild `old_root` from frontier + leaf count (SOUNDNESS-CRITICAL). |
-| [`reference/hash_to_bit.circom`](reference/hash_to_bit.circom) | `HashToBit()` — 4-constraint Legendre-symbol bit extractor. Reference for the SDK's off-circuit FMD derivation; not wired into any circuit, and deliberately outside the `just lint` path (see the `lint` recipe). |
-| [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)`, `TransactCompressN(N_IN, N_OUT)`, `BatchCompress(MAX_N)`. |
+| [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)`, `TransactCompressN(N_IN, N_OUT)`, `BatchCompress(MAX_L)`. |
 | [`test/helpers.ts`](test/helpers.ts) | Poseidon / Pedersen / value-commit test primitives. |
 | [`test/lib/`](test/lib/) | Shared test harness: circuit loader, input shapers, witness assertions, transact witness builders. |
 | [`test/transact.test.ts`](test/transact.test.ts) | Transact circuit test suite. |
 | [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library test suite. |
-| [`test/tree_update_batch.test.ts`](test/tree_update_batch.test.ts) | TreeUpdateBatch test suite (deposit binding + frontier binding + padding). |
+| [`test/tree_update_batch.test.ts`](test/tree_update_batch.test.ts) | TreeUpdateBatch test suite (deposit binding + odd leaf counts + frontier binding + padding). |
 | [`test/frontier_root.test.ts`](test/frontier_root.test.ts) | FrontierRoot fuzz / corruption tests. |
 | [`test/poly_eval.test.ts`](test/poly_eval.test.ts) | PolyEval test suite. |
 | [`test/fixtures/`](test/fixtures/) | Small-parameter wrapper circuits (`test_frontier_root_d3`, `test_merkle_d2`, `test_poly_eval`) instantiating library templates at compact sizes. |
@@ -654,37 +665,44 @@ Dominated by MAX_N pairs × 2 inserts × 10 Merkle levels of
 
 ---
 
-## 14. `TreeUpdateBatch(DEPTH, MAX_N)` — relayer batch tree-advance proof
+## 14. `TreeUpdateBatch(DEPTH, MAX_L)` — relayer batch tree-advance proof
 
 File: [`tree_update_batch.circom`](tree_update_batch.circom). Uses
 [`lib/insert.circom`](lib/insert.circom) and
 [`lib/frontier_root.circom`](lib/frontier_root.circom).
 
 **Purpose.** Lets the contract commit a fresh `new_root` after up to
-`MAX_N` pairs of leaves are inserted, *without* recomputing the tree
-on-chain. Each pair represents one `MASP.transact` output bundle (or
-deposit pair). The contract advances the on-chain root ring once the
-proof verifies and `old_root == currentRoot()`.
+`MAX_L` leaves are inserted, *without* recomputing the tree on-chain.
+The contract advances the on-chain root ring once the proof verifies
+and `old_root == currentRoot()`.
+
+**Leaf granularity.** `actual_count` counts **leaves**, not pairs, so a
+batch may commit any number of leaves in `[1, MAX_L]` — odd included.
+That is what lets one batch carry a 3-output transact bundle
+(`Transact(10, 2, 3)`, `Transact(10, 3, 3)`) or a single-leaf deposit.
+The earlier pair-granular form could express neither: it inserted
+exactly `2·actual_count` leaves, so a deposit needed a mandatory pad
+leaf and a 3-output shape had no representation at all.
 
 **Inputs.** Logical PIs (private witnesses; bound through
-`BatchCompress(MAX_N)`):
+`BatchCompress(MAX_L)`):
 
 | Logical PI | Width | Purpose |
 |---|---|---|
 | `old_root` | 1 | Anchor — contract validates against `currentRoot()`. |
-| `new_root` | 1 | Output — bound to the running root after `MAX_N` muxed inserts. |
+| `new_root` | 1 | Output — bound to the running root after `MAX_L` muxed inserts. |
 | `start_index` | 1 | First insertion slot. Contract validates against `committedCount`. |
-| `actual_count` | 1 | Active pair count, range `[1, MAX_N]`. |
-| `cms[2·MAX_N]` | 16 | Per-leaf commitments; padding (inactive) MUST be 0. |
-| `cv_dep[2·MAX_N][2]` | 32 | Per-leaf deposit-anchored Pedersen value commitments; padding MUST be 0. |
-| `pair_asset[MAX_N]` | 8 | Per-pair public asset id (deposit only; padding 0). |
-| `pair_public_in[MAX_N]` | 8 | Per-pair public_in total (deposit only; padding 0). |
-| `is_deposit[MAX_N]` | 8 | 0/1 per pair; 1 selects deposit-mode aggregate check. |
+| `actual_count` | 1 | Active leaf count, range `[1, MAX_L]`. |
+| `cms[MAX_L]` | 16 | Per-leaf commitments; padding (inactive) MUST be 0. |
+| `cv_dep[MAX_L][2]` | 32 | Per-leaf deposit-anchored Pedersen value commitments; padding MUST be 0. |
+| `leaf_asset[MAX_L]` | 16 | Per-leaf public asset id (deposit only; padding 0). |
+| `leaf_public_in[MAX_L]` | 16 | Per-leaf public_in (deposit only; padding 0). |
+| `is_deposit[MAX_L]` | 16 | 0/1 per leaf; 1 selects the deposit binding check. |
 
-Private witnesses: `frontier_in[DEPTH][3]`, `rcv_total[MAX_N]` (sum
-of per-leaf `rcv_dep` in a deposit pair).
+Private witnesses: `frontier_in[DEPTH][3]`, `rcv[MAX_L]` (the
+`rcv_dep` blinder of leaf `k`).
 
-Total compressed PI count: `4 + 9·MAX_N = 76` for `MAX_N = 8`.
+Total compressed PI count: `4 + 6·MAX_L = 100` for `MAX_L = 16`.
 
 **Frontier binding (SOUNDNESS-CRITICAL).** `frontier_in` is
 prover-supplied. Without binding, a relayer could submit
@@ -693,51 +711,49 @@ pool. [`FrontierRoot`](lib/frontier_root.circom) recomputes `old_root`
 in-circuit from `frontier_in + Num2Bits(2·DEPTH, start_index)` and
 asserts equality with the public `old_root`.
 
-**Padding constraints.** `active[i] = (i < actual_count)`. For every
-inactive pair, all per-pair fields (`cms`, `cv_dep`, `pair_asset`,
-`pair_public_in`, `is_deposit`, `rcv_total`) MUST be zero. Inactive
-slots still feed `PolyEval`, so zeroing prevents a prover from
-smuggling arbitrary cv_dep values into the verifier-visible compressed
-PIs.
+**Padding constraints.** `active[k] = (k < actual_count)`. For every
+inactive leaf, all per-leaf fields (`cms`, `cv_dep`, `leaf_asset`,
+`leaf_public_in`, `is_deposit`, `rcv`) MUST be zero. Inactive slots
+still feed `PolyEval`, so zeroing prevents a prover from smuggling
+arbitrary cv_dep values into the verifier-visible compressed PIs.
 
-**Deposit binding (C-1 / C-1'' closure).** When `active[i] == 1` and
-`is_deposit[i] == 1`:
+**Deposit binding (C-1 / C-1'' closure).** When `active[k] == 1` and
+`is_deposit[k] == 1`:
 
 ```
-cv_dep[2i] + cv_dep[2i+1] == pair_public_in[i] · V^pair_asset[i]
-                             + rcv_total[i] · H          (pair total)
-cv_dep[2i+1]              == rcv_dep_pad[i] · H          (pad leaf = 0)
+cv_dep[k] == leaf_public_in[k] · V^leaf_asset[k] + rcv[k] · H
 ```
 
-The deposit path runs no transact SNARK, so these are the only
-guarantee that depositor funds are correctly attributed.
+The deposit path runs no transact SNARK, so this is the only guarantee
+that depositor funds are correctly attributed.
 
-The aggregate **alone is not sufficient**: it fixes only `Σvalue` mod
-the subgroup order `l`, not the split. A depositor could set
-`cv_dep[2i] = 2^63 · V^A + r0 · H` and let `cv_dep[2i+1]` absorb
-`(pair_public_in − 2^63) mod l` — a leaf no 64-bit `ValueCommit` can
-reopen, so they simply abandon it — and walk away with a valid `2^63`
-note for a 1-unit deposit. Forcing the pad leaf to a value-0
-commitment makes `cv_dep[2i] = pair_public_in · V^asset +
-(rcv_total − rcv_dep_pad) · H` exactly, so neither leaf's value is
-depositor-chosen. Deposits must therefore place the whole amount in
-leaf `2i`; splitting across the pair is rejected.
+Binding each leaf **individually** is what makes this tight. An
+aggregate over several leaves — e.g. the pair sum
+`cv_dep[2i] + cv_dep[2i+1] == pair_public_in · V^asset + rcv_total · H`
+used before — fixes only `Σvalue` mod the subgroup order `l`, not the
+split. A depositor could set `cv_dep[2i] = 2^63 · V^A + r0 · H` and let
+`cv_dep[2i+1]` absorb `(pair_public_in − 2^63) mod l` — a leaf no
+64-bit `ValueCommit` can reopen, so they simply abandon it — and walk
+away with a valid `2^63` note for a 1-unit deposit. With one equality
+per leaf there is no split to exploit, and the value-0 pad leaf that
+previously closed the hole is no longer needed.
 
-`rcv_dep_pad` is a private witness carried alongside `rcv_total` in
-`DepositIntent`. Same disclosure argument as `rcv_total`: a Pedersen
+`rcv` is a private witness carried in `DepositIntent`. A Pedersen
 blinder is information-theoretically independent of value/asset/
-identity.
+identity, so carrying it discloses nothing.
 
-**Insert chain.** For pair `i`: `insA[i] = QuaternaryInsert(leaves[2i],
-fr[i], start_index + 2i)`; `insB[i] = QuaternaryInsert(leaves[2i+1],
-insA[i].frontier_out, start_index + 2i + 1)`. A muxed update
-propagates `insB[i].frontier_out` and `insB[i].root` when
-`active[i] == 1`, else carries `fr[i]` / `running_root[i]` through.
-After `MAX_N` pairs, `new_root === running_root[MAX_N]`.
+**Insert chain.** For leaf `k`:
+`ins[k] = QuaternaryInsert(leaves[k], fr[k], start_index + k)`. A muxed
+update propagates `ins[k].frontier_out` and `ins[k].root` when
+`active[k] == 1`, else carries `fr[k]` / `running_root[k]` through.
+After `MAX_L` leaves, `new_root === running_root[MAX_L]`.
 
-**SnarkCompression.** 76 logical PIs folded into `(z, y)` via
-`BatchCompress(MAX_N)`. Slot order MUST match
-`contracts/src/libs/PubInputs.sol :: compress(TreeUpdateBatch)`:
+**SnarkCompression.** 100 logical PIs folded into `(z, y)` via
+`BatchCompress(MAX_L)`. Slot order MUST match
+`contracts/src/libs/PubInputs.sol :: compress(TreeUpdateBatch)`. The
+two `uint64` blocks are adjacent and the `uint8` block follows them, so
+the contract can re-mask the sub-word members with two contiguous
+loops over the copied calldata:
 
 | Slot range | Coeffs |
 |---|---|
@@ -745,8 +761,8 @@ After `MAX_N` pairs, `new_root === running_root[MAX_N]`.
 | `1`               | `new_root` |
 | `2`               | `start_index` |
 | `3`               | `actual_count` |
-| `[4, 4+2·MAX_N)`  | `cms[0..2·MAX_N-1]` |
-| `[4+2·MAX_N, 4+6·MAX_N)` | `cv_dep` interleaved `(x0, y0, x1, y1, ...)` |
-| `[4+6·MAX_N, 4+7·MAX_N)` | `pair_asset[0..MAX_N-1]` |
-| `[4+7·MAX_N, 4+8·MAX_N)` | `pair_public_in[0..MAX_N-1]` |
-| `[4+8·MAX_N, 4+9·MAX_N)` | `is_deposit[0..MAX_N-1]` |
+| `[4, 4+MAX_L)`  | `cms[0..MAX_L-1]` |
+| `[4+MAX_L, 4+3·MAX_L)` | `cv_dep` interleaved `(x0, y0, x1, y1, ...)` |
+| `[4+3·MAX_L, 4+4·MAX_L)` | `leaf_asset[0..MAX_L-1]` |
+| `[4+4·MAX_L, 4+5·MAX_L)` | `leaf_public_in[0..MAX_L-1]` |
+| `[4+5·MAX_L, 4+6·MAX_L)` | `is_deposit[0..MAX_L-1]` |

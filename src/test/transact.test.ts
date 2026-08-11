@@ -1,10 +1,21 @@
 import { expect } from "chai";
 
-import { dummyInputAt, dummyOutput, SpentNote, Note, Field, commit, nullifier, buildRho, deriveNk } from "./helpers";
+import {
+    dummyInputAt,
+    dummyOutput,
+    commit,
+    nullifier,
+    buildRho,
+    deriveNk,
+    flatten,
+    hornerEval,
+    type SpentNote,
+    type Note,
+    type Field,
+} from "./helpers";
 import { loadCircuit, srcPath } from "./lib/circuit";
 import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "./lib/transact";
 import { expectWitnessFails } from "./lib/expect";
-import { flatten, hornerEval } from "@lelantos-org/sdk";
 
 const DEPTH = 10;          // quaternary depth 10 → 4^10 = 1,048,576 leaves
 const ASSET_B: Field = 99n; // second asset for multi-asset tests
@@ -576,9 +587,9 @@ describe("transact_2x2", function () {
     });
 
     it("multi-asset: per-asset imbalance fails even if scalar totals match", async () => {
-        // in: A=80, B=120 (totals=200). out: A=120, B=80 (totals=200). Per-asset
-        // mismatched. Old single-asset value-balance would accept; point-balance
-        // must reject.
+        // in: A=80, B=120 (totals=200). out: A=120, B=80 (totals=200). Scalar
+        // totals match but the per-asset balance does not, so the point-balance
+        // check must reject.
         const nsk = 11n;
         const tree = tx.newTree();
         let inA = tx.insert(tree, tx.note(80n,  nsk, 1n, ASSET),   nsk);
@@ -597,9 +608,9 @@ describe("transact_2x2", function () {
     });
 
     // ===== PolyEval binding: FMD clue fields =====
-    // ClueCheck was removed; out_clue_Rx/Ry/bits have no in-circuit constraints.
-    // Relayer resistance relies solely on PolyEval: changing any clue field must
-    // change y, making the proof invalid with the original (z, y) pair.
+    // out_clue_Rx/Ry/bits carry no in-circuit constraints. Relayer resistance
+    // relies solely on PolyEval: changing any clue field must change y, making
+    // the proof invalid with the original (z, y) pair.
     // These tests verify the wiring is correct — a TransactCompressN bug that
     // silently dropped clue slots would pass all constraint tests but fail here.
 

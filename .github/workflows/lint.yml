@@ -63,14 +63,16 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # circomspect exits non-zero on any warning. Known-safe analysis
-      # passes are suppressed via --allow flags, with rationale documented
-      # in the justfile `lint` recipe. Advisory-only — does not block PRs.
-      # Reviewers MUST inspect this job's log and ensure any new findings
-      # are either fixed or added to the justfile baseline before merging.
+      # circomspect exits non-zero on any warning. Known-safe analysis passes are
+      # suppressed via --allow flags, with rationale documented in the justfile
+      # `lint` recipe.
+      #
+      # This blocks. It was previously `continue-on-error: true` with a comment
+      # asking reviewers to read the log — a control nobody enforces. Because
+      # CIRCOMSPECT_VERSION is pinned above, a new finding cannot appear from an
+      # upstream release; it can only come from a circuit change, which is
+      # exactly what should fail. If a finding is known-safe, add it to the
+      # justfile baseline with rationale rather than muting the job.
       - name: Run circomspect
         run: just lint
-        continue-on-error: true
