@@ -3,8 +3,8 @@
 // Asserts every published artifact exists, falls in a generous size
 // band, and (for vkey) parses as the expected JSON shape. That covers
 // the package `files` whitelist plus the artifacts published only as
-// GitHub release assets (3x3) — both are built by `just package`, so
-// both are worth gating before a release goes out.
+// GitHub release assets (tree_update_batch) — both are built by
+// `just package`, so both are worth gating before a release goes out.
 //
 // The trusted-setup contribution (`snarkjs zkey contribute`) is
 // non-deterministic — snarkjs mixes fresh `crypto.randomBytes(64)`
@@ -70,12 +70,13 @@ const FILES: ArtifactCheck[] = [
     },
     /// 3x3 = `Transact(10, 3, 3)`, ~103k constraints against the same PTAU17.
     ///
-    /// Checked here but NOT in the package `files` whitelist: 3x3 has no
-    /// on-chain wiring yet, and its zkey adds ~26 MB gzipped to every install.
-    /// It ships as a GitHub release asset instead (see `.github/workflows/
-    /// publish.yml`), the same way `tree_update_batch` does. Gating it anyway
-    /// catches a broken 3x3 build before the release step uploads it. Move
-    /// these into `files` when 3x3 is deployed.
+    /// In the package `files` whitelist since 0.8.0, so SDK consumers can
+    /// resolve the 3x3 prover artifacts from npm instead of fetching GitHub
+    /// release assets (which needs a token against this private repo). It
+    /// still ships as a release asset too — the workflow uploads both.
+    ///
+    /// Cost of that choice: ~26 MB gzipped added to every install, including
+    /// 2x2-only consumers. `tree_update_batch` stays release-asset-only.
     ///
     /// Bands are measured, not scaled from 2x2: the witness wasm is *smaller*
     /// than 2x2's (wasm size tracks generated witness code, not constraint

@@ -21,9 +21,28 @@ R1CS totals on BN254 (`snarkjs r1cs info`):
 | `3x3.circom` — `Transact(10, 3, 3)`                   |     102,939 | 103,040 |            210 |
 | `tree_update_batch.circom` — `TreeUpdateBatch(10, 16)` |     252,672 | 252,368 |            146 |
 
-Each has one public input (the Fiat–Shamir challenge `z`). Only the `2x2`
-artifacts ship in the npm package; `3x3` is built but not wired on-chain (it
-needs a 42-slot `PubInputs.compress` overload — see [src/3x3.circom](src/3x3.circom)).
+Each has one public input (the Fiat–Shamir challenge `z`).
+
+### Published artifacts
+
+`2x2` and `3x3` prover artifacts ship in the npm package, under these export
+subpaths:
+
+| Export                            | File                               |
+|-----------------------------------|------------------------------------|
+| `./2x2/2x2.wasm`                  | `build/2x2.wasm`                   |
+| `./2x2/2x2_final.zkey`            | `build/2x2_final.zkey`             |
+| `./2x2/verification_key.json`     | `build/verification_key.json`      |
+| `./3x3/3x3.wasm`                  | `build/3x3.wasm`                   |
+| `./3x3/3x3_final.zkey`            | `build/3x3_final.zkey`             |
+| `./3x3/verification_key.json`     | `build/3x3_verification_key.json`  |
+
+Shipping `3x3` adds ~26 MB gzipped to every install. `tree_update_batch` is
+published only as a GitHub release asset, alongside the `.r1cs` and
+`Verifier*.sol` for each circuit.
+
+`3x3` is not wired on-chain: it needs a 42-slot `PubInputs.compress` overload
+(see [src/3x3.circom](src/3x3.circom)).
 
 ## Formal verification
 

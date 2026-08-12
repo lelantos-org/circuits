@@ -121,7 +121,6 @@ interface TransactShape {
     nIn: number;
     nOut: number;
     source: string;
-    deployed: boolean;
     cases: TransactCase[];
 }
 
@@ -133,7 +132,6 @@ const TRANSACT_SHAPES: TransactShape[] = [
         nIn: 2,
         nOut: 2,
         source: "src/2x2.circom",
-        deployed: true,
         cases: [
             {
                 name: "internal-2in2out-balanced",
@@ -184,11 +182,11 @@ const TRANSACT_SHAPES: TransactShape[] = [
         nIn: 3,
         nOut: 3,
         source: "src/3x3.circom",
-        // NOT DEPLOYED: no compile recipe, no ceremony, no PubInputs.sol overload.
-        // Vectors are still worth publishing — they pin the 42-slot layout the
-        // Lean development already proves against, so whoever deploys this shape
-        // inherits a byte-exact target instead of re-deriving it.
-        deployed: false,
+        // Built and published (compile + ceremony recipes in the justfile, prover
+        // artifacts in the npm package since 0.8.0), but with no on-chain wiring:
+        // it needs a 42-slot `PubInputs.compress` overload. The vectors pin that
+        // 42-slot layout — the same one the Lean development proves against — so
+        // whoever wires it up inherits a byte-exact target instead of re-deriving it.
         cases: [
             {
                 name: "internal-3in3out-balanced",
@@ -451,10 +449,6 @@ async function buildTransactVectors(shape: TransactShape) {
             template: `Transact(${DEPTH}, ${shape.nIn}, ${shape.nOut})`,
             source: shape.source,
             shape: { depth: DEPTH, nIn: shape.nIn, nOut: shape.nOut },
-            // NOT DEPLOYED shapes ship vectors anyway: the layout is what the Lean
-            // development proves against, and pinning it now is what stops a future
-            // deployment from silently picking a different order.
-            deployed: shape.deployed,
             coeffCount: 9 + 3 * shape.nIn + 8 * shape.nOut,
             layout,
             layoutDigest: layoutDigest(layout),
