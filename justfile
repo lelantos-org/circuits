@@ -270,8 +270,15 @@ picus-image:
     docker build --platform linux/arm64 -t picus:arm64 \
         -f "{{ROOT}}/docker/picus-arm64.Dockerfile" "{{ROOT}}/docker"
 
-# Check the compiled R1CS for under-constrainedness (needs Docker). STRONG=1 for strong safety.
-picus STRONG="":
+#   just picus                     # 2x2, weak (default) safety
+#   just picus 3x3                 # another circuit under src/
+#   just picus tree_update_batch 1 # strong safety
+#
+# The circuit name comes first, so the old `just picus 1` (strong on 2x2) is now
+# `just picus 2x2 1`.
+
+# Check one circuit's R1CS for under-constrainedness (needs Docker). STRONG=1 for strong safety.
+picus CIRCUIT="2x2" STRONG="":
     #!/usr/bin/env bash
     set -euo pipefail
     command -v docker >/dev/null || { echo "docker not found"; exit 1; }
@@ -284,10 +291,30 @@ picus STRONG="":
         echo "  or: docker build -t picus:local https://github.com/Veridise/Picus.git"
         exit 1
     fi
+    src="{{ROOT}}/src/{{CIRCUIT}}.circom"
+    [ -f "$src" ] || { echo "no such circuit: $src"; exit 1; }
     mkdir -p "{{BUILD}}/picus"
-    circom "{{ROOT}}/src/2x2.circom" --r1cs --sym --O0 -o "{{BUILD}}/picus" -l "{{ROOT}}/node_modules"
+    circom "$src" --r1cs --sym --O0 -o "{{BUILD}}/picus" -l "{{ROOT}}/node_modules"
     docker run --rm -v "{{BUILD}}/picus:/data" "$image" \
-        ./run-picus --solver z3 --timeout 10000 {{ if STRONG != "" { "--strong" } else { "" } }} /data/2x2.r1cs
+        ./run-picus --solver z3 --timeout 10000 {{ if STRONG != "" { "--strong" } else { "" } }} /data/{{CIRCUIT}}.r1cs
+
+# Keeps going after a failing circuit so one under-constrained result does not hide
+# the others, then exits non-zero if any failed.
+
+# Run `picus` over every top-level circuit. STRONG=1 for strong safety.
+picus-all STRONG="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failed=()
+    for circuit in 2x2 3x3 tree_update_batch; do
+        echo "==> picus: $circuit"
+        just picus "$circuit" "{{STRONG}}" || failed+=("$circuit")
+    done
+    if [ ${#failed[@]} -gt 0 ]; then
+        echo "==> picus failed: ${failed[*]}"
+        exit 1
+    fi
+    echo "==> picus: all circuits properly constrained"
 
 # === package ===
 

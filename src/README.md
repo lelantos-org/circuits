@@ -2,23 +2,34 @@
 
 Multi-Asset Shielded Pool circuits implemented in Circom 2.2.3 over the
 BN254 scalar field, with Baby-Jubjub used for the value-commitment
-subgroup. The package exports two Groth16 entry points:
+subgroup. Three Groth16 entry points:
 
-| Circuit | Instantiation | Purpose |
-|---|---|---|
-| [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` | Pool transact circuit: up to 2 shielded inputs, 2 shielded outputs per proof. |
-| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 8)` | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 8 leaves, any count (odd included). See §14. |
+| Circuit | Instantiation | Status | Purpose |
+|---|---|---|---|
+| [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` | deployed | Transact: 2 shielded inputs, 2 shielded outputs per proof. |
+| [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` | built, not on-chain | Transact at the 3-in × 3-out shape. Same template, 42-slot PI layout (§2a). |
+| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 8)` | deployed | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 8 leaves, any count (odd included). See §14. |
 
-The transact circuit operates on a quaternary Merkle tree of depth 10
-(`4^10 = 1,048,576` leaves). Each output carries an off-circuit FMD
-clue `(R, clue_bits)` supplied by the sender and bound via PolyEval
-(§7a).
+Both transact shapes instantiate one shared template,
+[`Transact(DEPTH, N_IN, N_OUT)`](lib/transact.circom), over a quaternary
+Merkle tree of depth 10 (`4^10 = 1,048,576` leaves). Each output carries
+an off-circuit FMD clue `(R, clue_bits)` supplied by the sender and
+bound via PolyEval (§7a).
+
+`3x3` is built by `just build-artifacts-3x3`, ships prover artefacts in
+the npm package, and is pinned by the vectors in
+[`vectors/`](../vectors/) — but it is not wired on-chain. Deployment
+additionally requires a `PubInputs.compress` overload for its 42 slots,
+a Solidity verifier, a production ceremony, `TRANSACT_OUT_LEAVES = 3` on
+the spend path, and generalising §10's pairwise-nullifier check to all
+three pairs.
 
 The design follows the Sapling/Namada multi-asset model: each note
 carries a private `asset_id`; a per-asset Baby-Jubjub generator `V^t`
 is derived in-circuit by Pedersen hash-to-curve; value commitments are
-`cv = value · V^t + rcv · H`; per-asset value conservation is enforced
-as Edwards-point equality across the spent and output bundles.
+`cv = value · V^t + rcv · H`. Per-asset value conservation is enforced
+arithmetically over asset ids (§6) — **not** by the Edwards point
+balance, which is defense in depth only (§5).
 
 ---
 
@@ -29,9 +40,12 @@ as Edwards-point equality across the spent and output bundles.
 > (`polyEval_binding`), and the faerie-gold defence of §7 (`nullifier_binds_cm`).
 > The known-discrete-log weakness of §5 is formalised too — as a *negative* result,
 > `pointBalance_not_sound`, so that no one can re-derive conservation from the Edwards
-> point balance. See [`lean/README.md`](../lean/README.md) for what is and is not
-> covered, and [`lean/FIDELITY.md`](../lean/FIDELITY.md) for how faithfully the Lean
-> model tracks this source.
+> point balance. Soundness is stated for the generic `(N_IN, N_OUT)` model and so
+> covers `3x3` as well, but a satisfying witness is exhibited at the `2x2` shape only:
+> `transact3x3_sound` is not yet shown non-vacuous. See
+> [`lean/README.md`](../lean/README.md) for what is and is not covered, and
+> [`lean/FIDELITY.md`](../lean/FIDELITY.md) for how faithfully the Lean model tracks
+> this source.
 >
 > `tree_update_batch.circom` is covered too, as of the leaf-granular rewrite:
 > `batch_advances_by_count` proves `new_root` is the root after exactly `actual_count`
@@ -101,7 +115,7 @@ The verifier sees only **two** field elements — `z` (Fiat-Shamir
 challenge) and `y` (Horner evaluation). The `9 + 3·N_IN + 8·N_OUT`
 logical PIs below are private witnesses bound into `(z, y)` by the
 [`TransactCompressN(N_IN, N_OUT)`](lib/poly_eval.circom) gadget (§2a) —
-31 slots at `N_IN = N_OUT = 2`.
+31 slots at `N_IN = N_OUT = 2`, 42 at `3×3`.
 
 Verifier-visible public signals:
 
@@ -173,22 +187,31 @@ byte-for-byte; reordering is a soundness change for the contract):
 |    |                      | 30 | `out_aux_digest` |
 
 Clue slots are appended in output order: `[Rx_j, Ry_j, bits_j]` for
-`j = 0..N_OUT-1`, starting at slot `24`. `out_aux_digest` is the single
-final slot, at `8 + 3·N_IN + 8·N_OUT`.
+`j = 0..N_OUT-1`, starting at slot `8 + 3·N_IN + 5·N_OUT` (24 at 2×2,
+32 at 3×3). `out_aux_digest` is the single final slot, at
+`8 + 3·N_IN + 8·N_OUT`.
+
+The same layout at `Transact(10, 3, 3)` gives 42 slots — see the header
+comment in [`3x3.circom`](3x3.circom) for the expanded ranges. That
+layout is pinned twice: `scripts/gen-vectors.ts` refuses to publish
+[`vectors/transact-3x3.json`](../vectors/transact-3x3.json) unless the
+compiled circuit's `y` matches the reference PolyEval over all 42
+coefficients, and `test/formal/layout_parity.test.ts` pins the published
+vector against the Lean dump `lean/expected/layout-3x3.txt`.
 
 `out_aux_digest` is `keccak256(abi.encode(aux)) mod r` over the whole
 `AuxValidation.Output` array. The contract MUST **recompute** it from
-the aux calldata rather than accept it as an input: the coefficient
-binds whatever the prover supplied, and only the recomputation ties
-that value to the payload the recipient receives. Without this slot,
-`out_clue_{Rx,Ry,bits}` are the only per-output fields bound, so a
-relayer can leave the clue intact — the proof still verifies and the
-recipient's FMD scan still flags the note — while corrupting `ephPub`
-and the ciphertext. The recipient then cannot derive the ECDH secret,
-cannot decrypt the opening, and cannot spend a note whose inputs are
-already nullified. It is not theft (the sender still holds the opening
-and can re-deliver out of band) but there is no on-chain recourse, and
-on a transfer the victim is a third party who never chose the relayer.
+the aux calldata rather than accept it as an input; only the
+recomputation ties the coefficient to the payload the recipient
+receives. Without this slot, `out_clue_{Rx,Ry,bits}` are the only
+per-output fields bound, so a relayer can leave the clue intact — proof
+still verifies, recipient's FMD scan still flags the note — while
+corrupting `ephPub` and the ciphertext. The recipient then cannot derive
+the ECDH secret, cannot decrypt the opening, and cannot spend a note
+whose inputs are already nullified. Not theft (the sender still holds
+the opening and can re-deliver out of band), but there is no on-chain
+recourse, and on a transfer the victim is a third party who never chose
+the relayer.
 
 Soundness: any tampering with `coeffs[k]` changes `y` for all but at
 most `N-1` values of `z` (Schwartz–Zippel over the BN254 scalar field;
@@ -316,9 +339,13 @@ outside the image of the 72-bit `HashToAssetGen`.
 > would let the point balance stand on its own again, but requires a
 > new ceremony and an SDK/WASM mirror.
 
-The SDK mirror in [`sdk/src/crypto/jubjub.ts`](../../sdk/src/crypto/jubjub.ts)
-passes the 9-byte buffer `[TAG_ASSET, ...asset_id_LE_8]` to
-`circomlibjs.pedersen.hash`, producing the same point byte-for-byte.
+Two mirrors reproduce this off-circuit, byte-for-byte: the test
+reference [`test/ref/jubjub.ts`](test/ref/jubjub.ts) passes the 9-byte
+buffer `[TAG_ASSET, ...asset_id_LE_8]` to `circomlibjs.pedersen.hash`,
+and the SDK's `hashToAssetGen`
+([`sdk/src/crypto/jubjub-wasm/`](../../sdk/src/crypto/jubjub-wasm/))
+does the same in Rust/WASM. Agreement is pinned by the published
+[`vectors/`](../vectors/).
 
 Defense in depth: real notes reject `asset_id == 0` via
 `(1 - is_dummy) · IsZero(asset_id) === 0`. Output notes apply the
@@ -442,13 +469,12 @@ bit_i     = legendre_bit(Poseidon(TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y))
 clue_bits = pack(1 - bit_i for i in [GAMMA])     (sender flips; receiver ⊕ == 1)
 ```
 
-`legendre_bit(h)` is computed off-circuit via `fmdLegendreWitness` in
-[`sdk/src/crypto/sqrt.ts`](../../sdk/src/crypto/sqrt.ts): for nonzero `h`,
-`bit = 1` iff `h` is a quadratic residue (`h = y²`), else `bit = 0` and
-`h = y²·Z` for the fixed non-residue `Z = 5` (synced with
-`FMD_LEGENDRE_QNR` in
-[`sdk/src/crypto/tags.ts`](../../sdk/src/crypto/tags.ts)). Exactly one of
-`{h, h·Z⁻¹}` is a residue, so the bit is well-defined.
+`legendre_bit(h)` is computed off-circuit by `fmdLegendreWitness`
+([`test/ref/sqrt.ts`](test/ref/sqrt.ts), mirrored in
+[`sdk/src/crypto/sqrt.ts`](../../sdk/src/crypto/sqrt.ts)): for nonzero
+`h`, `bit = 1` iff `h` is a quadratic residue (`h = y²`), else `bit = 0`
+and `h = y²·Z` for the fixed non-residue `Z = 5` (`FMD_LEGENDRE_QNR`).
+Exactly one of `{h, h·Z⁻¹}` is a residue, so the bit is well-defined.
 
 `clue_bits` is a single field element; the contract masks upper bits
 via `CLUE_BITS_MASK = 0x3FFF`. `GAMMA` is a subscription-time
@@ -489,11 +515,10 @@ Constraints that hold regardless of asset mix:
 
 - `RangeCheck64` on every private `value`.
 - Real notes reject `asset_id == 0`.
-- `cv` is bound to `(asset_id, value, rcv)`. (Historic note: an
-  earlier version of this document claimed distinct assets "live in
-  distinct subgroups" so their `cv`s cannot cancel. That is false —
-  see §5 — which is why conservation is enforced arithmetically by
-  `PerAssetValueBalance` and not by the point sum.)
+- `cv` is bound to `(asset_id, value, rcv)`. This does **not** stop
+  `cv`s of distinct assets from cancelling — the generators share a
+  base (§5) — which is why conservation is arithmetic
+  (`PerAssetValueBalance`), not group-theoretic.
 - `in_asset` / `out_asset` / `public_asset_id` are compared as field
   elements, so an asset id can only cancel against itself.
 - `cv_dep` is bound to `(asset_id, value, rcv_dep)` and pinned into
@@ -501,8 +526,8 @@ Constraints that hold regardless of asset mix:
   drift from one spend to the next.
 
 Caveats: the transparent bucket is single-asset per tx, and each side
-mixes at most `N_IN` / `N_OUT` asset ids — larger mixes require
-recompiling with larger `N_IN` / `N_OUT`.
+mixes at most `N_IN` / `N_OUT` asset ids — `3x3` raises that bound to 3
+per side; beyond it, recompile at a larger shape.
 
 Padding rules:
 
@@ -542,7 +567,9 @@ verifier:
    key range demands).
 4. `require(registry[public_asset_id].token != address(0))` — asset
    must be registered.
-5. `require(nullifier[0] != nullifier[1])` (no `!= 0` exception).
+5. `require(nullifier[i] != nullifier[k])` for every pair `i < k` (no
+   `!= 0` exception). At `2x2` that is one comparison; a `3x3`
+   deployment needs all three.
 6. Type `recipient_address`, `payer_address`, `relayer_address` as
    `address`; pass `uint256(uint160(addr))`. Use `address(0)` for
    unused slots.
@@ -589,36 +616,31 @@ Combined arity + tag prevents Poseidon collisions across hash sites.
 
 ## 12. Constraint budget
 
-R1CS totals from `snarkjs r1cs info`. **Note:** the artefacts in
-`build/` predate the FMD-off-circuit change and cover only the 2×2 and
-batch circuits; recompile with `just compile` / `just compile-batch`
-for current counts.
+R1CS totals from `snarkjs r1cs info`. Each circuit has one public input
+(`z`) and one public output (`y`).
 
-### `Transact(10, 2, 2)`
+| Circuit | Constraints | Wires | Private inputs |
+|---|---:|---:|---:|
+| `Transact(10, 2, 2)` | 69,350 | 69,419 | 143 |
+| `Transact(10, 3, 3)` | 102,939 | 103,040 | 210 |
+| `TreeUpdateBatch(10, 8)` | 130,607 | 130,471 | 90 |
 
-~68k constraints (estimated; the stale `build/` artefact reports
-111,728). Approximate breakdown:
+All three fit the 2^17 FFT domain and therefore `ptau_17`.
+
+### `Transact` breakdown (2×2; the per-slot rows scale with `N_IN + N_OUT`)
 
 | Component | Cost |
 |---|---|
 | 4 × `HashToAssetGen` (Pedersen 72) | ~8.4k |
 | 4 × `ValueCommit` for `cv` + 4 × `ValueCommit` for `cv_dep` | ~38k |
 | 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4.5k |
-| `PerAssetPointBalance` point sums (defense in depth) | ~70 |
-| `PerAssetValueBalance` per-asset conservation | ~200 |
 | Note commitments + Merkle + nullifiers + leaf hashes | ~17k |
+| `PerAssetValueBalance` per-asset conservation | ~200 |
+| `PerAssetPointBalance` point sums (defense in depth) | ~70 |
+| `PolyEval(31)` Horner chain | ~30 |
 | FMD clue signals | 0 (off-circuit, §7a) |
-| `PolyEval(30)` Horner chain | ~30 |
 
 ### `TreeUpdateBatch(10, 8)`
-
-```
-constraints:     130,607
-wires:           130,471
-public inputs:   1     (z)
-public outputs:  1     (y)
-private inputs:  90
-```
 
 Dominated by MAX_L single-leaf inserts × 10 Merkle levels of
 `Poseidon(5)`, plus the `MAX_L` deposit-binding Pedersen equalities
@@ -638,8 +660,8 @@ circuit to 2^18 and undo it. Verification gas is unaffected either way
 
 | File | Role |
 |---|---|
-| [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` — main 2-in × 2-out transact circuit. |
-| [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` — 3-in × 3-out shape. |
+| [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` — deployed 2-in × 2-out transact circuit. |
+| [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` — 3-in × 3-out shape; built and vector-pinned, not on-chain. |
 | [`tree_update_batch.circom`](tree_update_batch.circom) | Relayer batch tree-advance circuit (frontier-bound). See §14. |
 | [`lib/transact.circom`](lib/transact.circom) | `Transact(DEPTH, N_IN, N_OUT)` — the shared transact template both shapes instantiate. |
 | [`lib/tags.circom`](lib/tags.circom) | Domain-separation tag constants and `2^64`. |
@@ -654,15 +676,19 @@ circuit to 2^18 and undo it. Verification gas is unaffected either way
 | [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsertLevel` + `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO. |
 | [`lib/frontier_root.circom`](lib/frontier_root.circom) | `FrontierRoot(DEPTH)` — rebuild `old_root` from frontier + leaf count (SOUNDNESS-CRITICAL). |
 | [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)`, `TransactCompressN(N_IN, N_OUT)`, `BatchCompress(MAX_L)`. |
+| [`test/ref/`](test/ref/) | TypeScript reference implementation (field, tags, Poseidon, Baby-Jubjub, Merkle, notes, FMD, PolyEval compression, witness builders). No SDK dependency; the circom is the source of truth. |
+| [`test/lib/`](test/lib/) | Test harness: circuit loader, input shapers, witness assertions. |
 | [`test/helpers.ts`](test/helpers.ts) | Poseidon / Pedersen / value-commit test primitives. |
-| [`test/lib/`](test/lib/) | Shared test harness: circuit loader, input shapers, witness assertions, transact witness builders. |
 | [`test/transact.test.ts`](test/transact.test.ts) | Transact circuit test suite. |
 | [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library test suite. |
-| [`test/tree_update_batch.test.ts`](test/tree_update_batch.test.ts) | TreeUpdateBatch test suite (deposit binding + odd leaf counts + frontier binding + padding). |
-| [`test/frontier_root.test.ts`](test/frontier_root.test.ts) | FrontierRoot fuzz / corruption tests. |
+| [`test/tree_update_batch.test.ts`](test/tree_update_batch.test.ts) | TreeUpdateBatch suite (deposit binding, odd leaf counts, frontier binding, padding). |
+| [`test/frontier_root.test.ts`](test/frontier_root.test.ts) | FrontierRoot corruption tests. |
 | [`test/poly_eval.test.ts`](test/poly_eval.test.ts) | PolyEval test suite. |
+| [`test/reference.test.ts`](test/reference.test.ts) | Unit tests for the parts of `test/ref/` no circuit test reaches transitively. |
+| [`test/formal/layout_parity.test.ts`](test/formal/layout_parity.test.ts) | Pins the PI slot order of both shipped shapes against the Lean dumps `lean/expected/layout-{2x2,3x3}.txt`. |
 | [`test/fixtures/`](test/fixtures/) | Small-parameter wrapper circuits (`test_frontier_root_d3`, `test_merkle_d2`, `test_poly_eval`) instantiating library templates at compact sizes. |
-| [`test/fuzz/`](test/fuzz/) | Property-based suites (fast-check) covering Transact, Merkle, FrontierRoot, and PolyEval. |
+| [`test/fuzz/`](test/fuzz/) | Property-based suites (fast-check) over Transact (2×2), Merkle, FrontierRoot, PolyEval. |
+| [`scripts/gen-vectors.ts`](../scripts/gen-vectors.ts) | Builds and circuit-checks the published [`vectors/`](../vectors/) for `2x2`, `3x3`, and `tree_update_batch`. |
 
 ---
 
@@ -680,10 +706,10 @@ and `old_root == currentRoot()`.
 **Leaf granularity.** `actual_count` counts **leaves**, not pairs, so a
 batch may commit any number of leaves in `[1, MAX_L]` — odd included.
 That is what lets one batch carry a 3-output transact bundle
-(`Transact(10, 2, 3)`, `Transact(10, 3, 3)`) or a single-leaf deposit.
-The earlier pair-granular form could express neither: it inserted
-exactly `2·actual_count` leaves, so a deposit needed a mandatory pad
-leaf and a 3-output shape had no representation at all.
+(`Transact(10, 3, 3)`) or a single-leaf deposit. The earlier
+pair-granular form could express neither: it inserted exactly
+`2·actual_count` leaves, so a deposit needed a mandatory pad leaf and a
+3-output shape had no representation at all.
 
 **Inputs.** Logical PIs (private witnesses; bound through
 `BatchCompress(MAX_L)`):
