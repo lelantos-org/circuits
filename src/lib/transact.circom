@@ -8,7 +8,7 @@ include "value_commit.circom";
 include "poly_eval.circom";
 
 // MASP pool: N_IN-input × N_OUT-output multi-asset transact circuit.
-// The concrete shapes instantiate this template; see 2x2.circom and 3x3.circom.
+// Instantiated by 3x3.circom (deployed) and 2x2.circom.
 //
 // Parameters:
 //   DEPTH — Merkle depth; capacity 4^DEPTH leaves.
@@ -22,8 +22,9 @@ include "poly_eval.circom";
 //
 // Per-slot constraints live in SpentNote and OutputNote; this template is wiring.
 //
-// The verifier sees only (z, y) with y = PolyEval(coeffs, z); the coefficient
-// layout is TransactCompressN's and must match PubInputs.sol.
+// The verifier sees only the public signals (y, z), in that order, with
+// y = PolyEval(coeffs, z). The coefficient layout is TransactCompressN's and
+// must match PubInputs.sol.
 //
 // Enforced here: in_asset, out_asset, public_asset_id, public_in and public_out
 // are all < 2^64.
@@ -201,7 +202,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
     bal.pub_out_pt[1] <== pub_out_mul.out[1];
 
     // -------------------------------------------------------------------------
-    // Public-input compression → (z, y)
+    // Public-input compression → (y, z)
     // -------------------------------------------------------------------------
     component pe = TransactCompressN(N_IN, N_OUT);
     pe.z <== z;

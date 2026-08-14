@@ -11,7 +11,7 @@ on:
       fuzz_mode:
         description: 'FUZZ tier (light/medium/heavy)'
         required: false
-        default: 'light'
+        default: 'heavy'
 
 permissions:
   contents: read
@@ -39,7 +39,7 @@ jobs:
           github.event_name == 'pull_request' && 'light' ||
           github.event_name == 'push' && 'medium' ||
           github.event_name == 'workflow_dispatch' && (inputs.fuzz_mode || 'heavy') ||
-          'light'
+          'heavy'
         }}
     steps:
       - uses: actions/checkout@v4

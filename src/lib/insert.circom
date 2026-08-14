@@ -80,11 +80,10 @@ template QuaternaryInsertLevel() {
 
     // frontier_out[k] = s[k]·cur + (1-s[k])·f[k] for slots 0..2.
     //
-    // s[k]·cur is already computed above as c0_cur / c1_cur / c2_cur, and
-    // (1-s[0])·f[0] as c0_sib, so slot 0 is a pure linear combination and slots
-    // 1..2 need only their own sibling product. The k=1,2 sibling terms genuinely
-    // differ from the child muxes — c1_sib is (s2+s3)·f[1] but slot 1 needs
-    // (1-s1)·f[1] = (s0+s2+s3)·f[1], likewise for slot 2 — so those two stay.
+    // s[k]·cur is reused from c0_cur / c1_cur / c2_cur, and (1-s[0])·f[0] from
+    // c0_sib, so slot 0 is a pure linear combination. Slots 1..2 need their own
+    // sibling products: the child muxes use (s2+s3)·f[1] and s3·f[2], whereas the
+    // frontier needs (1-s1)·f[1] and (1-s2)·f[2].
     signal w_sib1;
     signal w_sib2;
     w_sib1 <== (1 - sel.s[1]) * frontier_in[1];

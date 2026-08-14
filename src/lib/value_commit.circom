@@ -62,16 +62,14 @@ template MulH() {
 //   cv     = value·gen + rcv·H
 //   cv_dep = value·gen + rcv_dep·H
 //
-// Every note needs exactly this pair — `cv` is the per-spend re-randomisation
+// Every note needs exactly this pair: `cv` is the per-spend re-randomisation
 // published in the transaction, `cv_dep` is the note's permanent blinding that
-// reproduces its committed leaf. The two blinders MUST stay independent: if
+// reproduces its committed leaf. The two blinders MUST stay independent — if
 // rcv == rcv_dep then in_cv at spend time equals the leaf's cv_dep and an
 // observer learns which leaf was spent.
 //
-// The value·gen term, however, is identical across the two. Instantiating
-// ValueCommit twice would compute EscalarMulAny(64) twice for the same bits and
-// the same generator — 585 constraints of duplicated work per note slot. This
-// template computes it once and adds each blinder.
+// The value·gen term is identical across the two, so it is computed once and
+// each blinder added to it, saving one EscalarMulAny(64) per note slot.
 //
 // rH / rH_dep are exposed for PerAssetPointBalance.
 template ValueCommitPair() {

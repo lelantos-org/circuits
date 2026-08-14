@@ -19,7 +19,7 @@ template RangeCheck64() {
 }
 
 // value·gen with value range-checked to 64 bits. Used for the transparent
-// bucket in the transact circuits and for per-pair deposit binding in
+// bucket in the transact circuits and for per-leaf deposit binding in
 // tree_update_batch.
 template ValueTimesGen() {
     signal input value;

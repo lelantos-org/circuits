@@ -2,7 +2,8 @@
 
 The proofs in `lean/` are about `Lelantos.TransactSat`, a hand-written Lean model. They
 are only worth something if that model faithfully mirrors the circuit — `Transact` and its
-transitive closure, instantiated by `src/2x2.circom`, `src/2x3.circom` and `src/3x3.circom`.
+transitive closure, instantiated by `src/2x2.circom` and `src/3x3.circom` (`3x3` is the
+deployed shape).
 This file is the argument that it does, and — just as importantly — the honest list of where
 the argument is still thin.
 
@@ -21,9 +22,9 @@ constructing a satisfying assignment for `Transact(10, 2, 2)` that exercises the
 10-level Merkle chain, both value commitments, all five balance candidates and the
 30-coefficient Horner evaluation.
 
-That construction is at the `2x2` shape only. `transact2x3_sound` and `transact3x3_sound`
-have no exhibited witness, so for those two shapes this fourth failure mode is **not** ruled
-out — see `lean/README.md § What is not proved`.
+That construction is at the `2x2` shape only. `transact3x3_sound` has no exhibited witness,
+so at the deployed shape this fourth failure mode is **not** ruled out — see
+`lean/README.md § What is not proved`.
 
 Known deliberate omissions, all in the safe direction:
 
@@ -245,13 +246,14 @@ Checks, each mechanical:
 
 | Link | Check |
 |---|---|
-| Lean → `expected/layout-{2x2,2x3,3x3}.txt` | `lean/scripts/dump-layout.sh`, one dump per deployed shape |
+| Lean → `expected/layout-{2x2,3x3}.txt` | `lean/scripts/dump-layout.sh`, one dump per instantiated shape |
 | `expected/layout-2x2.txt` → SDK | `src/test/formal/layout_parity.test.ts`, sentinel-per-field so any transposition fails |
 | SDK → circuit | existing PolyEval binding cases, `src/test/transact.test.ts:645-729` |
 
-The second and third links exist for the **2x2 shape only**. For `2x3` and `3x3` the chain
-stops at the first row: the layout is pinned against Lean, so an accidental change fails CI,
-but nothing cross-checks those two against the SDK or the circuit.
+The sentinel-per-field table in the second row is hand-written and exists for the **2x2
+shape only**; it is what catches a transposition between two slots of the same type. For
+`3x3` — the deployed shape — the vector-carries-Lean check in the same test file does apply,
+but that weaker link is all there is, and the third row does not cover it at all.
 
 The layout is defined once in Lean (`piSlot`) and the value lookup (`slotValue`) is
 separate, so the dumped names are derived from the same definition the proofs use rather

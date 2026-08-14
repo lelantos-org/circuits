@@ -1,9 +1,9 @@
 pragma circom 2.2.3;
 
 // Horner evaluation y = Σ_{k<N} c[k]·z^k.
-// Compresses N logical public inputs into the pair (z, y); two distinct
-// coefficient vectors collide with probability at most (N-1)/p.
-// Coefficient ordering must match contracts/src/lib/PubInputs.sol.
+// Compresses N logical public inputs into the public signals (y, z), in that
+// order; two distinct coefficient vectors collide with probability at most
+// (N-1)/p. Coefficient ordering must match contracts/src/lib/PubInputs.sol.
 template PolyEval(N) {
     signal input coeffs[N];
     signal input z;
@@ -111,12 +111,12 @@ template TransactCompressN(N_IN, N_OUT) {
     y <== pe.y;
 }
 
-// TreeUpdateBatch public-input compressor: 4 + 6·MAX_L coefficients → (z, y).
+// TreeUpdateBatch public-input compressor: 4 + 6·MAX_L coefficients → (y, z).
 // Layout must match PubInputs.sol :: compress(TreeUpdateBatch).
 //
-// Every array is indexed by leaf slot, not by pair: a batch commits to
-// actual_count individual leaves, so the deposit-binding fields
-// (leaf_asset, leaf_public_in, is_deposit) are MAX_L wide rather than MAX_L/2.
+// Every array is indexed by leaf slot: a batch commits to actual_count
+// individual leaves, so the deposit-binding fields (leaf_asset, leaf_public_in,
+// is_deposit) are MAX_L wide.
 //
 // The two uint64 blocks (leaf_asset, leaf_public_in) are adjacent and the uint8
 // block (is_deposit) follows them, so PubInputs.compress can re-mask the

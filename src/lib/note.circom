@@ -10,7 +10,6 @@ include "tags.circom";
 //       → nk  = Poseidon(TAG_NK, nsk)
 // nf = Poseidon(TAG_NF, nk, rho, cm).
 
-// ivk = Poseidon(TAG_IVK, nsk)
 template DeriveIvk() {
     signal input nsk;
     signal output ivk;
@@ -21,7 +20,6 @@ template DeriveIvk() {
     ivk <== h.out;
 }
 
-// nk = Poseidon(TAG_NK, nsk)
 template DeriveNk() {
     signal input nsk;
     signal output nk;
@@ -32,7 +30,6 @@ template DeriveNk() {
     nk <== h.out;
 }
 
-// owner_pk = Poseidon(TAG_PK, ivk)
 template DerivePk() {
     signal input ivk;
     signal output pk;

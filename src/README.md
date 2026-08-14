@@ -233,7 +233,14 @@ the recipient unable to detect their own note.
 The Solidity verifier exported via `snarkjs zkey export
 solidityverifier` exposes `IC0`, `IC1`, `IC2` and a
 `verifyProof(uint[2] _pA, uint[2][2] _pB, uint[2] _pC, uint[2] _pubSignals)`
-signature, with `_pubSignals = [z, y]`.
+signature, with `_pubSignals = [y, z]`.
+
+The order is `[y, z]`, **not** `[z, y]`: circom lays out the main
+component's outputs before its public inputs, and `Transact` declares
+`signal output y` while `z` arrives via `component main { public [z] }`.
+So wire 1 is `main.y` and wire 2 is `main.z`. Confirm against the
+compiled `.sym` rather than trusting prose — an integrator who swaps
+these rejects every proof.
 
 ---
 
@@ -549,13 +556,21 @@ verifier:
    order (§2a) into the `uint256` array, derive
    `z = H(transcript) mod r` for a domain-separated hash `H` over the
    flat vector, and compute `y = Σ coeffs[k]·z^k mod r`. Pass
-   `[z, y]` to `Verifier.verifyProof`. `z` MUST be a deterministic
-   function of every slot.
-0a. **Canonical slots.** `require(slot < r)` for *every* one of the
-   `9 + 3·N_IN + 8·N_OUT` logical PIs before compressing. `compress()`
-   is modular, so `v` and `v + r` yield the same `y`; without this
-   check any slot — in particular the unconstrained `out_clue_*` — can
-   be mutated in calldata while the proof still verifies.
+   `[y, z]` to `Verifier.verifyProof` — in that order, see §2a. `z`
+   MUST be a deterministic function of every slot.
+0a. **Canonical slots.** Either `require(slot < r)` for *every* one of
+   the `9 + 3·N_IN + 8·N_OUT` logical PIs before compressing, **or**
+   derive `z` by hashing the raw pre-reduction slot words. One of the
+   two is mandatory; doing neither is exploitable. `compress()`
+   is modular, so `v` and `v + r` yield the same `y`; if `z` is also
+   derived from reduced values, any slot — in particular the
+   unconstrained `out_clue_*` — can be mutated in calldata while the
+   proof still verifies. Hashing the raw words instead closes it from
+   the other side: the mutation changes `z`, so the proof no longer
+   verifies. The current consumer takes that route (`PubInputs.sol`
+   keccaks the copied calldata words), which is why it carries no
+   explicit `slot < r` check. Do not "fix" that by reducing the slots
+   before hashing — that reintroduces the malleability.
 0b. **Aux digest.** Fill slot `8 + 3·N_IN + 8·N_OUT` with
    `keccak256(abi.encode(aux)) mod r` computed from the aux calldata.
    Never read this slot from the caller: taking it as an input makes it

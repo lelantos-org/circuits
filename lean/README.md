@@ -2,10 +2,10 @@
 
 A machine-checked development for `Transact(DEPTH, N_IN, N_OUT)`, the multi-asset transact
 circuit, and for `TreeUpdateBatch(DEPTH, MAX_L)`, the relayer batch tree-advance circuit.
-The transact half covers all three shapes the repository instantiates — `src/2x2.circom`,
-`src/2x3.circom` and `src/3x3.circom`. Only `2x2` is built and deployed; the other two are
-compiled by no recipe and have no trusted setup, and are kept so the shape-generic results
-are exercised at more than one slot count (see the NOT DEPLOYED note in each circom header).
+The transact half covers both shapes the repository instantiates — `src/2x2.circom` and
+`src/3x3.circom`. `3x3` is the deployed shape: it is what `PubInputs.sol` compresses and
+what `contracts/src/verifiers/Verifier.sol` verifies. `2x2` is retained so the shape-generic
+results are exercised at more than one slot count.
 The top-level theorem holds for **any** assignment satisfying the modeled constraint system,
 not only those an honest prover produces.
 
@@ -48,7 +48,7 @@ Individually:
 |---|---|
 | `lake build` | elaborates and kernel-checks every proof; runs the axiom guard over every declaration |
 | `./scripts/check-axioms.sh` | trusted base still matches `expected/axioms.txt` |
-| `./scripts/dump-layout.sh` | public-input layouts still match `expected/layout-{2x2,2x3,3x3}.txt` |
+| `./scripts/dump-layout.sh` | public-input layouts still match `expected/layout-{2x2,3x3}.txt` |
 | `python3 scripts/check-prime.py` | discharges the two arithmetic axioms externally |
 
 CI runs the same set ([.github/workflows/lean.yml](../.github/workflows/lean.yml)).
@@ -64,7 +64,7 @@ assumptions recorded in a statement, not results — see
 | Theorem | Where | Statement |
 |---|---|---|
 | `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w`, for `N_IN ≤ 3` and `N_OUT ≤ 3` |
-| `transact2x2_sound` / `transact2x3_sound` / `transact3x3_sound` | `Circuit/Transact.lean` | the same for each instantiated shape: `Transact(10,2,2)` (deployed), `Transact(10,2,3)` and `Transact(10,3,3)` (not deployed) |
+| `transact2x2_sound` / `transact3x3_sound` | `Circuit/Transact.lean` | the same for each instantiated shape: `Transact(10,3,3)` (deployed) and `Transact(10,2,2)` |
 | `transact_binding` † | `Circuit/Transact.lean` | `TransactSat w → TxBinding w` |
 
 The `≤ 3` bound is not a property of the circuit — `PerAssetValueBalance` is written for
@@ -169,9 +169,9 @@ patching it, and the Lean statement shows the difference: it mentions one leaf.
 | `transactSat_twoAsset_satisfiable` | `Proofs/Completeness.lean` | …and by one moving **two distinct assets** with a non-zero public input |
 | `spentReal_witness` | `Proofs/Completeness.lean` | `SpentReal` is inhabited, so `spentNote_sound`'s `is_dummy = 0` case is reachable |
 
-All three satisfying assignments are built at the `2x2` shape. `transact2x3_sound` and
-`transact3x3_sound` are therefore proved but **not** shown non-vacuous: nothing here exhibits
-a satisfying assignment of `Transact(10,2,3)` or `Transact(10,3,3)`. Their hypotheses are
+All three satisfying assignments are built at the `2x2` shape. `transact3x3_sound` is
+therefore proved but **not** shown non-vacuous: nothing here exhibits a satisfying
+assignment of `Transact(10,3,3)` — the deployed shape. Its hypotheses are
 believed satisfiable for the same reasons the `2x2` ones are — the constructions are
 shape-generic apart from the concrete slot arithmetic — but that is an expectation, not a
 theorem. See [What is not proved](#what-is-not-proved).
@@ -254,13 +254,14 @@ development may derive conservation from the point equation.
   assignments for the transact circuit only; no `BatchChainSat` witness is constructed, so
   read literally the batch theorems could be vacuous. The circuit is exercised concretely by
   `src/test/tree_update_batch.test.ts` instead.
-* **Non-vacuity at the `2x3` and `3x3` shapes.** Soundness is proved for all three deployed
-  shapes, but the three satisfying assignments in `Proofs/Completeness.lean` are all built at
-  `2x2`. Read literally, `transact2x3_sound` and `transact3x3_sound` could be vacuous.
-* **Layout parity against the SDK for `2x3` and `3x3`.** `dump-layout.sh` pins all three
-  layouts against Lean, but only `expected/layout-2x2.txt` is cross-checked against
-  `sdk/src/bundle/snark-compression.ts` (by `src/test/formal/layout_parity.test.ts`). The
-  other two links in that chain do not exist yet.
+* **Non-vacuity at the `3x3` shape.** Soundness is proved for both instantiated shapes, but
+  the three satisfying assignments in `Proofs/Completeness.lean` are all built at `2x2`. Read
+  literally, `transact3x3_sound` could be vacuous — and `3x3` is the shape actually deployed,
+  so this gap sits on the live path, not on a spare one.
+* **Full layout parity against the SDK for `3x3`.** `dump-layout.sh` pins both layouts
+  against Lean, and `src/test/formal/layout_parity.test.ts` pins each published vector to its
+  Lean dump for both shapes. The hand-written sentinel-per-field table in that test, which is
+  what catches a transposition between two same-typed slots, exists for `2x2` only.
 * **Under-constrainedness of the compiled R1CS**, beyond what Picus establishes — see
   [Under-constrainedness](#under-constrainedness-of-the-compiled-r1cs) below.
 * **Contract obligations.** Nullifier freshness, `z` being a genuine Fiat-Shamir challenge,
@@ -400,7 +401,6 @@ lean/
   expected/                generated; regenerate with --update on the relevant script
     axioms.txt             expected output of Meta/Assumptions
     layout-2x2.txt         expected output of Circuit/Witness :: layoutNames, one per shape
-    layout-2x3.txt
     layout-3x3.txt
   scripts/                 check-all, check-axioms, dump-layout, check-prime
 ```

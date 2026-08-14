@@ -19,9 +19,14 @@ R1CS totals on BN254 (`snarkjs r1cs info`):
 |-------------------------------------------------------|------------:|--------:|---------------:|
 | `2x2.circom` — `Transact(10, 2, 2)`                   |      69,350 |  69,419 |            143 |
 | `3x3.circom` — `Transact(10, 3, 3)`                   |     102,939 | 103,040 |            210 |
-| `tree_update_batch.circom` — `TreeUpdateBatch(10, 16)` |     252,672 | 252,368 |            146 |
+| `tree_update_batch.circom` — `TreeUpdateBatch(10, 8)`  |     130,607 | 130,471 |             90 |
 
-Each has one public input (the Fiat–Shamir challenge `z`).
+`3x3.circom` is the deployed transact shape; `2x2.circom` is retained as a
+second instantiation of `Transact`.
+
+Each has exactly one public *input* — the Fiat–Shamir challenge `z` — and one
+public *output*, `y`. circom orders main outputs before main public inputs, so
+the generated Groth16 verifier takes `_pubSignals = [y, z]`, in that order.
 
 ### Published artifacts
 

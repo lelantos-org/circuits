@@ -51,13 +51,14 @@ prove input="":
 
 all: compile setup prove
 
-# === 3x3 circuit ===
+# === 3x3 circuit — THE DEPLOYED TRANSACT SHAPE ===
 #
 # `Transact(10, 3, 3)` — 3 shielded inputs x 3 shielded outputs (~103k
-# constraints, vs ~69k for 2x2; both fit PTAU17). Built and published as a
-# package artifact, but NOT wired on-chain: deploying it additionally needs a
-# `PubInputs.compress` overload for its 42-slot layout, a Solidity verifier, and
-# `TRANSACT_OUT_LEAVES = 3` on the spend path. See src/3x3.circom.
+# constraints, vs ~69k for 2x2; both fit PTAU17). Published as a package
+# artifact AND wired on-chain: `PubInputs.sol` carries the 42-slot compress for
+# this layout, `TRANSACT_IN = TRANSACT_OUT = 3`, and the exported verifier is
+# contracts/src/verifiers/Verifier.sol. Use `rebuild-3x3` to regenerate and
+# sync it. See src/3x3.circom.
 
 # Compile 3x3.circom -> r1cs + wasm + sym, print constraint count.
 compile-3x3:
@@ -78,9 +79,11 @@ setup-3x3:
     npx snarkjs zkey export verificationkey "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/3x3_verification_key.json"
     echo "==> Export Solidity verifier"
     npx snarkjs zkey export solidityverifier "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/Verifier3x3.sol"
-    echo "==> Done. Verifier at {{BUILD}}/Verifier3x3.sol (not synced to contracts/)"
+    echo "==> Done. Verifier at {{BUILD}}/Verifier3x3.sol — run `just rebuild-3x3` to sync it"
 
-# Build all 3x3 artifacts. No contracts/ sync — 3x3 is not deployed on-chain.
+# Build all 3x3 artifacts WITHOUT the contracts/ sync. Used by `package`
+# (publish CI has no sibling contracts checkout). Local circuit authors should
+# prefer `rebuild-3x3`, which also pushes the verifier into contracts/.
 build-artifacts-3x3: compile-3x3 setup-3x3
 
 # === tree_update_batch circuit ===
@@ -125,24 +128,28 @@ all-tree: compile compile-batch setup setup-batch
 
 # === rebuild + sync into contracts/ ===
 
-# Build all 2x2 artifacts WITHOUT the contracts/ sync. Used by the
-# `package` recipe (publish CI does not have a sibling contracts repo
-# checked out). Local circuit authors should prefer `rebuild`, which
-# wraps this and also pushes Verifier.sol into ../contracts/src/verifiers/.
+# Build all 2x2 artifacts. Never syncs into contracts/: 2x2 is NOT the deployed
+# transact shape, so `build/Verifier.sol` must not reach
+# contracts/src/verifiers/Verifier.sol — that path holds the 3x3 verifier, and
+# overwriting it with this one silently swaps the deployed circuit for a
+# different one under an unchanged filename.
 #
 # WARNING: re-runs the prototype single-contributor ceremony (INSECURE
 # — see `setup` recipe). Existing proofs become invalid after.
 build-artifacts: compile setup
 
-# Full rebuild after circuit edits: recompile -> trusted setup -> sync
-# Verifier.sol into contracts/src/verifiers/. Use after changes to
-# 2x2.circom or any lib/*.circom; this regenerates 2x2.r1cs, 2x2.wasm,
-# 2x2_final.zkey, verification_key.json, and Verifier.sol, then copies
-# the verifier into contracts/.
-rebuild: build-artifacts
-    @echo "==> Syncing Verifier.sol -> {{CONTRACTS_VERIFIER}}"
-    cp "{{BUILD}}/Verifier.sol" "{{CONTRACTS_VERIFIER}}"
-    @just _rebuild-report "2x2" "{{BUILD}}/2x2.r1cs" "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json" "{{CONTRACTS_VERIFIER}}"
+# Full rebuild of the 2x2 shape after circuit edits. No contracts/ sync — see
+# `build-artifacts` above, and use `rebuild-3x3` for the deployed shape.
+rebuild-2x2: build-artifacts
+    @just _rebuild-report "2x2" "{{BUILD}}/2x2.r1cs" "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json" "(not synced — 2x2 is not deployed)"
+
+# Full rebuild of the DEPLOYED transact shape after circuit edits: recompile ->
+# trusted setup -> sync Verifier3x3.sol into contracts/src/verifiers/Verifier.sol.
+# Use after changes to 3x3.circom or any lib/*.circom.
+rebuild-3x3: build-artifacts-3x3
+    @echo "==> Syncing Verifier3x3.sol -> {{CONTRACTS_VERIFIER}}"
+    cp "{{BUILD}}/Verifier3x3.sol" "{{CONTRACTS_VERIFIER}}"
+    @just _rebuild-report "3x3" "{{BUILD}}/3x3.r1cs" "{{BUILD}}/3x3_js/3x3.wasm" "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/3x3_verification_key.json" "{{CONTRACTS_VERIFIER}}"
 
 # Full rebuild for tree_update_batch circuit + sync TreeUpdateBatchVerifier.sol
 # into contracts/src/verifiers/.
@@ -295,8 +302,19 @@ picus CIRCUIT="2x2" STRONG="":
     [ -f "$src" ] || { echo "no such circuit: $src"; exit 1; }
     mkdir -p "{{BUILD}}/picus"
     circom "$src" --r1cs --sym --O0 -o "{{BUILD}}/picus" -l "{{ROOT}}/node_modules"
+    code=0
     docker run --rm -v "{{BUILD}}/picus:/data" "$image" \
-        ./run-picus --solver z3 --timeout 10000 {{ if STRONG != "" { "--strong" } else { "" } }} /data/{{CIRCUIT}}.r1cs
+        ./run-picus --solver z3 --timeout 10000 {{ if STRONG != "" { "--strong" } else { "" } }} /data/{{CIRCUIT}}.r1cs \
+        || code=$?
+    # Picus signals its verdict through the exit code (picus/exit.rkt): 8 safe, 9 unsafe,
+    # 0 unknown. A passing run therefore exits non-zero and has to be translated, or every
+    # green check reads as a failure.
+    case "$code" in
+        8)  echo "==> {{CIRCUIT}}: properly constrained" ;;
+        9)  echo "==> {{CIRCUIT}}: UNDER-CONSTRAINED"; exit 1 ;;
+        0)  echo "==> {{CIRCUIT}}: unknown — Picus could not decide (timeout or unsupported)"; exit 1 ;;
+        *)  echo "==> {{CIRCUIT}}: Picus error (exit $code)"; exit 1 ;;
+    esac
 
 # Keeps going after a failing circuit so one under-constrained result does not hide
 # the others, then exits non-zero if any failed.
@@ -326,8 +344,8 @@ picus-all STRONG="":
 # `scripts/check-artifacts.ts` to assert sizes + SHA-256 match
 # `release-manifest.json`.
 #
-# Depends on `build-artifacts` (NOT `rebuild`) so the publish workflow
-# does not require a sibling contracts/ checkout for the Verifier.sol
+# Depends on the `build-artifacts*` recipes (NOT `rebuild-3x3`) so the publish
+# workflow does not require a sibling contracts/ checkout for the Verifier.sol
 # sync step.
 package: build-artifacts build-artifacts-3x3
     @just package-check

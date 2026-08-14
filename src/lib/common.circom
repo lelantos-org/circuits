@@ -30,10 +30,10 @@ template PathIndexSelectors() {
 // TAG_MERKLE must match MerkleLevel4.
 //
 // These are compile-time constants, but circom does not constant-fold Poseidon:
-// computing the chain in-circuit emitted DEPTH × Poseidon(5) real constraints per
-// instantiation, and `tree_update_batch` instantiates EmptySubtreeHashes 17 times
-// (16 QuaternaryInsert + 1 FrontierRoot) for the same fixed table. Tabulating them
-// removes ~48.6k non-linear constraints from that circuit.
+// computing the chain in-circuit costs DEPTH × Poseidon(5) constraints per
+// instantiation, and `tree_update_batch` instantiates EmptySubtreeHashes
+// MAX_L + 1 times (one per QuaternaryInsert, plus FrontierRoot) for the same
+// fixed table. Tabulating removes that cost.
 //
 // The table is pinned two ways, so a typo cannot pass silently:
 //   - `src/test/merkle.test.ts` recomputes the chain with circomlibjs and asserts

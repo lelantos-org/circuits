@@ -2,7 +2,10 @@ pragma circom 2.2.3;
 
 include "lib/transact.circom";
 
-// 3-input × 3-output transact circuit. Logic is in Transact (lib/transact.circom).
+// 3-input × 3-output transact circuit, the deployed transact shape. Logic is in
+// Transact (lib/transact.circom).
+//
+// DEPTH = 10 matches the on-chain CommitmentTree: 4^10 = 1,048,576 leaves.
 //
 // PolyEval coefficient slots, which must match the PubInputs.sol :: compress
 // overload for this shape:
@@ -23,23 +26,21 @@ include "lib/transact.circom";
 //     [41]      out_aux_digest           (contract recomputes; never read from calldata)
 // Total = 9 + 3·N_IN + 8·N_OUT = 42.
 //
-// NOT DEPLOYED. No justfile recipe compiles this shape and no trusted setup
-// exists for it. It is kept so `Transact` is exercised at a second shape by the
-// Lean development (lean/expected/layout-3x3.txt).
+// Build with `just rebuild-3x3`, which exports the verifier to
+// contracts/src/verifiers/Verifier.sol. The layout is pinned by
+// scripts/gen-vectors.ts (refuses to publish unless the circuit's y equals the
+// reference PolyEval over the 42 coefficients) and by layout_parity.test.ts
+// against lean/expected/layout-3x3.txt.
 //
-// It IS compiled and satisfied off the deployment path: `scripts/gen-vectors.ts`
-// builds three witnesses for this shape, checks them against the compiled
-// circuit, and publishes `vectors/transact-3x3.json`. The generator refuses to
-// write unless the circuit's `y` equals the reference PolyEval over the 42
-// coefficients, so the layout above is pinned against the circom itself, and
-// `layout_parity.test.ts` pins the published vector against the Lean dump.
+// Not yet established for this shape:
+//   - a multi-party phase-2 ceremony; setup-3x3 is single-contributor.
+//   - Lean non-vacuity: transact3x3_sound has no exhibited witness.
 //
-// Deploying it still requires: a compile/setup recipe, its own phase-2 ceremony,
-// a PubInputs.sol compress overload for 42 slots, and a satisfying Lean witness
-// (transact3x3_sound is not yet shown non-vacuous).
-//
-// Note §10.5's `require(nullifier[0] != nullifier[1])` must generalise to all
-// three pairs at this shape.
+// Consumer-side checks indexed by input or output must range over the whole
+// shape: pairwise nullifier distinctness over all three pairs, and the out_cm
+// and out_cv_dep cross-bindings to tree_update_batch over all three outputs.
+// out_cv_dep sits inside the leaf preimage and spent.circom recomputes it from
+// the note, so an unbound output index yields an unspendable leaf.
 component main {
     public [ z ]
 } = Transact(10, 3, 3);

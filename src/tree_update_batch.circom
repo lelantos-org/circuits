@@ -15,10 +15,9 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // Relayer proof advancing the commitment tree from old_root to new_root by
 // inserting up to MAX_L leaves at [start_index, start_index + MAX_L).
 //
-// actual_count ∈ [1, MAX_L] is a LEAF count, not a pair count: any number of
-// leaves may be committed, odd included. That is what lets one batch carry a
-// 3-output transact bundle (Transact(10, 2, 3) / Transact(10, 3, 3)) or a
-// single-leaf deposit. Trailing slots must be zero.
+// actual_count ∈ [1, MAX_L] is a LEAF count: any number of leaves may be
+// committed, odd included. That is what lets one batch carry a 3-output transact
+// bundle or a single-leaf deposit. Trailing slots must be zero.
 //
 // leaf_k = Poseidon(TAG_LEAF, cms[k], cv_dep[k][0], cv_dep[k][1]), where cv_dep
 // is the depositor's or spender's Pedersen value commitment. Spends recompute
@@ -242,7 +241,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     // 10. Bind new_root.
     new_root === running_root[MAX_L];
 
-    // 11. Public-input compression → (z, y).
+    // 11. Public-input compression → (y, z).
     component pe = BatchCompress(MAX_L);
     pe.z <== z;
     pe.old_root <== old_root;
@@ -260,17 +259,16 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     y <== pe.y;
 }
 
-// DEPTH = 10 must match 2x2.circom and the on-chain CommitmentTree.
-// MAX_L = 8 leaves per batch. Chosen for proving speed: 8 lands at ~131k
-// constraints, just under the 2^17 FFT domain, which makes a proof ~1.8x faster
-// than MAX_L = 16 (2.7s vs 4.8s measured) and fits ptau_17 instead of ptau_20.
+// DEPTH = 10 must match the transact circuits and the on-chain CommitmentTree.
+// MAX_L = 8 leaves per batch: 130,607 constraints, which fits the 2^17 FFT
+// domain and ptau_17. Proving takes 2.7s, against 4.8s at MAX_L = 16 (2^18
+// domain, ptau_20).
 //
-// HEADROOM WARNING: 130,607 constraints against a 2^17 domain of 131,072 leaves
-// ~465 constraints of slack. One extra constraint per leaf tips the circuit into
-// 2^18 and the speed advantage disappears in a single commit. Re-measure before
-// adding anything to the per-leaf work.
-// Changing either requires a new ceremony and a contract change, since the
-// public-input layout is 4 + 6·MAX_L.
+// HEADROOM: 465 constraints of slack against the 131,072 domain. Adding
+// per-leaf work can cross into 2^18; re-measure before doing so.
+//
+// Changing either parameter requires a new ceremony and a contract change, since
+// the public-input layout is 4 + 6·MAX_L.
 component main {
     public [ z ]
 } = TreeUpdateBatch(10, 8);
