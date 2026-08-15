@@ -16,6 +16,11 @@ pragma circom 2.2.3;
 // | TAG_NK      | 9     | nk   = Poseidon(TAG_NK, nsk)                          |
 // | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)     |
 // | TAG_RHO     | 11    | rho  = Poseidon(TAG_RHO, nullifier[0], out_index)     |
+//
+// Reserved off-circuit, defined only in sdk/src/crypto/tags.ts. Listed here so
+// the value space stays single-sourced and a new in-circuit tag cannot collide:
+// | TAG_SUB_TOKEN  | 12 | sub token = Poseidon(TAG_SUB_TOKEN, ivk, epoch)      |
+// | TAG_FMD_EXPAND | 13 | h_i       = Poseidon(TAG_FMD_EXPAND, ck_x, ck_y, i)  |
 function TAG_CM()     { return 1; }
 function TAG_NF()     { return 2; }
 function TAG_PK()     { return 3; }
