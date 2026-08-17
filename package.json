@@ -2,7 +2,7 @@
   "name": "@lelantos-org/circuits",
   "version": "0.8.0",
   "description": "Lelantos MASP Groth16 prover artifacts.",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "type": "module",
   "files": [
     "build/2x2.wasm",
