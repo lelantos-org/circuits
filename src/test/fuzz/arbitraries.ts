@@ -1,12 +1,12 @@
-// Property-based test arbitraries for MASP circuits.
-// Builds on existing helpers in ../helpers.ts (which re-exports SDK crypto).
-// Keeps generated values inside circuit-enforced ranges (64-bit values, valid
-// path indices) so positive properties don't trip range checks accidentally.
+// Property-based test arbitraries for the MASP circuits.
+//
+// Generated values stay inside circuit-enforced ranges (64-bit values, valid
+// path indices) so positive properties do not trip a range check.
 //
 // Env vars:
 //   FUZZ=light|medium|heavy            global run-count (5 / 20 / 100)
 //   FUZZ_RUNS_<SUITE>=N                per-suite override, overrides FUZZ
-//     SUITE keys: CLUE, FRONTIER, HASHTOBIT, MERKLE, POLYEVAL,
+//     SUITE keys: CLUE, FIXEDBASE, FRONTIER, HASHTOBIT, MERKLE, POLYEVAL,
 //                 TRANSACT, TRANSACT_VARIANTS
 
 import * as fc from "fast-check";
@@ -27,11 +27,9 @@ export const MAX_VALUE = (1n << 64n) - 1n;
 // BN254 scalar field modulus — used by every gadget that constrains a Field.
 export const R = BN254_FR;
 
-// Canonical-positive modulo, shared so fuzz suites do not each redefine it.
-export const mod = (a: bigint, p: bigint): bigint => {
-    const r = a % p;
-    return r < 0n ? r + p : r;
-};
+// Canonical-positive modulo. Re-exported rather than redefined: the reference
+// implementation owns it, and a second copy is a second thing to keep in step.
+export { mod } from "../helpers";
 
 // Random bigint in [0, max] from a fast-check uint sequence (deterministic seed).
 export const arbField = (max: bigint = MAX_VALUE): fc.Arbitrary<bigint> =>
@@ -43,6 +41,29 @@ export const arbBoundaryField = (max: bigint): fc.Arbitrary<bigint> =>
     fc.oneof(
         { arbitrary: fc.bigInt(0n, max), weight: 7 },
         { arbitrary: fc.constantFrom(0n, 1n, max - 1n, max), weight: 3 },
+    );
+
+// Blinding scalars as `MulH` admits them: `Num2Bits(RCV_BITS = 252)`. Boundary
+// biased, because the interesting failures live at the window edges — the top
+// partial window, an all-ones scalar, and the subgroup order itself.
+export const MAX_BLINDER = (1n << 252n) - 1n;
+
+export const arbBlinder = (): fc.Arbitrary<bigint> =>
+    fc.oneof(
+        { arbitrary: fc.bigInt(0n, MAX_BLINDER), weight: 7 },
+        {
+            arbitrary: fc.constantFrom(
+                0n,
+                1n,
+                15n,
+                16n,
+                (1n << 251n) - 1n,
+                1n << 251n,
+                MAX_BLINDER - 1n,
+                MAX_BLINDER,
+            ),
+            weight: 3,
+        },
     );
 
 // Avoid 0 so random nsks produce distinct pks reliably.

@@ -51,18 +51,18 @@ variable {depth nIn nOut : ℕ}
 
 /-- The constraint system of `Transact(depth, nIn, nOut)`. -/
 structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
-  /-- `src/lib/transact.circom:97-117` — each spent slot, bound to the shared root. -/
+  /-- `src/lib/transact.circom:97-122` — each spent slot, bound to the shared root. -/
   spent_sat : ∀ i, i < nIn → SpentNoteSat (w.spent i)
   spent_root : ∀ i, i < nIn → (w.spent i).root = w.merkleRoot
-  /-- `:88, 113-114` — `DummyZeroValue(N_IN)`. -/
+  /-- `:95, 120-121` — `DummyZeroValue(N_IN)`. -/
   dummy_zero : DummyZeroValueSat nIn (fun i => (w.spent i).isDummy) (inValue w)
-  /-- `:126-129` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
+  /-- `:133-136` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
   rho_derived : ∀ j, j < nOut → (w.out j).rho = deriveRho (w.spent 0).nullifier (j : F)
-  /-- `:131-141` — each output slot. -/
+  /-- `:138-148` — each output slot. -/
   out_sat : ∀ j, j < nOut → OutputNoteSat (w.out j)
-  /-- `:143-144` — the forwarded deposit commitments are the ones the outputs computed. -/
+  /-- `:150-151` — the forwarded deposit commitments are the ones the outputs computed. -/
   cv_dep_bound : ∀ j, j < nOut → w.outCvDep j = (w.out j).cvDep
-  /-- `:150-161` — the public bucket: generator, two `ValueTimesGen`s (each a
+  /-- `:157-168` — the public bucket: generator, two `ValueTimesGen`s (each a
   `RangeCheck64` plus a `ValueScalarMul`, `src/lib/balance.circom:24-40`). -/
   pub_gen : w.pubGen = coords (assetGen w.publicAssetId)
   /-- `HashToAssetGen` decomposes its argument with `Num2Bits(64)`
@@ -73,14 +73,27 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
   pub_out_range : RangeCheck64Sat w.publicOut w.pubOutBits
   pub_in_mul : ValueScalarMulSat w.pubInBits w.pubGen w.pubInPt
   pub_out_mul : ValueScalarMulSat w.pubOutBits w.pubGen w.pubOutPt
-  /-- `:166-177` — the load-bearing conservation check. -/
+  /-- `src/lib/transact.circom:173-184` — the load-bearing conservation check. -/
   value_balance : PerAssetValueBalanceSat nIn nOut (inAsset w) (inValue w) (outAsset w)
     (outValue w) w.publicAssetId w.publicIn w.publicOut w.vbPubInv w.vbPubEq
     w.vbInInv w.vbInEq w.vbOutInv w.vbOutEq w.vbInTerm w.vbOutTerm w.vbLhs w.vbRhs
-  /-- `:179-195` — the point equation. Included for fidelity; nothing is derived from it,
+  /-- `src/lib/transact.circom:186-202` — the point equation. Included for fidelity;
+  nothing is derived from it,
   because `pointBalance_not_sound` shows nothing can be. -/
   point_balance : PerAssetPointBalanceSat nIn nOut w.inCvG w.outCvG w.inRHG w.outRHG
     w.pubInG w.pubOutG
+  /-- MODEL-ONLY, and in the dangerous direction: these four have **no circom counterpart**.
+  `src/lib/transact.circom:186-202` wires the `cv` / `rH` coordinates into
+  `PerAssetPointBalance` with no subgroup or curve check on them, whereas these fields assert
+  each published pair is the image under `coords` of a prime-order-subgroup element. That
+  strengthens `TransactSat`, which per the table in `FIDELITY.md` weakens `transact_sound`.
+
+  They are here because `point_balance` is stated over group elements, so without them
+  `inCvG` / `outCvG` / `inRHG` / `outRHG` would be free variables disconnected from the
+  signals — the same argument as `point_pub_in` / `point_pub_out` below. The practical risk
+  is nil: nothing is derived from `point_balance`, because `pointBalance_not_sound` shows
+  nothing can be. Removing them means restating `PerAssetPointBalanceSat` over coordinates
+  rather than group elements. -/
   point_in_cv : ∀ i, i < nIn → (w.spent i).cv = coords (w.inCvG i)
   point_out_cv : ∀ j, j < nOut → (w.out j).cv = coords (w.outCvG j)
   point_in_rH : ∀ i, i < nIn → (w.spent i).rH = coords (w.inRHG i)
@@ -91,7 +104,7 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
   assignment by solving for `pubOutG` — i.e. modelled in name only. -/
   point_pub_in : w.pubInPt = coords w.pubInG
   point_pub_out : w.pubOutPt = coords w.pubOutG
-  /-- `:200-225` — public-input compression. -/
+  /-- `:207-233` — public-input compression. -/
   compress : PolyEvalSat (piCount nIn nOut) (txCoeffs w) w.z w.peAcc w.y
 
 /-- Obligations the circuit cannot discharge, which the contract must.
@@ -243,7 +256,7 @@ theorem no_asset_creation {w : TxWitness depth nIn nOut}
 
 /-- **Public-input binding at the transaction level.** If two transactions with *different*
 public inputs are accepted against the same `(z, y)`, then `z` is one of at most
-`piCount - 1` field elements — 30 out of `p ≈ 2^253.6` for the deployed instance.
+`piCount - 1` field elements — 30 out of `p ≈ 2^253.6` at the `2x2` instance.
 
 The security reading needs `ContractObligations.challenge_is_fiat_shamir`: the prover must
 not be able to pick `z` after fixing the coefficients. The circuit cannot enforce that, so
@@ -291,13 +304,16 @@ theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
 `perAssetValueBalance_nat`, where it is what keeps each side of the balance equation below
 `p`. The repository ships exactly two shapes, and both sit inside it. -/
 
-/-- `Transact(10, 2, 2)` — `src/2x2.circom:28`. -/
+/-- `Transact(10, 2, 2)` — `src/2x2.circom:28`. Not the deployed shape; retained as a
+second instantiation of `Transact` and as the shape the satisfiability witnesses in
+`Proofs/Completeness.lean` are built at. -/
 abbrev Transact2x2 := TxWitness 10 2 2
 
-/-- `Transact(10, 3, 3)` — `src/3x3.circom:38`. NOT DEPLOYED; see the circom header. -/
+/-- `Transact(10, 3, 3)` — `src/3x3.circom:44`. **The deployed shape**; see the circom
+header. -/
 abbrev Transact3x3 := TxWitness 10 3 3
 
-/-- **Soundness of the deployed `2x2` instance.** -/
+/-- **Soundness at the `2x2` instance.** -/
 theorem transact2x2_sound {w : Transact2x2} (h : TransactSat w) : TxWellFormed w :=
   transact_sound (by norm_num) (by norm_num) h
 

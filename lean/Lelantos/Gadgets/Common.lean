@@ -54,4 +54,21 @@ theorem pathIndexSelectors_sound {idx : F} {b s : ℕ → F}
     · simp only [hv0, hv1, bitNat] at hvalEq ⊢
       interval_cases k <;> simp_all
 
+/-! ## A canonical satisfying assignment
+
+`pathIndexSelectors_sound` reads the one-hot vector off a satisfying assignment. This is the
+other direction: for each of the four digits, the assignment exists. The completeness proofs
+need all four, because a batch inserts at consecutive indices and so exercises every digit
+at the lowest level.
+-/
+
+/-- The one-hot selector vector for digit `t`. -/
+def selAt (t : ℕ) : ℕ → F := fun k => if k = t then 1 else 0
+
+/-- **`PathIndexSelectors` is satisfiable at every digit it admits.** -/
+theorem pathIndexSelectors_witness {t : ℕ} (ht : t < 4) :
+    PathIndexSelectorsSat ((t : ℕ) : F) (natBits t) (selAt t) := by
+  refine ⟨num2Bits_witness (by simpa using ht), ?_, ?_, ?_, ?_⟩ <;>
+    · interval_cases t <;> norm_num [selAt, natBits]
+
 end Lelantos

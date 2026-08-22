@@ -28,3 +28,14 @@ export const POW_2_64 = 1n << 64n;
  * bit extraction: `5^((r-1)/2) === -1 (mod r)`.
  */
 export const FMD_LEGENDRE_QNR = 5n;
+
+/**
+ * Least non-negative residue of `a` mod `p`.
+ *
+ * JS `%` keeps the sign of the dividend, so a negative intermediate — which
+ * Horner evaluation and Tonelli-Shanks both produce — comes back out of range.
+ */
+export function mod(a: bigint, p: bigint = BN254_FR): bigint {
+    const r = a % p;
+    return r < 0n ? r + p : r;
+}

@@ -12,10 +12,10 @@
       "coeffCount": 42,
       "layoutDigest": "0x144fffddb22d2b0f48e184dae825ae2332130385e95c812072b305e2c5e03e78"
     },
-    "tree-update-batch-8.json": {
-      "sha256": "8f976f589ce6c17a61c8cabf3aafc85b8ef31d717304e003e0876c6b4dd32275",
-      "coeffCount": 52,
-      "layoutDigest": "0x25918d3250dcbe961be9a3958a3e0db9f8a7771992eddc26bbbd1e6a60f7a2df"
+    "tree-update-batch-4.json": {
+      "sha256": "97c441353d720893f6d02d5bdbfe299103bae4a69230bd1baa854091416b79e0",
+      "coeffCount": 28,
+      "layoutDigest": "0xb983937166e9d29ee55de612fbb85f6b4add21935e51153d83462515e84ffaf1"
     }
   }
 }

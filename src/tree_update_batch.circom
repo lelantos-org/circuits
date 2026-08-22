@@ -15,9 +15,9 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // Relayer proof advancing the commitment tree from old_root to new_root by
 // inserting up to MAX_L leaves at [start_index, start_index + MAX_L).
 //
-// actual_count ∈ [1, MAX_L] is a LEAF count: any number of leaves may be
-// committed, odd included. That is what lets one batch carry a 3-output transact
-// bundle or a single-leaf deposit. Trailing slots must be zero.
+// actual_count ∈ [1, MAX_L] is a LEAF count, so odd counts are permitted: one
+// batch carries either a 3-output transact bundle or a single-leaf deposit.
+// Trailing slots must be zero.
 //
 // leaf_k = Poseidon(TAG_LEAF, cms[k], cv_dep[k][0], cv_dep[k][1]), where cv_dep
 // is the depositor's or spender's Pedersen value commitment. Spends recompute
@@ -26,13 +26,12 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // Per-leaf deposit binding, applied when is_deposit[k] == 1:
 //   cv_dep[k] == leaf_public_in[k]·V^leaf_asset[k] + rcv[k]·H
 //
-// Deposits carry no transact proof, so the leaf must be pinned by the batch
-// circuit itself. Pinning it directly — rather than constraining a sum over an
-// aggregate of leaves — is what makes the binding tight: a sum fixes only
-// Σvalue modulo the subgroup order l, so a depositor could put 2^63·V^A into
-// one leaf, let a second leaf absorb (public_in − 2^63) mod l as an unspendable
-// leaf they abandon, and walk away with a valid 2^63 note for a one-unit
-// deposit. With one equality per leaf there is no split to exploit.
+// Deposits carry no transact proof, so the batch circuit pins the leaf itself.
+// The binding is per leaf rather than over an aggregate: a sum would fix only
+// Σvalue modulo the subgroup order l, letting a depositor place 2^63·V^A in one
+// leaf, absorb (public_in − 2^63) mod l in a second leaf they abandon, and
+// retain a valid 2^63 note for a one-unit deposit. One equality per leaf admits
+// no such split.
 //
 // is_deposit[k] == 0 skips the check; the transact circuit proves conservation
 // for spends.
@@ -48,7 +47,7 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 //   [4 + 3·MAX_L .. 3 + 4·MAX_L]   leaf_asset
 //   [4 + 4·MAX_L .. 3 + 5·MAX_L]   leaf_public_in
 //   [4 + 5·MAX_L .. 3 + 6·MAX_L]   is_deposit
-// Total = 4 + 6·MAX_L (52 for MAX_L = 8).
+// Total = 4 + 6·MAX_L (28 for MAX_L = 4).
 //
 // The caller must ensure start_index + MAX_L - 1 < 4^DEPTH.
 template TreeUpdateBatch(DEPTH, MAX_L) {
@@ -73,7 +72,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 
     // 1. Range-check actual_count ∈ [1, MAX_L] via Num2Bits(actual_count - 1).
     //    That bounds it by 2^COUNT_BITS, so the bound must be tight to MAX_L.
-    var COUNT_BITS = 3;
+    var COUNT_BITS = 2;
     assert((1 << COUNT_BITS) == MAX_L);
     component cnt_bits = Num2Bits(COUNT_BITS);
     cnt_bits.in <== actual_count - 1;
@@ -260,15 +259,18 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 }
 
 // DEPTH = 10 must match the transact circuits and the on-chain CommitmentTree.
-// MAX_L = 8 leaves per batch: 130,607 constraints, which fits the 2^17 FFT
-// domain and ptau_17. Proving takes 2.7s, against 4.8s at MAX_L = 16 (2^18
-// domain, ptau_20).
 //
-// HEADROOM: 465 constraints of slack against the 131,072 domain. Adding
-// per-leaf work can cross into 2^18; re-measure before doing so.
+// MAX_L = 4: 57,106 constraints, inside the 2^16 FFT domain and ptau_16, with
+// 8,430 constraints of headroom. A leaf slot costs roughly 12k constraints, and
+// `just budget` fails CI if the domain is crossed.
 //
-// Changing either parameter requires a new ceremony and a contract change, since
-// the public-input layout is 4 + 6·MAX_L.
+// MAX_L is at its floor. COUNT_BITS above requires a power of two, and a spend
+// emits TRANSACT_OUT = 3 leaves that must fit one batch — MASP.sol pins
+// `actualCount` to exactly that on the transfer path. Only flushBatch
+// (deposits, one leaf each) uses more than 3 slots.
+//
+// Changing either parameter requires a new ceremony and a contract change,
+// since the public-input layout is 4 + 6·MAX_L.
 component main {
     public [ z ]
-} = TreeUpdateBatch(10, 8);
+} = TreeUpdateBatch(10, 4);

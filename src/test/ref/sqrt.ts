@@ -5,12 +5,7 @@
 // full Tonelli-Shanks is required. `modPow` uses repeated squaring; direct
 // exponentiation would produce an unbounded intermediate.
 
-import { BN254_FR, FMD_LEGENDRE_QNR } from "./field.js";
-
-function mod(a: bigint, p: bigint): bigint {
-    const r = a % p;
-    return r < 0n ? r + p : r;
-}
+import { BN254_FR, FMD_LEGENDRE_QNR, mod } from "./field.js";
 
 function modPow(base: bigint, exp: bigint, p: bigint): bigint {
     let r = 1n;

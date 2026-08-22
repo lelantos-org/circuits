@@ -3,13 +3,15 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadCircuit, srcPath } from "../lib/circuit";
+import { loadCircuit, srcPath, type CircuitInput } from "../lib/circuit";
+import { readOutput } from "../lib/expect";
+import { TIMEOUT_HEAVY } from "../lib/constants";
 
 // Groth16 public-signal ORDER for the transact shapes.
 //
 // The exported Solidity verifier takes `_pubSignals` as a flat `uint[2]`, so a
 // transposition is not a type error anywhere: it is two field elements handed
-// over in the wrong order, and every proof simply fails to verify. That is a
+// over in the wrong order, and every proof fails to verify. That is a
 // silent, total integration break, and the failure mode looks identical to a
 // bad zkey or a stale ceremony — which is exactly why it deserves a pin rather
 // than a sentence in a README.
@@ -38,7 +40,9 @@ const ROOT = resolve(HERE, "../../..");
 const SHIPPED_SHAPES = ["2x2", "3x3"] as const;
 
 interface PublishedVector {
-    witness: Record<string, unknown>;
+    // Parsed straight out of the published JSON, so it is typed as the circom
+    // input shape rather than re-declared here.
+    witness: CircuitInput;
     compression: { z: string; y: string };
     circuitOutput: { y: string };
 }
@@ -51,7 +55,7 @@ function loadVector(shape: string): PublishedVector {
 }
 
 describe("groth16 public-signal order", function () {
-    this.timeout(600000);
+    this.timeout(TIMEOUT_HEAVY);
 
     for (const shape of SHIPPED_SHAPES) {
         describe(`transact_${shape}`, () => {
@@ -71,12 +75,12 @@ describe("groth16 public-signal order", function () {
             // The two assertions that matter. Together they say: the first
             // public signal is y and the second is z.
             it("witness[1] is `y`, the first public signal", () => {
-                expect(BigInt(witness[1].toString()).toString()).to.equal(vector.circuitOutput.y);
-                expect(BigInt(witness[1].toString()).toString()).to.equal(vector.compression.y);
+                expect(readOutput(witness, 0).toString()).to.equal(vector.circuitOutput.y);
+                expect(readOutput(witness, 0).toString()).to.equal(vector.compression.y);
             });
 
             it("witness[2] is `z`, the second public signal", () => {
-                expect(BigInt(witness[2].toString()).toString()).to.equal(vector.compression.z);
+                expect(readOutput(witness, 1).toString()).to.equal(vector.compression.z);
             });
 
             // Guards the inference above: if `y` and `z` were ever equal the

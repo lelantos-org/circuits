@@ -38,9 +38,9 @@
     "url": "git+https://github.com/lelantos-org/circuits.git"
   },
   "scripts": {
-    "test": "FUZZ=medium NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 600000 'src/test/**/*.test.ts'",
-    "test:unit": "FUZZ=medium NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 600000 --ignore 'src/test/fuzz/**' 'src/test/**/*.test.ts'",
-    "test:fuzz": "FUZZ=${FUZZ:-heavy} NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 1800000 'src/test/fuzz/**/*.test.ts'",
+    "test": "FUZZ=${FUZZ:-medium} NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 600000 --exit 'src/test/**/*.test.ts'",
+    "test:unit": "FUZZ=${FUZZ:-medium} NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 600000 --exit --ignore 'src/test/fuzz/**' 'src/test/**/*.test.ts'",
+    "test:fuzz": "FUZZ=${FUZZ:-heavy} NODE_OPTIONS=\"--import tsx/esm\" mocha --reporter spec --timeout 1800000 --exit 'src/test/fuzz/**/*.test.ts'",
     "package": "just package",
     "vectors": "NODE_OPTIONS=\"--import tsx/esm\" node scripts/gen-vectors.ts"
   },

@@ -48,9 +48,9 @@ element, so with both fields 64-bit range-checked the packing is injective.
 See `src/lib/note.circom:60`. -/
 theorem two_pow_128_lt_p : 2 ^ 128 < p := by unfold p; norm_num
 
-/-- `2 ^ 253 < p`: `MulH` decomposes its scalar with `Num2Bits(253)`, so that
+/-- `2 ^ 252 < p`: `MulH` decomposes its scalar with `Num2Bits(252)`, so that
 decomposition is also alias-free. See `src/lib/value_commit.circom:41`. -/
-theorem two_pow_253_lt_p : 2 ^ 253 < p := by unfold p; norm_num
+theorem two_pow_252_lt_p : 2 ^ 252 < p := by unfold p; norm_num
 
 instance : NeZero p := ⟨by have := p_pos; omega⟩
 

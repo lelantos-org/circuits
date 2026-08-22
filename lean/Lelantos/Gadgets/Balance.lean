@@ -237,8 +237,8 @@ wrap-around forgery is possible.
 
 `≤ 3` is not a property of the circuit — `PerAssetValueBalance` is written for arbitrary
 `N_IN` / `N_OUT`. It is the largest slot count for which the sums provably stay below `p`
-using only `two_pow_66_lt_p`, and it covers every deployed shape: `Transact(10, 2, 2)`,
-`Transact(10, 2, 3)` and `Transact(10, 3, 3)`. A wider shape needs a correspondingly wider
+using only `two_pow_66_lt_p`, and it covers every shape the repository ships:
+`Transact(10, 2, 2)` and `Transact(10, 3, 3)`. A wider shape needs a correspondingly wider
 bound in `Lelantos.Model.Field`, and nothing else. -/
 theorem perAssetValueBalance_nat
     (h : PerAssetValueBalanceSat nIn nOut inA inV outA outV pa pi po

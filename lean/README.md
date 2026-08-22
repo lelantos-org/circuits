@@ -10,7 +10,7 @@ The top-level theorem holds for **any** assignment satisfying the modeled constr
 not only those an honest prover produces.
 
 That distinction is the point. The test suite
-([transact.test.ts](../src/test/transact.test.ts), [fuzz/](../src/test/fuzz/)) exercises the
+([src/test/transact/](../src/test/transact/), [fuzz/](../src/test/fuzz/)) exercises the
 honest witness-generation path only; `circom_tester` cannot detect an under-constrained
 signal, so that bug class is untested by construction. These proofs quantify over satisfying
 assignments instead.
@@ -121,7 +121,7 @@ chain result below depends on `p_prime` alone.
 | `batch_step_inserts` | `Circuit/TreeUpdateBatch.lean` | an active step is a genuine `InsertsTo` of that leaf over the running frontier |
 | `batch_step_stalls` | `Circuit/TreeUpdateBatch.lean` | an inactive step carries the running state through unchanged |
 | `batch_advances_by_count` | `Circuit/TreeUpdateBatch.lean` | **both halves at once: every step below `actual_count` is a real insert, and `new_root` is the running root at `actual_count`** — the formal content of "odd counts work" |
-| `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(10, 8)`, `COUNT_BITS = 3` |
+| `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(10, 4)`, `COUNT_BITS = 2` |
 | `batch_bounds_deployed` | `Circuit/TreeUpdateBatch.lean` | the two side conditions are simultaneously satisfiable at the deployed shape, so the results above are not conditional on an impossible hypothesis |
 | `batch_deposit_opens` | `Circuit/TreeUpdateBatch.lean` | an active deposit leaf's `cv_dep` opens to exactly `leaf_public_in` units of `leaf_asset` |
 | `quaternaryInsertLevel_sound` | `Gadgets/Insert.lean` | the level arithmetic is the fill table: `cur` at the digit, frontier left, empty-subtree hash right — and the frontier update is a *different* mux, also proved |
@@ -144,10 +144,10 @@ filled. It is the *contiguity* of the active prefix that rules that out. The sta
 mentions the parity of `actual_count`, which is the whole point of the leaf-granular
 design.
 
-`batch_deposit_opens` is stated per leaf, with no aggregate anywhere in it. The earlier
-pair-granular form bound only `cv_dep[2i] + cv_dep[2i+1]`, which fixes `Σvalue` modulo the
-subgroup order `ell` and not the split between the two leaves; that gap is what the pad-leaf
-constraint existed to close. Binding each leaf on its own removes the gap rather than
+`batch_deposit_opens` is stated per leaf, with no aggregate anywhere in it. An aggregate
+form binding only `cv_dep[2i] + cv_dep[2i+1]` would fix `Σvalue` modulo the subgroup order
+`ell` and not the split between the two leaves. Binding each leaf on its own removes the
+gap rather than
 patching it, and the Lean statement shows the difference: it mentions one leaf.
 
 ### Hash binding †
@@ -168,13 +168,13 @@ patching it, and the Lean statement shows the difference: it mentions one leaf.
 | `transactSat_spend_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable by a transaction that actually **moves value** through a non-dummy slot |
 | `transactSat_twoAsset_satisfiable` | `Proofs/Completeness.lean` | …and by one moving **two distinct assets** with a non-zero public input |
 | `spentReal_witness` | `Proofs/Completeness.lean` | `SpentReal` is inhabited, so `spentNote_sound`'s `is_dummy = 0` case is reachable |
+| `transact3x3Sat_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable at `Transact(10,3,3)`, **the deployed shape** |
+| `batchSat_satisfiable` | `Proofs/BatchCompleteness.lean` | `BatchSat` is satisfiable at `TreeUpdateBatch(10,4)`, so the batch results are not vacuous either |
+| `batchSat_partial_batch` | `Proofs/BatchCompleteness.lean` | …by a batch committing **three** leaves into four slots, so the padding constraints and both muxes are exercised rather than satisfied trivially |
 
-All three satisfying assignments are built at the `2x2` shape. `transact3x3_sound` is
-therefore proved but **not** shown non-vacuous: nothing here exhibits a satisfying
-assignment of `Transact(10,3,3)` — the deployed shape. Its hypotheses are
-believed satisfiable for the same reasons the `2x2` ones are — the constructions are
-shape-generic apart from the concrete slot arithmetic — but that is an expectation, not a
-theorem. See [What is not proved](#what-is-not-proved).
+The first four assignments are built at the `2x2` shape; `transact3x3Sat_satisfiable` repeats
+the padding construction at the deployed one, so `transact3x3_sound` is non-vacuous too. The
+batch witness lives in `Proofs/BatchCompleteness.lean`.
 
 ### Assignments with no satisfying witness
 
@@ -194,11 +194,13 @@ theorem. See [What is not proved](#what-is-not-proved).
 
 Two independent questions hide under that word, and both need an answer.
 
-**Is the hypothesis satisfiable?** Yes, three times over. `transactSat_satisfiable`
+**Is the hypothesis satisfiable?** Yes, several times over. `transactSat_satisfiable`
 constructs the degenerate-but-legal padding transaction; `transactSat_spend_satisfiable` one
 that actually spends, with a non-dummy input, a real Merkle path, a non-zero scalar
 multiplication and a balance whose sums are not all zero; `transactSat_twoAsset_satisfiable`
 one whose five balance candidates are not all the same asset.
+`transact3x3Sat_satisfiable` repeats the first at the deployed `3x3` shape, and
+`batchSat_satisfiable` covers `TreeUpdateBatch(10, 4)` with a partially-filled batch.
 
 This matters because `A → B` is trivially true when `A` is unsatisfiable, so a modelling slip
 that over-constrains the system would fail silently. The spending witness additionally makes
@@ -250,14 +252,6 @@ development may derive conservation from the point equation.
   chain for any coefficient vector, but the batch layout (`4 + 6·MAX_L`) is pinned against
   `PubInputs.sol` by `src/test/tree_update_batch.test.ts`, not in Lean. `dump-layout.sh`
   covers the transact layouts only.
-* **Non-vacuity of the batch results.** `Proofs/Completeness.lean` exhibits satisfying
-  assignments for the transact circuit only; no `BatchChainSat` witness is constructed, so
-  read literally the batch theorems could be vacuous. The circuit is exercised concretely by
-  `src/test/tree_update_batch.test.ts` instead.
-* **Non-vacuity at the `3x3` shape.** Soundness is proved for both instantiated shapes, but
-  the three satisfying assignments in `Proofs/Completeness.lean` are all built at `2x2`. Read
-  literally, `transact3x3_sound` could be vacuous — and `3x3` is the shape actually deployed,
-  so this gap sits on the live path, not on a spare one.
 * **Full layout parity against the SDK for `3x3`.** `dump-layout.sh` pins both layouts
   against Lean, and `src/test/formal/layout_parity.test.ts` pins each published vector to its
   Lean dump for both shapes. The hand-written sentinel-per-field table in that test, which is
@@ -291,14 +285,16 @@ prover may choose freely in a way that reaches `y`.
 | Artifact | Wires | Verdict |
 |---|---|---|
 | `--O0` build, as Picus recommends | 158,793 | **properly constrained** (exit `8` = `safe`) |
-| deployed `build/2x2.r1cs`, circom default `--O1` | 70,171 | **properly constrained** (exit `8` = `safe`) |
+| `build/2x2.r1cs`, circom default `--O1` | 70,171 | **properly constrained** (exit `8` = `safe`) |
 
 Both verdicts came from the propagation phase alone — the `binary01`, `linear`, `basis2`,
 `aboz` and `bim` lemmas determined every signal without a single SMT query, which is what
 one expects from a circuit assembled entirely out of well-understood circomlib gadgets. Each
-run took under 90 seconds.
+run took under 90 seconds. Both wire counts are from the circuit revision current when the
+run was recorded; re-run `just picus` after a circuit change rather than reading them as live.
 
-Reproduce with `just picus` (needs Docker; the image is ~4.5 GB and is not part of CI).
+Reproduce with `just picus` (needs Docker; the image is ~4.5 GB). `.github/workflows/picus.yml`
+runs `just picus-all` nightly over all three shapes; it does not run on pull requests.
 
 Two caveats worth stating precisely:
 
@@ -358,9 +354,9 @@ outside it: it imports the finished development and reports on it, which is why
 ```mermaid
 flowchart BT
     MODEL["<b>Model</b><br/>Field · Bits · Poseidon · Jubjub<br/><i>ambient objects; no circom counterpart</i>"]
-    GADGETS["<b>Gadgets</b><br/>Comparators · Common · Note · PolyEval<br/>Balance · Merkle · ValueCommit · PointBalance<br/><i>one module per circom template</i>"]
-    CIRCUIT["<b>Circuit</b><br/>Spent · Output · Witness · Transact<br/><i>the transact circuit itself</i>"]
-    PROOFS["<b>Proofs</b><br/>Completeness · Rejection<br/><i>results about the finished system</i>"]
+    GADGETS["<b>Gadgets</b><br/>Comparators · Common · Note · PolyEval<br/>Balance · Merkle · Insert · ValueCommit · PointBalance<br/><i>one module per circom template</i>"]
+    CIRCUIT["<b>Circuit</b><br/>Spent · Output · Witness · Transact · TreeUpdateBatch<br/><i>the circuits themselves</i>"]
+    PROOFS["<b>Proofs</b><br/>Completeness · BatchCompleteness · Rejection<br/><i>results about the finished system</i>"]
     META["<b>Meta</b><br/>Assumptions · AxiomGuard"]
 
     GADGETS --> MODEL
@@ -385,15 +381,18 @@ lean/
       PolyEval             Horner soundness and Schwartz-Zippel binding
       Balance              RangeCheck64, DummyZeroValue, per-asset conservation
       Merkle               MerkleLevel4 / MerkleRoot / MerkleProofOrDummy
+      Insert               QuaternaryInsert and the frontier update
       ValueCommit          ValueScalarMul, MulH, opening cv to the note's value
       PointBalance         the proved negative result
-    Circuit/               the transact circuit itself
+    Circuit/               the circuits themselves
       Spent                SpentNote
       Output               OutputNote
       Witness              TxWitness and the 31-slot public-input layout
       Transact             TransactSat, TxWellFormed, TxBinding, transact_sound
+      TreeUpdateBatch      BatchChainSat, BatchDepositSat, the batch chain results
     Proofs/                results about the finished system
-      Completeness         three concrete satisfying assignments (non-vacuity)
+      Completeness         concrete satisfying assignments for transact (non-vacuity)
+      BatchCompleteness    the same for tree_update_batch, at a partially-filled batch
       Rejection            malformed transactions that provably have none
     Meta/                  about the development rather than the circuit
       Assumptions          the trusted base, documented and printed

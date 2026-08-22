@@ -24,7 +24,7 @@ satisfies the point equation and violates per-asset conservation for asset 1.
 
 Consequence for the rest of the development: conservation is proved **only** from
 `perAssetValueBalance_nat`, and no theorem is allowed to appeal to the point equation.
-The runtime counterpart of this proof is `src/test/transact.test.ts:847`.
+The runtime counterpart of this proof is `src/test/transact/multi_asset.test.ts`.
 -/
 
 namespace Lelantos
@@ -52,7 +52,7 @@ theorem assetGen_collinear : assetGen 1 + assetGen 3 = (2 : ZMod ell) • assetG
 /-! ## The counterexample
 
 One unit of asset 1 and one unit of asset 3 in; two units of asset 2 out, plus an empty
-second output slot so the shape is the **deployed** `Transact(10, 2, 2)` rather than a
+second output slot so the shape is a shipped one, `Transact(10, 2, 2)`, rather than a
 convenient 2-in/1-out variant. Nothing public.
 -/
 
@@ -112,8 +112,10 @@ theorem attack_violates_conservation :
   exact one_ne_zero h
 
 /-- **`PerAssetPointBalance` is not sound as a conservation check.** There is an assignment
-satisfying the point equation whose per-asset value balance fails — at the deployed
+satisfying the point equation whose per-asset value balance fails — at a full
 `(N_IN, N_OUT) = (2, 2)` shape, so no reader can dismiss it as an artefact of the sizes.
+The attack is shape-generic; `2x2` is used because the concrete slot arithmetic is smallest
+there.
 
 This is why `PerAssetValueBalance` exists and why nothing downstream may substitute the
 point equation for it. -/

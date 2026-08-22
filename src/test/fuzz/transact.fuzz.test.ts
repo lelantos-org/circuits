@@ -8,8 +8,8 @@ import {
     arbBalancedSplit, arbNsk, arbField, MAX_VALUE,
     fcParamsFor, arbDistinctBigInt,
 } from "./arbitraries";
+import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 
-const DEPTH = 10;
 const CIRCUIT = srcPath("2x2.circom");
 const fcParams = fcParamsFor("TRANSACT");
 
@@ -23,7 +23,7 @@ const BALANCED_EXAMPLES = [
 ];
 
 describe("transact_2x2 [fuzz]", function () {
-    this.timeout(900000);
+    this.timeout(TIMEOUT_HEAVY);
 
     let circuit: any;
     let tx: TxBuilder;

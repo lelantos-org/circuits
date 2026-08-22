@@ -5,6 +5,7 @@ ROOT := justfile_directory()
 BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
 PTAU_URL_BASE := "https://storage.googleapis.com/zkevm/ptau"
+PTAU16 := "powersOfTau28_hez_final_16.ptau"
 PTAU17 := "powersOfTau28_hez_final_17.ptau"
 PTAU20 := "powersOfTau28_hez_final_20.ptau"
 
@@ -19,12 +20,7 @@ default:
 # === 2x2 circuit ===
 
 # Compile 2x2.circom -> r1cs + wasm + sym, print constraint count.
-compile:
-    mkdir -p "{{BUILD}}"
-    echo "==> Compiling {{ROOT}}/src/2x2.circom"
-    circom "{{ROOT}}/src/2x2.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
-    echo "==> Constraint info"
-    npx snarkjs r1cs info "{{BUILD}}/2x2.r1cs"
+compile: (_compile "2x2")
 
 # Phase-2 trusted setup (single-contributor; INSECURE — prototype only).
 setup:
@@ -49,24 +45,20 @@ prove input="":
     echo "==> Verify"; \
     npx snarkjs groth16 verify "{{BUILD}}/verification_key.json" "{{BUILD}}/public.json" "{{BUILD}}/proof.json"
 
+# Compile, run the prototype ceremony, then prove and verify one witness.
 all: compile setup prove
 
-# === 3x3 circuit — THE DEPLOYED TRANSACT SHAPE ===
+# === 3x3 circuit — the deployed transact shape ===
 #
-# `Transact(10, 3, 3)` — 3 shielded inputs x 3 shielded outputs (~103k
-# constraints, vs ~69k for 2x2; both fit PTAU17). Published as a package
-# artifact AND wired on-chain: `PubInputs.sol` carries the 42-slot compress for
-# this layout, `TRANSACT_IN = TRANSACT_OUT = 3`, and the exported verifier is
-# contracts/src/verifiers/Verifier.sol. Use `rebuild-3x3` to regenerate and
-# sync it. See src/3x3.circom.
+# `Transact(10, 3, 3)`: 3 shielded inputs x 3 shielded outputs. Constraint
+# counts are in budget.json. Published as a package artifact and wired on-chain:
+# `PubInputs.sol` carries the 42-slot compress for this layout,
+# `TRANSACT_IN = TRANSACT_OUT = 3`, and the exported verifier is
+# contracts/src/verifiers/Verifier.sol. Use `rebuild-3x3` to regenerate and sync
+# it. See src/3x3.circom.
 
 # Compile 3x3.circom -> r1cs + wasm + sym, print constraint count.
-compile-3x3:
-    mkdir -p "{{BUILD}}"
-    echo "==> Compiling {{ROOT}}/src/3x3.circom"
-    circom "{{ROOT}}/src/3x3.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
-    echo "==> Constraint info"
-    npx snarkjs r1cs info "{{BUILD}}/3x3.r1cs"
+compile-3x3: (_compile "3x3")
 
 # Phase-2 trusted setup for 3x3 (single-contributor; INSECURE — prototype only).
 setup-3x3:
@@ -81,30 +73,31 @@ setup-3x3:
     npx snarkjs zkey export solidityverifier "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/Verifier3x3.sol"
     echo "==> Done. Verifier at {{BUILD}}/Verifier3x3.sol — run `just rebuild-3x3` to sync it"
 
-# Build all 3x3 artifacts WITHOUT the contracts/ sync. Used by `package`
-# (publish CI has no sibling contracts checkout). Local circuit authors should
-# prefer `rebuild-3x3`, which also pushes the verifier into contracts/.
+# Used by `package`, since publish CI has no sibling contracts checkout. Local
+# circuit authors should prefer `rebuild-3x3`, which also pushes the verifier
+# into contracts/.
+
+# Build all 3x3 artifacts WITHOUT the contracts/ sync.
 build-artifacts-3x3: compile-3x3 setup-3x3
 
 # === tree_update_batch circuit ===
 
 # Compile tree_update_batch.circom -> r1cs + wasm + sym, print constraint count.
-compile-batch:
-    mkdir -p "{{BUILD}}"
-    echo "==> Compiling {{ROOT}}/src/tree_update_batch.circom"
-    circom "{{ROOT}}/src/tree_update_batch.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
-    echo "==> Constraint info"
-    npx snarkjs r1cs info "{{BUILD}}/tree_update_batch.r1cs"
+compile-batch: (_compile "tree_update_batch")
+
+# tree_update_batch at MAX_L=4 has 57,106 constraints and so uses the 2^16 FFT
+# domain and PTAU16, with 8,430 constraints of headroom. A leaf slot costs
+# roughly 12k constraints, and `just budget` pins the domain so growth past it
+# fails CI rather than doubling proving time.
+#
+# 2x2 (44,406) and 3x3 (65,523) also fit 2^16, but their setup recipes still
+# fetch PTAU17; switching them is a separate change, and 3x3 clears 2^16 by 13.
 
 # Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
-# tree_update_batch (MAX_L=8) has ~131k constraints -> 2^17 FFT domain, so it
-# uses PTAU17 like 2x2/3x3. It needed PTAU20 (~3GB) at MAX_L=16 (~253k, 2^18).
-# Headroom is thin: 130,607 of 131,072. Adding per-leaf constraints pushes it
-# back to PTAU20 and roughly doubles proving time.
 setup-batch:
-    just _fetch-ptau "{{PTAU17}}"
+    just _fetch-ptau "{{PTAU16}}"
     echo "==> Phase-2 setup (tree_update_batch)"
-    npx snarkjs groth16 setup "{{BUILD}}/tree_update_batch.r1cs" "{{PTAU_DIR}}/{{PTAU17}}" "{{BUILD}}/tree_update_batch_0.zkey"
+    npx snarkjs groth16 setup "{{BUILD}}/tree_update_batch.r1cs" "{{PTAU_DIR}}/{{PTAU16}}" "{{BUILD}}/tree_update_batch_0.zkey"
     echo "==> Single contribution (PROTOTYPE ONLY)"
     npx snarkjs zkey contribute "{{BUILD}}/tree_update_batch_0.zkey" "{{BUILD}}/tree_update_batch_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
     echo "==> Export verification key"
@@ -128,31 +121,37 @@ all-tree: compile compile-batch setup setup-batch
 
 # === rebuild + sync into contracts/ ===
 
-# Build all 2x2 artifacts. Never syncs into contracts/: 2x2 is NOT the deployed
-# transact shape, so `build/Verifier.sol` must not reach
-# contracts/src/verifiers/Verifier.sol — that path holds the 3x3 verifier, and
-# overwriting it with this one silently swaps the deployed circuit for a
-# different one under an unchanged filename.
+# Never syncs into contracts/: 2x2 is not the deployed transact shape, so
+# `build/Verifier.sol` must not reach contracts/src/verifiers/Verifier.sol.
+# That path holds the 3x3 verifier, and overwriting it would swap the deployed
+# circuit under an unchanged filename.
 #
-# WARNING: re-runs the prototype single-contributor ceremony (INSECURE
-# — see `setup` recipe). Existing proofs become invalid after.
+# WARNING: re-runs the prototype single-contributor ceremony (INSECURE — see the
+# `setup` recipe). Existing proofs become invalid.
+
+# Compile + trusted setup for 2x2. Never synced into contracts/.
 build-artifacts: compile setup
 
-# Full rebuild of the 2x2 shape after circuit edits. No contracts/ sync — see
-# `build-artifacts` above, and use `rebuild-3x3` for the deployed shape.
+# No contracts/ sync — see `build-artifacts` above, and use `rebuild-3x3` for
+# the deployed shape.
+
+# Full rebuild of the 2x2 shape after circuit edits.
 rebuild-2x2: build-artifacts
     @just _rebuild-report "2x2" "{{BUILD}}/2x2.r1cs" "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json" "(not synced — 2x2 is not deployed)"
 
 # Full rebuild of the DEPLOYED transact shape after circuit edits: recompile ->
 # trusted setup -> sync Verifier3x3.sol into contracts/src/verifiers/Verifier.sol.
 # Use after changes to 3x3.circom or any lib/*.circom.
+
+# Full rebuild of the DEPLOYED transact shape, syncing the verifier to contracts/.
 rebuild-3x3: build-artifacts-3x3
     @echo "==> Syncing Verifier3x3.sol -> {{CONTRACTS_VERIFIER}}"
     cp "{{BUILD}}/Verifier3x3.sol" "{{CONTRACTS_VERIFIER}}"
     @just _rebuild-report "3x3" "{{BUILD}}/3x3.r1cs" "{{BUILD}}/3x3_js/3x3.wasm" "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/3x3_verification_key.json" "{{CONTRACTS_VERIFIER}}"
 
-# Full rebuild for tree_update_batch circuit + sync TreeUpdateBatchVerifier.sol
-# into contracts/src/verifiers/.
+# Syncs TreeUpdateBatchVerifier.sol into contracts/src/verifiers/.
+
+# Full rebuild of the tree_update_batch shape after circuit edits.
 rebuild-batch: compile-batch setup-batch
     @echo "==> Patching contract name (Groth16Verifier -> TreeUpdateBatchGroth16Verifier)"
     @sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' "{{BUILD}}/TreeUpdateBatchVerifier.sol" > "{{BUILD}}/TreeUpdateBatchVerifier.patched.sol"
@@ -174,21 +173,38 @@ test-unit:
 test-fuzz:
     npm run test:fuzz
 
+# === constraint budget ===
+
+# Every shape must fit its FFT domain, and its exact count must match
+# budget.json — a change lands as a diff a reviewer approves rather than
+# drifting silently. Needs the r1cs, so run after `compile*`.
+
+# Check every shape against its constraint budget.
+budget:
+    @echo "==> Constraint budget"
+    NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/check-budget.mjs"
+
+# Accept new constraint counts into budget.json. Review the diff.
+budget-update:
+    NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/check-budget.mjs" --update
+
 # === golden vectors ===
 
-# Regenerate vectors/ — the cross-repo contract consumed by @lelantos-org/sdk.
-#
 # Every `y` is read out of a witness produced by the compiled circuit and
 # compared against the TypeScript Horner evaluation; the generator refuses to
-# write if they disagree. That is what makes these a circuit contract rather
-# than a TS-to-TS snapshot. Slot names come from lean/expected/layout-2x2.txt,
-# so run `just lean-update` first if the layout changed.
+# write on disagreement, so these are a circuit contract rather than a
+# TypeScript snapshot. Slot names come from
+# lean/expected/layout-<shape>.txt, so run `just lean-update` first if the
+# layout changed.
+
+# Regenerate vectors/ — the cross-repo contract consumed by @lelantos-org/sdk.
 vectors:
     NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/gen-vectors.ts"
 
-# Regenerate into a temp dir and diff against the committed files.
 # Run in CI: a circuit or layout change that was not accompanied by
 # `just vectors` fails here.
+
+# Regenerate into a temp dir and diff against the committed files.
 vectors-check:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -210,22 +226,22 @@ vectors-check:
 # circuit instead of being waived tree-wide. Re-check
 # `grep -rn '<--' src/lib src/*.circom` before adding any waiver back.
 #
-# Suppressed analysis passes (each reviewed; rationale below). To audit, run
-# without `--allow` flags and confirm every reported site falls under one of
-# the documented categories. Re-evaluate whenever the listed sites change.
+# Suppressed analysis passes, with the rationale for each below. To audit, run
+# without the `--allow` flags and confirm every reported site falls under one of
+# these categories. Re-evaluate whenever the listed sites change.
 #
 #   CS0010 non-strict-binary-conversion
 #       Each Num2Bits site uses n < 254 bits, so 2^n < p and no aliasing is
 #       possible (the field-element decomposition is unique).
 #       Sites: balance.circom / asset_gen.circom (64 bits),
-#              value_commit.circom (253 bits), common.circom (2 bits),
-#              tree_update_batch.circom (COUNT_BITS=4; 2*DEPTH bits,
-#              DEPTH<=32 ⇒ n<=64).
+#              value_commit.circom (RCV_BITS = 252), common.circom (2 bits),
+#              tree_update_batch.circom (COUNT_BITS = 2; 2*DEPTH bits,
+#              DEPTH <= 32 ⇒ n <= 64).
 #
 #   CS0014 unconstrained-less-than
 #       tree_update_batch.circom `LessThan(COUNT_BITS+1)` with inputs `k`
 #       (compile-time loop var, becomes a constant in R1CS) and `actual_count`
-#       (bounded by `Num2Bits(COUNT_BITS=4)` in step 1, so <= 2^4).
+#       (bounded by `Num2Bits(COUNT_BITS=2)` in step 1, so <= 2^2).
 #
 #   CS0018 unused-output-signal
 #       Intentional: components are instantiated for their internal constraints,
@@ -234,8 +250,8 @@ vectors-check:
 #           threaded out; deposit-branch rH is bound internally by ValueCommit.
 #         - QuaternaryInsertLevel/MerkleLevel4: `PathIndexSelectors.bits`
 #           selectors output is consumed; `bits` is the redundant view.
-#       TreeUpdateBatch no longer appears here: with one insert per leaf,
-#       every `ins[k].root` feeds the running-root mux.
+
+# Static analysis over src/lib and the top-level circuits (needs circomspect).
 lint:
     @command -v circomspect >/dev/null || { echo "circomspect not found. Install: cargo install circomspect"; exit 1; }
     @test -z "$(grep -rl -- '<--' "{{ROOT}}/src/lib" "{{ROOT}}/src"/*.circom || true)" \
@@ -243,6 +259,7 @@ lint:
     circomspect "{{ROOT}}/src/lib" "{{ROOT}}/src"/*.circom -L "{{ROOT}}/node_modules" \
         --allow CS0010 --allow CS0014 --allow CS0018
 
+# Delete build/ — artifacts, keys and verifiers alike.
 clean:
     rm -rf "{{BUILD}}"
 
@@ -260,9 +277,9 @@ lean-check:
 lean-update:
     cd "{{ROOT}}/lean" && ./scripts/check-axioms.sh --update && ./scripts/dump-layout.sh --update
 
-# Answers a question the Lean proofs cannot: they are about the *modeled* constraint
-# system, while Picus reads the R1CS circom actually emitted. Not part of `lean-check`
-# or CI — it needs Docker and a 4.5 GB image, built once with:
+# Complements the Lean proofs, which are about the modeled constraint system,
+# whereas Picus reads the R1CS circom emits. Not part of `lean-check` or CI: it
+# needs Docker and a 4.5 GB image, built once with:
 #
 #   docker build -t picus:local https://github.com/Veridise/Picus.git
 #
@@ -347,6 +364,8 @@ picus-all STRONG="":
 # Depends on the `build-artifacts*` recipes (NOT `rebuild-3x3`) so the publish
 # workflow does not require a sibling contracts/ checkout for the Verifier.sol
 # sync step.
+
+# Full rebuild + publish gate. RE-RUNS BOTH CEREMONIES, invalidating existing proofs.
 package: build-artifacts build-artifacts-3x3
     @just package-check
 
@@ -362,6 +381,8 @@ package: build-artifacts build-artifacts-3x3
 #
 # Missing artifacts are left to check-artifacts.ts to report, which names each
 # one and how to rebuild it.
+
+# Run the publish gate against whatever is already in build/. No compile, no ceremony.
 package-check:
     @echo "==> Staging build/2x2.wasm + build/3x3.wasm (no rebuild)"
     @[ -f "{{BUILD}}/2x2_js/2x2.wasm" ] && cp "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2.wasm" || echo "    skip: build/2x2_js/2x2.wasm absent"
@@ -370,6 +391,17 @@ package-check:
     NODE_OPTIONS="--import tsx/esm" node scripts/check-artifacts.ts
 
 # === internal helpers (prefixed `_`) ===
+
+# Compile one src/<circuit>.circom to r1cs + wasm + sym and print its
+# constraint count. The three named `compile*` recipes are thin wrappers so the
+# flags cannot drift between the shapes — the constraint budget compares them
+# against one another.
+_compile circuit:
+    mkdir -p "{{BUILD}}"
+    echo "==> Compiling {{ROOT}}/src/{{circuit}}.circom"
+    circom "{{ROOT}}/src/{{circuit}}.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
+    echo "==> Constraint info"
+    npx snarkjs r1cs info "{{BUILD}}/{{circuit}}.r1cs"
 
 _fetch-ptau file:
     mkdir -p "{{PTAU_DIR}}"

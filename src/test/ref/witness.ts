@@ -16,8 +16,11 @@ export interface ClueInputs {
     clueRy: Field;
 }
 
+// Declared as type aliases rather than interfaces so they carry an implicit
+// index signature, and so satisfy `CircuitInput` in lib/circuit.ts without a cast.
+
 /** Public-input slots, in PubInputs.compress(Transact) order. */
-export interface CircomPublicInputs {
+export type CircomPublicInputs = {
     merkle_root: string;
     nullifier: string[];
     out_cm: string[];
@@ -37,10 +40,10 @@ export interface CircomPublicInputs {
     out_clue_bits: string[];
     /** Digest over the encrypted-note payloads; final slot. */
     out_aux_digest: string;
-}
+};
 
 /** Full witness: the public slots above plus the private ones. */
-export interface CircomTransactInput extends CircomPublicInputs {
+export type CircomTransactInput = CircomPublicInputs & {
     /** Fiat-Shamir challenge over the logical PIs. */
     z: string;
 
@@ -63,7 +66,7 @@ export interface CircomTransactInput extends CircomPublicInputs {
     out_rcm: string[];
     out_rcv: string[];
     out_rcv_dep: string[];
-}
+};
 
 export interface BuildOpts {
     publicAssetId: Field;
@@ -183,7 +186,7 @@ export interface DummyBlinders {
 const DUMMY_RCV_DOMAIN = 0x647563n; // "duc"
 const DUMMY_RCVDEP_DOMAIN = 0x647564n; // "dud"
 
-// Keep the result under 2^253, the width MulH's Num2Bits enforces on rcv.
+// Keep the result under 2^252, the width MulH's Num2Bits(RCV_BITS) enforces on rcv.
 const BLINDER_MASK = (1n << 252n) - 1n;
 
 /**
@@ -202,8 +205,8 @@ export function deterministicDummyBlinders(P: Poseidon, rho: Field): DummyBlinde
  *
  * nf = Poseidon(TAG_NF, nk, rho, cm) with nk = Poseidon(TAG_NK, 0); a fresh
  * `rho` keeps nf distinct from prior dummies and from any real spend. `cm` must
- * be the commitment SpentNote actually recomputes from the dummy's zero fields —
- * the circuit feeds it into the nullifier, so a placeholder 0 would fail.
+ * be the commitment SpentNote recomputes from the dummy's zero fields: the
+ * circuit feeds it into the nullifier, so a placeholder 0 would fail.
  *
  * `blinders` defaults to a derivation from `rho`. Blinders must differ between
  * dummies, since `cv = 0·gen + rcv·H` with a shared `rcv` is the same point in

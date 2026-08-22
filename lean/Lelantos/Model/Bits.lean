@@ -102,4 +102,53 @@ theorem num2Bits_sound {n : ℕ} {v : F} {bs : ℕ → F}
   have hval : v.val = bitsNat bs n := by rw [hv, ZMod.val_natCast_of_lt hlt]
   exact ⟨hval, hval ▸ bitsNat_lt bs n⟩
 
+/-! ## A canonical satisfying assignment
+
+`Num2BitsSat` is a constraint, so every result consuming it is conditional on something
+satisfying it. These exhibit the obvious witness for an arbitrary natural below `2 ^ n`,
+which is what the completeness proofs need in order to instantiate `LessThan`, the
+quaternary-insert chain and the batch circuit at concrete indices.
+-/
+
+/-- Bit `i` of `m` as a field element — the little-endian decomposition `Num2Bits` emits,
+so `natBits m i` is what the circuit calls `out[i]`. -/
+def natBits (m : ℕ) : ℕ → F := fun i => ((m / 2 ^ i % 2 : ℕ) : F)
+
+theorem natBits_isBit (m i : ℕ) : IsBit (natBits m i) := by
+  have h : m / 2 ^ i % 2 = 0 ∨ m / 2 ^ i % 2 = 1 := by omega
+  rcases h with h | h <;> simp [natBits, h, IsBit]
+
+/-- Splitting the low `n + 1` bits of `m` into its low `n` bits and bit `n`. Pure `Nat`
+arithmetic; it exists to carry the induction in `natBits_recompose`. -/
+theorem mod_two_pow_succ (m n : ℕ) :
+    m % 2 ^ (n + 1) = m % 2 ^ n + 2 ^ n * (m / 2 ^ n % 2) := by
+  have hdvd : (2 : ℕ) ^ n ∣ 2 ^ (n + 1) := pow_dvd_pow 2 (Nat.le_succ n)
+  have h1 : m % 2 ^ (n + 1) % 2 ^ n = m % 2 ^ n := Nat.mod_mod_of_dvd m hdvd
+  have h2 : m / 2 ^ n % 2 = m % 2 ^ (n + 1) / 2 ^ n := by
+    rw [← Nat.mod_mul_right_div_self, ← pow_succ]
+  have h3 := Nat.div_add_mod (m % 2 ^ (n + 1)) (2 ^ n)
+  rw [h2, ← h1]
+  omega
+
+/-- `natBits` recomposes to the low `n` bits of `m`. -/
+theorem natBits_recompose (m n : ℕ) :
+    ((m % 2 ^ n : ℕ) : F) = ∑ i ∈ Finset.range n, natBits m i * (2 : F) ^ i := by
+  induction n with
+  | zero => simp [Nat.mod_one]
+  | succ k ih =>
+    rw [Finset.sum_range_succ, ← ih, mod_two_pow_succ m k]
+    push_cast [natBits]
+    ring
+
+/-- **`Num2Bits(n)` is satisfiable at every value it admits.** The counterpart to
+`num2Bits_sound`: that reads a decomposition off a satisfying assignment, this exhibits one.
+-/
+theorem num2Bits_witness {n m : ℕ} (h : m < 2 ^ n) :
+    Num2BitsSat n ((m : ℕ) : F) (natBits m) where
+  bits i _ := natBits_isBit m i
+  recomposition := by
+    have hm : m % 2 ^ n = m := Nat.mod_eq_of_lt h
+    have := natBits_recompose m n
+    rwa [hm] at this
+
 end Lelantos

@@ -4,22 +4,21 @@ import { fileURLToPath } from "url";
 
 import { expect } from "chai";
 
-import { Poseidon, MerkleTree, Field } from "./helpers";
-import { fixturePath, loadCircuit } from "./lib/circuit";
+import { Poseidon, MerkleTree, TAG_MERKLE, Field } from "./helpers";
+import { fixturePath, loadCircuit, type CircuitTester } from "./lib/circuit";
 import { merkleInputJson } from "./lib/inputs";
 import { expectWitnessFails, witnessMatchesRoot } from "./lib/expect";
+import { ARITY, TIMEOUT_CIRCUIT, TIMEOUT_FAST } from "./lib/constants";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const TAG_MERKLE: Field = 5n;
-const ARITY = 4;
 const DEPTH = 2; // 16 leaves
 const WRAPPER = fixturePath("test_merkle_d2.circom");
 
 describe("quaternary merkle tree", function () {
-    this.timeout(180000);
+    this.timeout(TIMEOUT_CIRCUIT);
 
-    let circuit: any;
+    let circuit: CircuitTester;
     let P: Poseidon;
 
     before(async () => {
@@ -69,7 +68,7 @@ describe("quaternary merkle tree", function () {
     });
 
     it("MerkleLevel4 places `cur` at every path_index slot correctly", async () => {
-        // Single-level check via depth-2 wrapper: pin the second level so we can
+        // Single-level check via the depth-2 wrapper: pin the second level to
         // isolate level-0 placement behaviour. Use distinct sibling values to
         // detect any off-by-one in the slot-routing logic.
         const leaf = 42n;
@@ -146,12 +145,12 @@ describe("quaternary merkle tree", function () {
 });
 
 // EMPTY_SUBTREE(d) in lib/common.circom is a hardcoded table rather than an
-// in-circuit Poseidon chain, because circom does not constant-fold Poseidon and
-// tree_update_batch instantiates EmptySubtreeHashes 17 times. These tests are
-// what make the table safe: they read the constants out of the circom source
-// itself, so a typo fails CI instead of silently shifting every empty subtree.
+// in-circuit Poseidon chain, since circom does not constant-fold Poseidon.
+// These tests read the constants out of the circom source and recompute the
+// chain, so a typo in the table fails CI rather than shifting every empty
+// subtree.
 describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
-    this.timeout(60000);
+    this.timeout(TIMEOUT_FAST);
 
     // Genesis root asserted by CommitmentTree.EMPTY_ROOT in the contracts repo.
     const CONTRACT_EMPTY_ROOT =

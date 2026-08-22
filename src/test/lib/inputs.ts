@@ -1,8 +1,8 @@
-// Plain-JSON input shapers shared by spec + fuzz tests.
+// Plain-JSON input shapers shared by the spec and fuzz suites.
 //
 // These translate the camelCase witness the tests build into the snake_case
-// signal names circom reads. circom reads positionally, so the key set is part
-// of the contract with the circuit.
+// signal names circom reads. The key set is part of the contract with the
+// circuit.
 
 import { flattenBatch, type Field, type Point } from "../helpers";
 
@@ -22,9 +22,9 @@ export function merkleInputJson(leaf: Field, pathElements: Field[][], pathIndice
 }
 
 /**
- * The PolyEval-bound fields of a TreeUpdateBatch witness — the "logical public
- * inputs". Split out from the rest because the coefficients over these are what
- * derives `z`, so they must be shapeable before `z` exists.
+ * The PolyEval-bound fields of a TreeUpdateBatch witness: the logical public
+ * inputs. Separate from the rest because `z` is derived from the coefficients
+ * over them, so they must be shapeable before `z` exists.
  */
 export interface TreeUpdateBatchPublicArgs {
     oldRoot: Field;
@@ -46,8 +46,8 @@ export interface TreeUpdateBatchArgs extends TreeUpdateBatchPublicArgs {
 }
 
 // Consumed twice: `treeUpdateBatchInputJson` spreads the result into the object
-// handed to the circuit, and `treeUpdateBatchCoeffs` flattens the same object,
-// so the coefficient vector always describes the evaluated witness.
+// handed to the circuit and `treeUpdateBatchCoeffs` flattens it, so the
+// coefficient vector always describes the evaluated witness.
 function publicJson(a: TreeUpdateBatchPublicArgs) {
     return {
         old_root: a.oldRoot.toString(),
@@ -62,20 +62,27 @@ function publicJson(a: TreeUpdateBatchPublicArgs) {
     };
 }
 
+/**
+ * The circom input object for TreeUpdateBatch.
+ *
+ * Key order is contractual: circom resolves signals by name, but this object is
+ * serialized into `vectors/` and the SDK pins each file by SHA-256. Reordering
+ * these keys breaks the published contract even though the witness is identical.
+ */
 export function treeUpdateBatchInputJson(a: TreeUpdateBatchArgs) {
     return {
         z: a.z.toString(),
         ...publicJson(a),
-        rcv: a.rcv.map(r => r.toString()),
         frontier_in: a.frontier.map(lvl => lvl.map(s => s.toString())),
+        rcv: a.rcv.map(r => r.toString()),
     };
 }
 
 /**
  * PolyEval coefficients for a batch witness: 4 + 6·MAX_L of them.
  *
- * The layout is defined once, in `ref/compress.ts :: flattenBatch`, which is
- * also the source `scripts/gen-vectors.ts` publishes vectors from.
+ * The layout is defined in `ref/compress.ts :: flattenBatch`, which is also
+ * what `scripts/gen-vectors.ts` publishes vectors from.
  */
 export function treeUpdateBatchCoeffs(a: TreeUpdateBatchPublicArgs): Field[] {
     return flattenBatch(publicJson(a));

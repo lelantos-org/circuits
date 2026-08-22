@@ -1,22 +1,20 @@
 // Pre-publish sanity for @lelantos-org/circuits.
 //
-// Asserts every published artifact exists, falls in a generous size
-// band, and (for vkey) parses as the expected JSON shape. That covers
-// the package `files` whitelist plus the artifacts published only as
-// GitHub release assets (tree_update_batch) — both are built by
-// `just package`, so both are worth gating before a release goes out.
+// Asserts every published artifact exists, falls within a size band, and, for
+// a vkey, parses as the expected JSON shape. Covers the package `files`
+// whitelist plus the artifacts published only as GitHub release assets
+// (tree_update_batch); `just package` builds both.
 //
 // The trusted-setup contribution (`snarkjs zkey contribute`) is
-// non-deterministic — snarkjs mixes fresh `crypto.randomBytes(64)`
-// into the entropy source before applying the user-supplied entropy
-// (see snarkjs `getRandomRng`). So the zkey + vkey SHA-256 differ
-// across every rebuild. We CANNOT pin them at the gate level without
-// either forking snarkjs or committing the zkey to git.
+// non-deterministic: snarkjs mixes fresh `crypto.randomBytes(64)` into the
+// entropy source before applying the user-supplied entropy (see snarkjs
+// `getRandomRng`), so the zkey and vkey SHA-256 differ on every rebuild and
+// cannot be pinned here.
 //
-// Instead: emit per-artifact SHA-256 to stdout (one `name=sha` line
-// each) plus a `circuits-shas` line for GH Actions to pipe into
-// `$GITHUB_STEP_SUMMARY` / release notes. Fail only on
-// missing-file, out-of-range size, or malformed vkey.
+// Instead the gate emits per-artifact SHA-256 to stdout (one `name=sha` line
+// each) plus a `circuits-shas` line for GitHub Actions to pipe into
+// `$GITHUB_STEP_SUMMARY` and the release notes. It fails only on a missing
+// file, an out-of-range size, or a malformed vkey.
 //
 // stdout is a machine interface: `.github/workflows/publish.yml` greps
 // `^<name>=` and `^circuits-shas=`. Keep those two line shapes stable.
@@ -38,18 +36,17 @@ interface ArtifactCheck {
     json?: (value: unknown) => boolean;
 }
 
-/// Size bands are intentionally wide. The 2x2 circuit produces:
-///   - 2x2.wasm           ~5 MB (deterministic from circom; ClueCheck removed)
-///   - 2x2_final.zkey   ~35–45 MB (depends on ceremony randomness)
-///   - verification_key.json ~3 KB (vkey JSON, derived from zkey)
-/// Sizes that fall outside these bands indicate a broken build, not a
-/// new ceremony output.
+/// Size bands are wide by design. The 2x2 circuit produces:
+///   - 2x2.wasm                ~5 MB   (deterministic from circom)
+///   - 2x2_final.zkey          ~35-45 MB (varies with ceremony randomness)
+///   - verification_key.json   ~3 KB   (derived from the zkey)
+/// A size outside these bands indicates a broken build rather than a new
+/// ceremony output.
 const FILES: ArtifactCheck[] = [
     {
-        // Ceiling raised 5 MB -> 6 MB: the witness wasm had grown to 5,054,678 B
-        // and was tripping the gate on an otherwise healthy build. The band is a
-        // broken-build detector, not a size budget — it wants enough headroom to
-        // absorb ordinary circuit growth without a false failure at publish time.
+        // The band is a broken-build detector rather than a size budget, so the
+        // ceiling carries enough headroom to absorb ordinary circuit growth
+        // without failing a healthy build at publish time.
         name: "2x2.wasm",
         path: resolve(BUILD, "2x2.wasm"),
         minBytes: 3_000_000,
@@ -68,7 +65,7 @@ const FILES: ArtifactCheck[] = [
         maxBytes: 15_000,
         json: isGroth16Vkey,
     },
-    /// 3x3 = `Transact(10, 3, 3)`, ~103k constraints against the same PTAU17.
+    /// 3x3 = `Transact(10, 3, 3)`; see budget.json for its constraint count.
     ///
     /// In the package `files` whitelist since 0.8.0, so SDK consumers can
     /// resolve the 3x3 prover artifacts from npm instead of fetching GitHub

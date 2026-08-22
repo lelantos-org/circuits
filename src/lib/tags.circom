@@ -1,7 +1,7 @@
 pragma circom 2.2.3;
 
 // Domain-separation tags. Must stay in sync with sdk/src/crypto/tags.ts;
-// changing a value invalidates every previously issued proof.
+// changing a value invalidates every issued proof.
 //
 // | Tag         | Value | Use                                                  |
 // |-------------|-------|------------------------------------------------------|

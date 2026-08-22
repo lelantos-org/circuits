@@ -86,10 +86,10 @@ structure OutputWellFormed (o : OutputSlot) : Prop where
   Not "some 64-bit number times some point": the scalar is `value`, the range-checked
   signal that `cm` also binds. -/
   cvOpens : o.cv = coords ((o.value.val : ZMod ell) • assetGen o.assetId
-    + blindScalar o.rcvBits • H)
+    + (o.rcv.val : ZMod ell) • H)
   /-- …and so does `cv_dep`, with its own blinding factor and nothing else different. -/
   cvDepOpens : o.cvDep = coords ((o.value.val : ZMod ell) • assetGen o.assetId
-    + blindScalar o.rcvDepBits • H)
+    + (o.rcvDep.val : ZMod ell) • H)
 
 theorem outputNote_sound {o : OutputSlot} (h : OutputNoteSat o) : OutputWellFormed o := by
   have hvc := h.cv_sat
@@ -126,7 +126,7 @@ theorem outputNote_cvDep_same_value {o : OutputSlot} (h : OutputNoteSat o) :
     ∃ r r' : ZMod ell,
       o.cv = coords ((o.value.val : ZMod ell) • assetGen o.assetId + r • H) ∧
       o.cvDep = coords ((o.value.val : ZMod ell) • assetGen o.assetId + r' • H) :=
-  ⟨blindScalar o.rcvBits, blindScalar o.rcvDepBits,
+  ⟨(o.rcv.val : ZMod ell), (o.rcvDep.val : ZMod ell),
     (outputNote_sound h).cvOpens, (outputNote_sound h).cvDepOpens⟩
 
 end Lelantos

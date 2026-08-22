@@ -6,9 +6,9 @@ import { fixturePath, loadCircuit } from "../lib/circuit";
 import { merkleInputJson } from "../lib/inputs";
 import { expectWitnessFails, witnessMatchesRoot } from "../lib/expect";
 import { fcParamsFor, arbField, arbDistinctInt, R } from "./arbitraries";
+import { ARITY, TIMEOUT_HEAVY } from "../lib/constants";
 
 const DEPTH = 2;
-const ARITY = 4;
 const N_LEAVES = ARITY ** DEPTH;
 const WRAPPER = fixturePath("test_merkle_d2.circom");
 const fcParams = fcParamsFor("MERKLE");
@@ -27,7 +27,7 @@ const ROUND_TRIP_EXAMPLES: [bigint[], number][] = [
 ];
 
 describe("quaternary merkle [fuzz]", function () {
-    this.timeout(900000);
+    this.timeout(TIMEOUT_HEAVY);
 
     let circuit: any;
     let P: Poseidon;

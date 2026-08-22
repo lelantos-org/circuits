@@ -93,7 +93,7 @@ theorem quaternaryInsertLevel_sound {cur zero idx curNext : F} {fr b s c fout : 
       rw [h0] at hf0 <;> rw [h1] at hf1 <;> rw [h2] at hf2 <;>
       interval_cases k <;> simp only [frontierUpd, hf0, hf1, hf2] <;> norm_num
 
-/-- The constraint system of `QuaternaryInsert(depth)` — `src/lib/insert.circom:99-128`.
+/-- The constraint system of `QuaternaryInsert(depth)` — `src/lib/insert.circom:98-127`.
 `cur` is the chain of running nodes, `frIn`/`frOut` the per-level frontier arrays. -/
 structure QuaternaryInsertSat (depth : ℕ) (leaf : F) (dig : ℕ → F)
     (frIn : ℕ → ℕ → F) (zeros : ℕ → F) (b s c : ℕ → ℕ → F)
@@ -167,5 +167,71 @@ theorem quaternaryInsert_sound {depth : ℕ} {leaf root : F} {dig zeros : ℕ �
       h.top,
       fun d hd => (quaternaryInsertLevel_sound (h.level d hd)).2.2⟩,
     fun d hd => (quaternaryInsertLevel_sound (h.level d hd)).1⟩
+
+/-! ## A canonical satisfying assignment
+
+Each `QuaternaryInsertLevel` signal is defined here as exactly the expression its constraint
+requires, so every field below is `rfl` up to unfolding. What that buys is the chain: given a
+digit vector, a starting frontier and the empty-subtree fills, the running nodes and the
+outgoing frontier are determined, and `quaternaryInsert_witness` assembles them into a
+satisfying assignment for the whole `QuaternaryInsert(depth)`.
+-/
+
+/-- The four child slots a level presents to `Poseidon`, at digit `t`. One branch per
+`c*_def` field of `QuaternaryInsertLevelSat`, in the same order and citing the same lines:
+`:41-43`, `:50-53`, `:60-63`, `:69-71`. `fill` is the level's empty-subtree hash. -/
+noncomputable def insChildren (t : ℕ) (cur fill : F) (fr : ℕ → F) : ℕ → F := fun k =>
+  if k = 0 then selAt t 0 * cur + (1 - selAt t 0) * fr 0
+  else if k = 1 then selAt t 0 * fill + selAt t 1 * cur + (selAt t 2 + selAt t 3) * fr 1
+  else if k = 2 then (selAt t 0 + selAt t 1) * fill + selAt t 2 * cur + selAt t 3 * fr 2
+  else (selAt t 0 + selAt t 1 + selAt t 2) * fill + selAt t 3 * cur
+
+/-- The frontier this level hands upward, at digit `t` — `:93-95`, which are the same
+expression at each of the three slots. -/
+noncomputable def insFrontierOut (t : ℕ) (cur : F) (fr : ℕ → F) : ℕ → F := fun k =>
+  selAt t k * cur + (1 - selAt t k) * fr k
+
+/-- **One level of `QuaternaryInsert` is satisfiable at every digit.** Every field is `rfl`
+because `insChildren` and `insFrontierOut` are the constraint expressions verbatim; the only
+content is the selector witness. -/
+theorem quaternaryInsertLevel_witness {t : ℕ} (ht : t < 4) (cur fill : F) (fr : ℕ → F) :
+    QuaternaryInsertLevelSat cur fr fill ((t : ℕ) : F) (natBits t) (selAt t)
+      (insChildren t cur fill fr) (merkleNode (insChildren t cur fill fr))
+      (insFrontierOut t cur fr) where
+  selectors := pathIndexSelectors_witness ht
+  c0_def := rfl
+  c1_def := rfl
+  c2_def := rfl
+  c3_def := rfl
+  out_def := rfl
+  fout0_def := rfl
+  fout1_def := rfl
+  fout2_def := rfl
+
+/-- The running node above `leaf` after `d` levels, given the digits, the empty-subtree
+fills and the incoming frontier. `insCur … depth` is the root the insert produces. -/
+noncomputable def insCur (leaf : F) (dig : ℕ → ℕ) (zeros : ℕ → F) (frIn : ℕ → ℕ → F) :
+    ℕ → F
+  | 0 => leaf
+  | d + 1 => merkleNode (insChildren (dig d) (insCur leaf dig zeros frIn d) (zeros d) (frIn d))
+
+/-- **`QuaternaryInsert(depth)` is satisfiable**, for any leaf, any quaternary digit vector,
+any fills and any incoming frontier.
+
+The arguments after `zeros` are the derived signals, in the order `QuaternaryInsertSat`
+declares them: the digit vector as field elements, the incoming frontier, the fills, then
+the per-level selector bits, one-hot selectors, child vectors, running nodes, outgoing
+frontier, and finally the root. -/
+theorem quaternaryInsert_witness {depth : ℕ} (leaf : F) (dig : ℕ → ℕ)
+    (hdig : ∀ d, dig d < 4) (zeros : ℕ → F) (frIn : ℕ → ℕ → F) :
+    QuaternaryInsertSat depth leaf (fun d => ((dig d : ℕ) : F)) frIn zeros
+      (fun d => natBits (dig d)) (fun d => selAt (dig d))
+      (fun d => insChildren (dig d) (insCur leaf dig zeros frIn d) (zeros d) (frIn d))
+      (insCur leaf dig zeros frIn)
+      (fun d => insFrontierOut (dig d) (insCur leaf dig zeros frIn d) (frIn d))
+      (insCur leaf dig zeros frIn depth) where
+  base := rfl
+  level d _ := quaternaryInsertLevel_witness (hdig d) _ _ _
+  top := rfl
 
 end Lelantos

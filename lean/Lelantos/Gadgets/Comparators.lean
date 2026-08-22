@@ -149,4 +149,22 @@ theorem lessThan_sound {n : ℕ} {a b out : F} {bs : ℕ → F}
       · exact ho
     rw [if_neg hlt, ho]; ring
 
+/-- **`LessThan(n)` is satisfiable at every pair of operands it admits.** The bits are the
+canonical decomposition of the shifted difference, so `lessThan_sound` reads the comparison
+off the top bit. Needed to instantiate `active[k]` in the batch circuit. -/
+theorem lessThan_witness {n i j : ℕ} (hi : i < 2 ^ n) (hj : j ≤ 2 ^ n) :
+    LessThanSat n (i : F) (j : F) (natBits (i + 2 ^ n - j))
+      (1 - natBits (i + 2 ^ n - j) n) where
+  diff_bits := by
+    have hle : j ≤ i + 2 ^ n := le_trans hj (Nat.le_add_left _ _)
+    have hlt : i + 2 ^ n - j < 2 ^ (n + 1) := by
+      have : i + 2 ^ n - j ≤ i + 2 ^ n := Nat.sub_le _ _
+      have h2 : (2 : ℕ) ^ (n + 1) = 2 ^ n + 2 ^ n := by ring
+      omega
+    have hcast : (i : F) + (2 : F) ^ n - (j : F) = ((i + 2 ^ n - j : ℕ) : F) := by
+      rw [Nat.cast_sub hle]; push_cast; ring
+    rw [hcast]
+    exact num2Bits_witness hlt
+  out_def := rfl
+
 end Lelantos

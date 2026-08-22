@@ -13,6 +13,8 @@
 //   - `rootFromPath` and `cacheKeyStride` have no circuit counterpart.
 
 import { expect } from "chai";
+
+import { TIMEOUT_FAST } from "./lib/constants";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,7 +45,7 @@ import {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 describe("reference / merkle path recomputation", function () {
-    this.timeout(120000);
+    this.timeout(TIMEOUT_FAST);
 
     let P: Poseidon;
     before(async () => {
@@ -138,7 +140,7 @@ describe("reference / quadratic residues", () => {
 });
 
 describe("reference / fuzzy message detection", function () {
-    this.timeout(120000);
+    this.timeout(TIMEOUT_FAST);
 
     let P: Poseidon;
     let J: Jubjub;
@@ -249,10 +251,9 @@ describe("reference / snark compression", () => {
     });
 
     // The vectors record `abiEncodedCoeffs` so the contract side can localise a
-    // mismatch to the encoding. Recomputing it here makes the field load-bearing
-    // rather than merely present.
+    // mismatch to the encoding; recomputing it here checks the published value.
     //
-    // Driven from index.json so a shape change (a new circuit, or a different
+    // Driven from index.json, so a shape change (a new circuit, or a different
     // MAX_L) is covered without editing this file.
     const INDEX = JSON.parse(readFileSync(resolve(ROOT, "vectors/index.json"), "utf8"));
     const VECTOR_FILES: string[] = Object.keys(INDEX.files);

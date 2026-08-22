@@ -27,8 +27,8 @@ export const H_BASE: Point = [
     5980429700218124965372158798884772646841287887664001482443826541541529227896n,
 ];
 
-/** Width of the `rcv` scalar, mirroring `Num2Bits(253)` in MulH. */
-const MAX_BLINDER_BITS = 253n;
+/** Width of the `rcv` scalar, mirroring `RCV_BITS()` in src/lib/value_commit.circom. */
+const MAX_BLINDER_BITS = 252n;
 
 function assertBigint(x: unknown, what: string): asserts x is bigint {
     if (typeof x !== "bigint") {
@@ -140,7 +140,7 @@ export class Jubjub {
         assertBigint(value, "valueCommit value");
         assertBigint(rcv, "valueCommit rcv");
         if (value >= POW_2_64) throw new Error("valueCommit: value must be < 2^64");
-        if (rcv >= 1n << MAX_BLINDER_BITS) throw new Error("valueCommit: rcv must be < 2^253");
+        if (rcv >= 1n << MAX_BLINDER_BITS) throw new Error("valueCommit: rcv must be < 2^252");
         return this.addPoint(
             this.mulPointEscalar(assetGen, value),
             this.mulPointEscalar(H_BASE, rcv),

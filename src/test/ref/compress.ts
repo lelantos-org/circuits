@@ -94,10 +94,31 @@ export interface FlattenBatchInput {
 }
 
 /**
- * BatchCompress layout. Total = 4 + 6·MAX_L (100 at MAX_L = 16).
+ * Slot names of the BatchCompress layout, in coefficient order.
+ *
+ * The order `flattenBatch` emits values in, declared beside it so the names
+ * published in `vectors/` and the values they label stay together. The vector
+ * generator reads this directly.
+ */
+export function batchLayoutNames(maxL: number): string[] {
+    const names = ["oldRoot", "newRoot", "startIndex", "actualCount"];
+    for (let k = 0; k < maxL; k++) names.push(`cms ${k}`);
+    for (let k = 0; k < maxL; k++) {
+        names.push(`cvDepX ${k}`);
+        names.push(`cvDepY ${k}`);
+    }
+    for (let k = 0; k < maxL; k++) names.push(`leafAsset ${k}`);
+    for (let k = 0; k < maxL; k++) names.push(`leafPublicIn ${k}`);
+    for (let k = 0; k < maxL; k++) names.push(`isDeposit ${k}`);
+    return names;
+}
+
+/**
+ * BatchCompress layout. Total = 4 + 6·MAX_L (28 at MAX_L = 4).
  *
  * Arrays are indexed by leaf slot: a batch commits `actual_count` individual
- * leaves, odd counts included.
+ * leaves, odd counts included. `batchLayoutNames` above names these slots in
+ * the same order; a change to one requires the same change to the other.
  */
 export function flattenBatch(input: FlattenBatchInput): Field[] {
     const maxL = input.cms.length;

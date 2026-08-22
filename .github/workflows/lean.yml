@@ -8,9 +8,9 @@ on:
       - '.github/workflows/lean.yml'
   push:
     branches: [main]
-    # Same filter as `pull_request`. Without it a docs-only push to main ran the
-    # full 60-minute job, and on push `leanchecker` is enabled — the most
-    # expensive configuration, for a change that cannot affect any proof.
+    # Same filter as `pull_request`. Without it a docs-only push to main runs
+    # the full 60-minute job, including the `leanchecker` kernel re-check, for a
+    # change that cannot affect a proof.
     paths:
       - 'lean/**'
       - 'src/**'
@@ -38,10 +38,10 @@ jobs:
       - name: Discharge the arithmetic axioms
         run: python3 scripts/check-prime.py
 
-      # Installs elan from `lean-toolchain`, restores the `.lake` cache, pulls the
-      # prebuilt Mathlib oleans (`lake exe cache get`) instead of compiling Mathlib
-      # from source, and builds. It exports elan on `$GITHUB_PATH`, so the `lake env`
-      # steps below work unchanged.
+      # Installs elan from `lean-toolchain`, restores the `.lake` cache, pulls
+      # the prebuilt Mathlib oleans (`lake exe cache get`) rather than compiling
+      # Mathlib from source, and builds. Exports elan on `$GITHUB_PATH`, so the
+      # `lake env` steps below work unchanged.
       - name: Build
         id: lean
         uses: leanprover/lean-action@v1
@@ -51,15 +51,19 @@ jobs:
           # There is no `test` or `lint` target; do not let auto-config invent one.
           test: false
           lint: false
-          # An independent re-check by the kernel of every declaration under the
-          # `Lelantos` prefix: it catches a proof that only type-checks because of an
-          # elaborator bug. Run with no arguments, so its target is the manifest
-          # package name capitalized — see the note in `lean/lakefile.toml`.
-          leanchecker: ${{ github.event_name == 'push' }}
+          # Independent kernel re-check of every declaration under the
+          # `Lelantos` prefix, catching a proof that type-checks only because of
+          # an elaborator bug. Run with no arguments, so its target is the
+          # capitalized manifest package name; see `lean/lakefile.toml`.
+          #
+          # Runs on pull requests as well as pushes. The whole job is already
+          # path-filtered to `lean/**` and `src/**`, so this only fires on a
+          # change that could affect a proof — and a proof that survives only an
+          # elaborator bug should not reach `main` in the first place.
+          leanchecker: true
 
-      # The proofs are worthless if any of them is admitted. `check-axioms.sh` would
-      # catch a `sorryAx` reaching a top-level theorem; this also catches a `sorry`
-      # sitting in a file that nothing imports.
+      # `check-axioms.sh` catches a `sorryAx` reaching a top-level theorem; this
+      # also catches a `sorry` in a file nothing imports.
       - name: No `sorry`
         run: |
           if grep -rn '\bsorry\b' Lelantos/ Lelantos.lean; then
@@ -72,9 +76,17 @@ jobs:
       - name: Trusted base unchanged
         run: ./scripts/check-axioms.sh
 
-      # The public-input layout is the highest-risk hand transcription in the development.
-      # This dumps one layout per deployed shape. `expected/layout-2x2.txt` is additionally
-      # what `src/test/formal/layout_parity.test.ts` checks the SDK against, so it has to be
-      # verified against Lean here or the chain has a broken link.
+      # The public-input layout is the highest-risk hand transcription in the
+      # development. This dumps one layout per deployed shape.
+      # `expected/layout-2x2.txt` is also what
+      # `src/test/formal/layout_parity.test.ts` checks the SDK against, so it
+      # must be verified against Lean here to keep that chain intact.
       - name: Public-input layout unchanged
         run: ./scripts/dump-layout.sh
+
+      # Doc comments cite the circom lines they mirror. The citations are
+      # hand-maintained, so this resolves every one of them against the file it
+      # names — catching a renamed or deleted source, or a citation past the end
+      # of a file, which is how they rot.
+      - name: Source citations resolve
+        run: python3 scripts/check-citations.py

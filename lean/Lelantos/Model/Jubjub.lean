@@ -38,7 +38,7 @@ conservation from the point balance, which is exactly what this development forb
   `a = 168700` is a square and `d = 168696` is a non-square, so the twisted Edwards
   addition law is complete and the denominators never vanish for on-curve inputs. That
   completeness fact is what `babyAdd_spec` packages.
-* `escalarMul_spec` — `EscalarMulAny(n)` / `EscalarMulFix(n)` compute `k • P`.
+* `escalarMul_spec` — `EscalarMulAny(n)` / `FixedBaseMul(n)` compute `k • P`.
 * `assetGen_dl` — `HashToAssetGen` is a *single-segment* Pedersen hash, so it is a known
   multiple of one fixed base. See `Lelantos.Gadgets.PointBalance` for the consequence.
 -/
@@ -90,7 +90,7 @@ axiom babyAdd : Pt → Pt → Pt
 
 axiom babyAdd_spec (g h : G) : babyAdd (coords g) (coords h) = coords (g + h)
 
-/-- `EscalarMulAny(n)` / `EscalarMulFix(n)`: the output is the scalar multiple of the base
+/-- `EscalarMulAny(n)` / `FixedBaseMul(n)`: the output is the scalar multiple of the base
 by the natural number the bits encode. -/
 axiom escalarMul : ℕ → Pt → Pt
 
@@ -122,11 +122,16 @@ three windows to the consecutive multipliers `2, 3, 4`. Since `assetMul` is affi
 window contribution, the multipliers form an arithmetic progression.
 
 This is the concrete instance that makes `pointBalance_not_sound` bite. It is checked at
-runtime by `src/test/transact.test.ts:847`. -/
+runtime by `src/test/transact/multi_asset.test.ts`. -/
 axiom assetMul_arith : assetMul 1 + assetMul 3 = 2 * assetMul 2
 
 /-- `PointSum(n)` (`src/lib/value_commit.circom:156`): the identity for `n = 0`, otherwise a
 left-nested chain of `BabyAdd`. -/
 def pointSum (pts : ℕ → G) (n : ℕ) : G := ∑ i ∈ Finset.range n, pts i
+
+/-- An all-zero slot vector contributes the identity, whatever the slot count. Used to
+discharge the `rH` halves of the point equation for witnesses with no blinding. -/
+@[simp] theorem pointSum_zero (n : ℕ) : pointSum (fun _ => (0 : G)) n = 0 := by
+  simp [pointSum]
 
 end Lelantos

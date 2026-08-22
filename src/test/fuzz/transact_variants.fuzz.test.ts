@@ -1,22 +1,19 @@
 // Heavy variant coverage for `2x2.circom`.
 //
-// Existing [src/test/fuzz/transact.fuzz.test.ts](./transact.fuzz.test.ts)
-// covers balanced random witnesses, unbalanced mutations, ghost-note
-// asset, wrong-nsk, and value-overflow. This file adds:
-//   - role symmetry: which real note occupies which input/output slot is
-//     free — an honest rebuild after swapping slots must still verify. (A raw
-//     JSON swap does not verify: output rho is bound to (nullifier[0],
-//     out_index), so slot order feeds the derivation. That binding is the F1
-//     faerie-gold defense, not a soundness hole.)
-//   - public-value boundary: publicIn / publicOut at 2^64 - 1 (max) and
-//     at exactly 2^64 (overflow);
-//   - path-element perturbation: mutating a random level of one input's
-//     Merkle authentication path must reject (Poseidon image disagrees
-//     with `merkle_root`).
+// [src/test/fuzz/transact.fuzz.test.ts](./transact.fuzz.test.ts) covers
+// balanced random witnesses, unbalanced mutations, ghost-note asset, wrong-nsk
+// and value overflow. This file adds:
+//   - role symmetry: which real note occupies which slot is free, so an honest
+//     rebuild after swapping slots must still verify. A raw JSON swap does not,
+//     because output rho is bound to (nullifier[0], out_index) and slot order
+//     feeds that derivation — the F1 defence, not a soundness hole.
+//   - public-value boundary: publicIn / publicOut at 2^64 - 1 and at 2^64.
+//   - path-element perturbation: mutating a random level of one input's Merkle
+//     authentication path must reject, since the Poseidon image no longer
+//     matches `merkle_root`.
 //
-// SLOW: each property builds 1–2 depth-10 SNARK witnesses per fast-check
-// trial. Run count halved vs the shared `fcParams` (mirrors
-// `frontier_root_fuzz.test.ts` rationale).
+// Slow: each property builds one or two depth-10 witnesses per trial, so the
+// run count is halved against the shared `fcParams`.
 
 import * as fc from "fast-check";
 
@@ -25,8 +22,8 @@ import { loadCircuit, srcPath } from "../lib/circuit";
 import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { expectWitnessFails } from "../lib/expect";
 import { arbBalancedSplit, arbNsk, arbField, MAX_VALUE, fcParamsFor } from "./arbitraries";
+import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 
-const DEPTH = 10;
 const CIRCUIT = srcPath("2x2.circom");
 // `TRANSACT_VARIANTS` is slow (≥1 depth-10 witness per trial); SUITE_SCALE
 // halves vs NUM_RUNS by default. Override: FUZZ_RUNS_TRANSACT_VARIANTS=N.
@@ -56,7 +53,7 @@ async function buildBalanced(
 }
 
 describe("transact_2x2 variants [fuzz]", function () {
-    this.timeout(3_600_000);
+    this.timeout(TIMEOUT_HEAVY);
 
     let circuit: any;
     let tx: TxBuilder;
@@ -67,11 +64,10 @@ describe("transact_2x2 variants [fuzz]", function () {
     });
 
     it("input-role swap preserves witness validity (honest rebuild)", async () => {
-        // Output rho is bound to (nullifier[0], out_index), so swapping input
-        // slots changes nullifier[0] and thus the honestly-derived output
-        // rho/cm; a raw JSON swap does not verify. The invariant is that which
-        // real note occupies which input slot is free, provided the witness is
-        // rebuilt honestly. Both arrangements must verify.
+        // Swapping input slots changes nullifier[0], and with it the derived
+        // output rho and cm, so a raw JSON swap does not verify. The invariant
+        // is that either assignment of real notes to input slots verifies once
+        // the witness is rebuilt.
         await fc.assert(fc.asyncProperty(
             arbBalancedSplit(), arbNsk(), arbNsk(),
             async ({ v1, v2, o1, o2 }, aliceNsk, bobNsk) => {

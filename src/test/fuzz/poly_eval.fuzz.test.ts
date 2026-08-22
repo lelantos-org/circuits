@@ -1,30 +1,25 @@
 // Property-based coverage for `lib/poly_eval.circom`.
 //
-// The unit test [src/test/poly_eval.test.ts](../poly_eval.test.ts) pins a
-// handful of deterministic seeds. This file widens the surface with
-// fast-check: random coefficients and `z` values across BN254 𝔽_r, plus
-// algebraic identities (linearity, z=0, z=1) that lock the gadget to its
-// Horner-form specification.
+// The unit test [src/test/poly_eval.test.ts](../poly_eval.test.ts) pins a set
+// of deterministic seeds. This file adds random coefficients and `z` values
+// across BN254 Fr, plus the algebraic identities (linearity, z=0, z=1) that tie
+// the gadget to its Horner-form specification.
 //
-// Wrapper exposes `TestPolyEval26` (N=26). Property: contract-side `SnarkCompression`
-// implements the SAME Horner schedule, so any Schwartz–Zippel divergence
-// here would break the on-chain ↔ in-circuit binding.
+// The wrapper exposes `TestPolyEval26` (N=26). The contract-side
+// `SnarkCompression` implements the same Horner schedule, so a divergence here
+// breaks the on-chain to in-circuit binding.
 
 import { expect } from "chai";
 import * as fc from "fast-check";
 
 import { fixturePath, loadCircuit } from "../lib/circuit";
-import { fcParamsFor, arbField, mod, R, arbDistinctBigInt } from "./arbitraries";
+import { hornerEval, mod } from "../helpers";
+import { fcParamsFor, arbField, R, arbDistinctBigInt } from "./arbitraries";
+import { TIMEOUT_HEAVY } from "../lib/constants";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
 const N = 26;
 const fcParams = fcParamsFor("POLYEVAL");
-
-function hornerEval(coeffs: bigint[], z: bigint): bigint {
-    let acc = 0n;
-    for (let i = coeffs.length - 1; i >= 0; i--) acc = mod(acc * z + coeffs[i], R);
-    return acc;
-}
 
 function toInput(coeffs: bigint[], z: bigint) {
     return { coeffs: coeffs.map(c => c.toString()), z: z.toString() };
@@ -49,7 +44,7 @@ const COEFFS_Z_EXAMPLES: [bigint[], bigint][] = [
 const COEFFS_ONLY_EXAMPLES: [bigint[]][] = [[ALL_ZERO_COEFFS], [ALL_MAX_COEFFS]];
 
 describe("PolyEval [fuzz, N=26]", function () {
-    this.timeout(600_000);
+    this.timeout(TIMEOUT_HEAVY);
 
     let circuit: any;
     before(async () => { circuit = await loadCircuit(WRAPPER); });

@@ -6,9 +6,9 @@ subgroup. Three Groth16 entry points:
 
 | Circuit | Instantiation | Status | Purpose |
 |---|---|---|---|
-| [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` | deployed | Transact: 2 shielded inputs, 2 shielded outputs per proof. |
-| [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` | built, not on-chain | Transact at the 3-in × 3-out shape. Same template, 42-slot PI layout (§2a). |
-| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 8)` | deployed | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 8 leaves, any count (odd included). See §14. |
+| [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` | not deployed | Second instantiation of the shared template, and the shape the Lean witnesses are built at. |
+| [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` | the transact shape; on-chain wiring incomplete | Transact at 3 shielded inputs × 3 shielded outputs. 42-slot PI layout (§2a). |
+| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 4)` | deployed | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 4 leaves, any count (odd included). See §14. |
 
 Both transact shapes instantiate one shared template,
 [`Transact(DEPTH, N_IN, N_OUT)`](lib/transact.circom), over a quaternary
@@ -18,11 +18,12 @@ bound via PolyEval (§7a).
 
 `3x3` is built by `just build-artifacts-3x3`, ships prover artefacts in
 the npm package, and is pinned by the vectors in
-[`vectors/`](../vectors/) — but it is not wired on-chain. Deployment
-additionally requires a `PubInputs.compress` overload for its 42 slots,
-a Solidity verifier, a production ceremony, `TRANSACT_OUT_LEAVES = 3` on
-the spend path, and generalising §10's pairwise-nullifier check to all
-three pairs.
+[`vectors/`](../vectors/). `just rebuild-3x3` exports its verifier to
+`contracts/src/verifiers/Verifier.sol` — the path the deployed verifier
+occupies, which is why `rebuild-2x2` deliberately never writes there.
+Wiring it up still requires a `PubInputs.compress` overload for its 42
+slots, a production ceremony, `TRANSACT_OUT_LEAVES = 3` on the spend
+path, and generalising §10's pairwise-nullifier check to all three pairs.
 
 The design follows the Sapling/Namada multi-asset model: each note
 carries a private `asset_id`; a per-asset Baby-Jubjub generator `V^t`
@@ -41,18 +42,21 @@ balance, which is defense in depth only (§5).
 > The known-discrete-log weakness of §5 is formalised too — as a *negative* result,
 > `pointBalance_not_sound`, so that no one can re-derive conservation from the Edwards
 > point balance. Soundness is stated for the generic `(N_IN, N_OUT)` model and so
-> covers `3x3` as well, but a satisfying witness is exhibited at the `2x2` shape only:
-> `transact3x3_sound` is not yet shown non-vacuous. See
+> covers both shapes, and each has an exhibited satisfying assignment
+> (`transactSat_satisfiable`, `transact3x3Sat_satisfiable`), so neither soundness
+> result is vacuous. See
 > [`lean/README.md`](../lean/README.md) for what is and is not covered, and
 > [`lean/FIDELITY.md`](../lean/FIDELITY.md) for how faithfully the Lean model tracks
 > this source.
 >
-> `tree_update_batch.circom` is covered too, as of the leaf-granular rewrite:
-> `batch_advances_by_count` proves `new_root` is the root after exactly `actual_count`
-> appends — for any count, odd included — and `batch_deposit_opens` proves the per-leaf
-> deposit binding of §14. Both are insensitive to the parity of `actual_count`, which is
-> what the pair-to-leaf change was for. `FrontierRoot` and the `BabyCheck` on `cv_dep` are
-> **not** modelled; see [`lean/README.md`](../lean/README.md) for that gap.
+> `tree_update_batch.circom` is covered too: `batch_advances_by_count` proves `new_root`
+> is the root after exactly `actual_count` appends — for any count, odd included — and
+> `batch_deposit_opens` proves the per-leaf deposit binding of §14. Both are insensitive
+> to the parity of `actual_count`. `batchSat_satisfiable` exhibits a satisfying assignment
+> for `TreeUpdateBatch(10, 4)` committing three leaves into four slots, so the padding
+> constraints and both muxes are exercised rather than satisfied trivially, and none of the
+> batch results is vacuous. `FrontierRoot` and the `BabyCheck` on `cv_dep` are **not**
+> modelled; see [`lean/README.md`](../lean/README.md) for that gap.
 
 ---
 
@@ -358,7 +362,8 @@ Defense in depth: real notes reject `asset_id == 0` via
 `(1 - is_dummy) · IsZero(asset_id) === 0`. Output notes apply the
 same check unconditionally.
 
-Cost ≈ 2.1k constraints per call.
+Cost = 975 constraints per call: 911 for `Pedersen(72)` plus 64 for the
+`Num2Bits(64)`. (Measured from `build/2x2.r1cs` + `2x2.sym`.)
 
 ---
 
@@ -375,12 +380,26 @@ cv_dep = value · V^t + rcv_dep · H
 ```
 
 `value · V^t` is computed by `EscalarMulAny(64)` (variable-base, 64-bit
-scalar, ~2k constraints). For `value = 0` the result is the identity
+scalar, 586 constraints). For `value = 0` the result is the identity
 `(0, 1)` regardless of `asset_id`, so dummies are colour-neutral.
-`rcv · H` uses `EscalarMulFix(253, H)` (~3k constraints). `ValueCommit`
-exposes the `rH = rcv · H` component so balance can sum points;
-collapsing it to a scalar `Σrcv_in − Σrcv_out` would wrap into 254 bits
-when outputs exceed inputs and break a 253-bit decomposition.
+`rcv · H` uses `FixedBaseMul(252, H)`
+([`lib/fixed_base_mul.circom`](lib/fixed_base_mul.circom)), 748
+constraints; with its `Num2Bits(252)` the whole `MulH` is 1,000.
+
+> `FixedBaseMul` is used in place of circomlib's `EscalarMulFix`, which costs
+> 3,864 constraints for the same group element. `EscalarMulFix` takes its base
+> as a signal even though the base is a template parameter, so circom cannot
+> constant-fold, and each of its 85 windows spends 22 constraints rebuilding a
+> compile-time-constant table plus 3 on a compensation chain undoing the `+1·B`
+> offset baked into every window. `FixedBaseMul` builds the tables in `var`
+> arithmetic and starts each window at the identity, so neither cost arises. The
+> two agree on every scalar — pinned by the committed `vectors/` and by
+> [`test/fuzz/fixed_base_mul.fuzz.test.ts`](test/fuzz/fixed_base_mul.fuzz.test.ts),
+> which compares them over arbitrary 252-bit scalars.
+
+`ValueCommit` exposes the `rH = rcv · H` component so balance can sum
+points; collapsing it to a scalar `Σrcv_in − Σrcv_out` would wrap into 254
+bits when outputs exceed inputs and break the decomposition.
 
 **Value conservation (binding check).** `PerAssetValueBalance` checks,
 for every asset id `c` appearing anywhere in the transaction:
@@ -597,9 +616,10 @@ verifier:
 10. Move `public_in` in (deposit) from `payer_address`; pay
     `public_out` to `recipient_address`.
 
-`rcv` per note is implicitly bounded to 253 bits by the in-circuit
-`Num2Bits(253)` inside `MulH`. Wallets should sample `rcv` uniformly
-over `[0, 2^252)` to stay clear of the boundary.
+`rcv` per note is bounded to `RCV_BITS = 252` bits by the in-circuit
+`Num2Bits(252)` inside `MulH` ([`lib/value_commit.circom`](lib/value_commit.circom)).
+Wallets should sample `rcv` uniformly below the Baby-Jubjub subgroup order
+`ell < 2^251`, which stays clear of the boundary.
 
 ---
 
@@ -636,38 +656,77 @@ R1CS totals from `snarkjs r1cs info`. Each circuit has one public input
 
 | Circuit | Constraints | Wires | Private inputs |
 |---|---:|---:|---:|
-| `Transact(10, 2, 2)` | 69,350 | 69,419 | 143 |
-| `Transact(10, 3, 3)` | 102,939 | 103,040 | 210 |
-| `TreeUpdateBatch(10, 8)` | 130,607 | 130,471 | 90 |
+| `Transact(10, 2, 2)` | 44,406 | 44,475 | 143 |
+| `Transact(10, 3, 3)` | 65,523 | 65,624 | 210 |
+| `TreeUpdateBatch(10, 4)` | 57,106 | 57,054 | 62 |
 
-All three fit the 2^17 FFT domain and therefore `ptau_17`.
+All three now fit the **2^16** FFT domain, and `just budget` pins each to
+it so regrowth is a CI failure rather than a silent doubling of proving
+time.
 
-### `Transact` breakdown (2×2; the per-slot rows scale with `N_IN + N_OUT`)
+`Transact(10, 3, 3)` clears it by **10** constraints. snarkjs sizes the
+domain from `nConstraints + nPubInputs + nOutputs`, so the largest count
+that still fits 2^16 is 65,533 rather than 65,536 — a build at 65,534
+already needs 2^17. Treat that as a cliff, not headroom: any addition to
+a per-slot gadget is multiplied by 6.
+`TreeUpdateBatch(10, 4)` has 8,427 of room, `Transact(10, 2, 2)` 21,127.
+
+> `just budget` reports `13 under 65536` for this shape, not 10:
+> `scripts/check-budget.mjs` compares the raw constraint count against
+> `domain` and does not add the two public signals. It would therefore
+> pass a build at 65,534–65,536 that silently lands on 2^17. The
+> exact-count assertion catches such a change anyway, since the count
+> would no longer match `budget.json` — but the reported slack reads
+> three too high.
+
+### Measured gadget costs
+
+Everything below is attributed from `build/2x2.r1cs` + `2x2.sym`, not
+estimated. Counts are as this repo compiles, at circom's default `--O1`,
+so surviving linear rows are included.
+
+| Gadget | Cost |
+|---|---:|
+| `HashToAssetGen` = `Num2Bits(64)` + `Pedersen(72)` | 975 |
+| `MulH` = `Num2Bits(252)` + `FixedBaseMul(252, H)` | 1,000 |
+| `EscalarMulAny(64)` | 586 |
+| `Poseidon(2)` / `Poseidon(3)` / `Poseidon(4)` | 517 / 605 / 736 |
+| `BabyAdd`, `BabyDbl` | 6 |
+| `ValueCommitPair` (1 × `EscalarMulAny` + 2 × `MulH` + 2 × `BabyAdd`) | 2,579 |
+
+### `Transact` breakdown (2×2; per-slot rows scale with `N_IN + N_OUT`)
 
 | Component | Cost |
-|---|---|
-| 4 × `HashToAssetGen` (Pedersen 72) | ~8.4k |
-| 4 × `ValueCommit` for `cv` + 4 × `ValueCommit` for `cv_dep` | ~38k |
-| 2 × `ValueScalarMul` + 2 × `RangeCheck64` (public bucket) | ~4.5k |
-| Note commitments + Merkle + nullifiers + leaf hashes | ~17k |
+|---|---:|
+| 5 × `HashToAssetGen` | 4,875 |
+| 8 × `MulH` (`cv` and `cv_dep` per slot) | 8,000 |
+| 6 × `EscalarMulAny(64)` (4 per-slot + 2 public bucket) | 3,516 |
+| Note commitments + Merkle + nullifiers + leaf hashes + key derivation | ~27k |
 | `PerAssetValueBalance` per-asset conservation | ~200 |
 | `PerAssetPointBalance` point sums (defense in depth) | ~70 |
 | `PolyEval(31)` Horner chain | ~30 |
 | FMD clue signals | 0 (off-circuit, §7a) |
 
-### `TreeUpdateBatch(10, 8)`
+### `TreeUpdateBatch(10, 4)`
 
 Dominated by MAX_L single-leaf inserts × 10 Merkle levels of
-`Poseidon(5)`, plus the `MAX_L` deposit-binding Pedersen equalities
+`Poseidon(5)`, plus the `MAX_L` deposit-binding equalities
 (each: `HashToAssetGen` + `ValueScalarMul` + `MulH` + `BabyAdd`).
-`FrontierRoot` adds ~8.7k constraints. `PolyEval(100)` is negligible.
+`FrontierRoot` adds ~8.7k constraints. `PolyEval(28)` is negligible.
 
-`MAX_L = 8` is a proving-speed choice: it lands just under the 2^17 FFT
-domain, making a proof ~1.8x faster than `MAX_L = 16` (2.7s vs 4.8s
-measured) and fitting `ptau_17` instead of `ptau_20`. Headroom is thin —
-130,607 of 131,072 — so roughly 465 constraints of growth would push the
-circuit to 2^18 and undo it. Verification gas is unaffected either way
-(195,026, a fixed pairing check over 2 public inputs).
+**`MAX_L = 4` is the floor, not a tuning choice.** `COUNT_BITS` requires
+a power of two, and a spend emits `TRANSACT_OUT = 3` leaves that must
+fit one batch — `MASP.sol` pins `actualCount` to exactly that on the
+transfer path. Only `flushBatch` (deposits, one leaf each) ever uses more
+than three, so a wider batch would be padding on every transfer.
+
+A leaf slot costs ~12k constraints, so the width drives the domain: at
+`MAX_L = 4` the circuit is 57,106 constraints and fits 2^16 with
+`ptau_16`, with 8,427 of room.
+
+Verification gas is unaffected by any of it (195,026, a fixed pairing
+check over 2 public inputs) — halving the width does not make a batch
+cheaper to verify, it caps how many deposits share one verification.
 
 ---
 
@@ -692,18 +751,23 @@ circuit to 2^18 and undo it. Verification gas is unaffected either way
 | [`lib/frontier_root.circom`](lib/frontier_root.circom) | `FrontierRoot(DEPTH)` — rebuild `old_root` from frontier + leaf count (SOUNDNESS-CRITICAL). |
 | [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)`, `TransactCompressN(N_IN, N_OUT)`, `BatchCompress(MAX_L)`. |
 | [`test/ref/`](test/ref/) | TypeScript reference implementation (field, tags, Poseidon, Baby-Jubjub, Merkle, notes, FMD, PolyEval compression, witness builders). No SDK dependency; the circom is the source of truth. |
-| [`test/lib/`](test/lib/) | Test harness: circuit loader, input shapers, witness assertions. |
-| [`test/helpers.ts`](test/helpers.ts) | Poseidon / Pedersen / value-commit test primitives. |
-| [`test/transact.test.ts`](test/transact.test.ts) | Transact circuit test suite. |
-| [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library test suite. |
+| [`test/lib/`](test/lib/) | Test harness: memoizing circuit loader and `CircuitTester` types, circuit dimensions and named actors, input shapers, witness assertions, transact and batch witness builders, seeded PRNG. |
+| [`test/helpers.ts`](test/helpers.ts) | Single import path over `test/ref/`. |
+| [`test/transact/`](test/transact/) | Transact suites, split by concern: `balance` (conservation, dummy/padding slots, Merkle membership), `multi_asset`, `tamper` (one table row per tampered field), `binding` (PolyEval binding), `rho` (faerie-gold), over a shared `setup.ts`. |
 | [`test/tree_update_batch.test.ts`](test/tree_update_batch.test.ts) | TreeUpdateBatch suite (deposit binding, odd leaf counts, frontier binding, padding). |
+| [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library suite, including the `EMPTY_SUBTREE` table read out of the circom source. |
 | [`test/frontier_root.test.ts`](test/frontier_root.test.ts) | FrontierRoot corruption tests. |
-| [`test/poly_eval.test.ts`](test/poly_eval.test.ts) | PolyEval test suite. |
+| [`test/poly_eval.test.ts`](test/poly_eval.test.ts) | PolyEval suite. |
+| [`test/fixed_base_mul.test.ts`](test/fixed_base_mul.test.ts) | FixedBaseMul: window tables, the 4-bit mux, the accumulator chain, and agreement with circomlib's `EscalarMulFix`. |
 | [`test/reference.test.ts`](test/reference.test.ts) | Unit tests for the parts of `test/ref/` no circuit test reaches transitively. |
+| [`test/check_budget.test.ts`](test/check_budget.test.ts) | Coverage for the constraint-budget gate itself. |
 | [`test/formal/layout_parity.test.ts`](test/formal/layout_parity.test.ts) | Pins the PI slot order of both shipped shapes against the Lean dumps `lean/expected/layout-{2x2,3x3}.txt`. |
-| [`test/fixtures/`](test/fixtures/) | Small-parameter wrapper circuits (`test_frontier_root_d3`, `test_merkle_d2`, `test_poly_eval`) instantiating library templates at compact sizes. |
-| [`test/fuzz/`](test/fuzz/) | Property-based suites (fast-check) over Transact (2×2), Merkle, FrontierRoot, PolyEval. |
-| [`scripts/gen-vectors.ts`](../scripts/gen-vectors.ts) | Builds and circuit-checks the published [`vectors/`](../vectors/) for `2x2`, `3x3`, and `tree_update_batch`. |
+| [`test/formal/pubsignal_order.test.ts`](test/formal/pubsignal_order.test.ts) | Pins `_pubSignals = [y, z]` for both shapes against the published vectors. |
+| [`test/fixtures/`](test/fixtures/) | Small-parameter wrapper circuits instantiating library templates at compact sizes (`test_merkle_d2`, `test_frontier_root_d3`, `test_poly_eval`, and four `test_fixed_base_mul*` variants). |
+| [`test/fuzz/`](test/fuzz/) | Property-based suites (fast-check) over Transact (2×2, plus a variants suite), Merkle, FrontierRoot, PolyEval and FixedBaseMul. Run counts come from the shared `FUZZ` tier in `arbitraries.ts`. |
+| [`scripts/gen-vectors.ts`](../scripts/gen-vectors.ts) | Orchestrates the published [`vectors/`](../vectors/); per-shape construction lives in [`scripts/vectors/`](../scripts/vectors/) (`common`, `transact`, `batch`). Every `y` is read out of a compiled-circuit witness and refuses to write if it disagrees with the reference. |
+| [`scripts/check-budget.mjs`](../scripts/check-budget.mjs) | The `just budget` gate: FFT domain plus the exact count in [`budget.json`](../budget.json). |
+| [`scripts/check-artifacts.ts`](../scripts/check-artifacts.ts) | Pre-publish gate over the shipped artifacts. |
 
 ---
 
@@ -721,10 +785,9 @@ and `old_root == currentRoot()`.
 **Leaf granularity.** `actual_count` counts **leaves**, not pairs, so a
 batch may commit any number of leaves in `[1, MAX_L]` — odd included.
 That is what lets one batch carry a 3-output transact bundle
-(`Transact(10, 3, 3)`) or a single-leaf deposit. The earlier
-pair-granular form could express neither: it inserted exactly
-`2·actual_count` leaves, so a deposit needed a mandatory pad leaf and a
-3-output shape had no representation at all.
+(`Transact(10, 3, 3)`) or a single-leaf deposit — a pair-granular count
+could express neither, since it would insert exactly `2·actual_count`
+leaves.
 
 **Inputs.** Logical PIs (private witnesses; bound through
 `BatchCompress(MAX_L)`):
@@ -735,16 +798,16 @@ pair-granular form could express neither: it inserted exactly
 | `new_root` | 1 | Output — bound to the running root after `MAX_L` muxed inserts. |
 | `start_index` | 1 | First insertion slot. Contract validates against `committedCount`. |
 | `actual_count` | 1 | Active leaf count, range `[1, MAX_L]`. |
-| `cms[MAX_L]` | 8 | Per-leaf commitments; padding (inactive) MUST be 0. |
-| `cv_dep[MAX_L][2]` | 16 | Per-leaf deposit-anchored Pedersen value commitments; padding MUST be 0. |
-| `leaf_asset[MAX_L]` | 8 | Per-leaf public asset id (deposit only; padding 0). |
-| `leaf_public_in[MAX_L]` | 8 | Per-leaf public_in (deposit only; padding 0). |
-| `is_deposit[MAX_L]` | 8 | 0/1 per leaf; 1 selects the deposit binding check. |
+| `cms[MAX_L]` | 4 | Per-leaf commitments; padding (inactive) MUST be 0. |
+| `cv_dep[MAX_L][2]` | 8 | Per-leaf deposit-anchored Pedersen value commitments; padding MUST be 0. |
+| `leaf_asset[MAX_L]` | 4 | Per-leaf public asset id (deposit only; padding 0). |
+| `leaf_public_in[MAX_L]` | 4 | Per-leaf public_in (deposit only; padding 0). |
+| `is_deposit[MAX_L]` | 4 | 0/1 per leaf; 1 selects the deposit binding check. |
 
 Private witnesses: `frontier_in[DEPTH][3]`, `rcv[MAX_L]` (the
 `rcv_dep` blinder of leaf `k`).
 
-Total compressed PI count: `4 + 6·MAX_L = 52` for `MAX_L = 8`.
+Total compressed PI count: `4 + 6·MAX_L = 28` for `MAX_L = 4`.
 
 **Frontier binding (SOUNDNESS-CRITICAL).** `frontier_in` is
 prover-supplied. Without binding, a relayer could submit
@@ -777,8 +840,8 @@ split. A depositor could set `cv_dep[2i] = 2^63 · V^A + r0 · H` and let
 `cv_dep[2i+1]` absorb `(pair_public_in − 2^63) mod l` — a leaf no
 64-bit `ValueCommit` can reopen, so they simply abandon it — and walk
 away with a valid `2^63` note for a 1-unit deposit. With one equality
-per leaf there is no split to exploit, and the value-0 pad leaf that
-previously closed the hole is no longer needed.
+per leaf there is no split to exploit, so no value-0 pad leaf is
+required.
 
 `rcv` is a private witness carried in `DepositIntent`. A Pedersen
 blinder is information-theoretically independent of value/asset/
@@ -790,7 +853,7 @@ update propagates `ins[k].frontier_out` and `ins[k].root` when
 `active[k] == 1`, else carries `fr[k]` / `running_root[k]` through.
 After `MAX_L` leaves, `new_root === running_root[MAX_L]`.
 
-**SnarkCompression.** 52 logical PIs folded into `(z, y)` via
+**SnarkCompression.** 28 logical PIs folded into `(z, y)` via
 `BatchCompress(MAX_L)`. Slot order MUST match
 `contracts/src/libs/PubInputs.sol :: compress(TreeUpdateBatch)`. The
 two `uint64` blocks are adjacent and the `uint8` block follows them, so

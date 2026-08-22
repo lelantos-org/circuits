@@ -5,7 +5,7 @@ import Lelantos.Circuit.Transact
 
 `transact_sound` has the shape `TransactSat w → TxWellFormed w`, which is vacuously true if
 `TransactSat` is unsatisfiable. This file rules that out by constructing satisfying
-assignments for the deployed instance `Transact(10, 2, 2)`. Each discharges every constraint
+assignments for `Transact(10, 2, 2)`. Each discharges every constraint
 — key chain, commitment, range checks, the full ten-level Merkle chain, nullifier, both
 value commitments, all five balance candidates, the point balance and the thirty-coefficient
 Horner evaluation — rather than dodging them with `nIn = nOut = 0`.
@@ -81,7 +81,7 @@ noncomputable def gen (a : F) : Pt := coords (assetGen a)
 noncomputable def vTOf (bits : ℕ → F) (a : F) : Pt := escalarMul (bitsNat bits 64) (gen a)
 
 /-- `rcv · H` for `rcv = 0`. Every witness here uses zero blinding. -/
-noncomputable def rH : Pt := escalarMul (bitsNat zeroBits 253) (coords H)
+noncomputable def rH : Pt := escalarMul (bitsNat zeroBits 252) (coords H)
 
 /-- The resulting value commitment. -/
 noncomputable def cvOf (bits : ℕ → F) (a : F) : Pt := babyAdd (vTOf bits a) rH
@@ -107,7 +107,7 @@ theorem cvOf_zero (a : F) : cvOf zeroBits a = coords 0 := by
 
 theorem valueCommit_witness (bits : ℕ → F) (a : F) :
     ValueCommitSat bits (gen a) 0 zeroBits (vTOf bits a) rH (cvOf bits a) :=
-  ⟨rfl, ⟨num2Bits_zero 253, rfl⟩, rfl⟩
+  ⟨rfl, ⟨num2Bits_zero 252, rfl⟩, rfl⟩
 
 /-- The subgroup element a value commitment opens to, for zero blinding. -/
 noncomputable def cvG (bits : ℕ → F) (a : F) : G :=
@@ -167,6 +167,14 @@ def accOf (init : F) (t : ℕ → F) : ℕ → F
 theorem accChain_witness (n : ℕ) (init : F) (t : ℕ → F) :
     AccChainSat n init t (accOf init t) :=
   ⟨rfl, fun _ _ => rfl⟩
+
+/-- An accumulator over zero terms stays at its initial value, whatever its length. The
+padding transaction needs this at an arbitrary arity, where `simp` cannot just unfold the
+chain to a fixed depth. -/
+theorem accOf_zero {t : ℕ → F} (ht : ∀ i, t i = 0) (n : ℕ) : accOf 0 t n = 0 := by
+  induction n with
+  | zero => rfl
+  | succ m ih => rw [accOf, ih, ht m, add_zero]
 
 /-! ### Two-slot vectors
 
@@ -434,7 +442,7 @@ forty-odd fields of boilerplate.
 -/
 
 /-- The parts of a witness that differ between transactions. -/
-structure Parts where
+structure Parts (nIn nOut : ℕ) where
   /-- The two spent-note slots. -/
   spent : ℕ → SpentSlot 10
   /-- The two output-note slots. -/
@@ -452,29 +460,29 @@ structure Parts where
   pubInG : G
 
 /-- The candidate asset set a witness's balance check iterates over. -/
-noncomputable def candOf (w : TxWitness 10 2 2) (c : ℕ) : F :=
-  candAt 2 2 (inAsset w) (outAsset w) w.publicAssetId c
+noncomputable def candOf {nIn nOut : ℕ} (w : TxWitness 10 nIn nOut) (c : ℕ) : F :=
+  candAt nIn nOut (inAsset w) (outAsset w) w.publicAssetId c
 
 /-- `in_term[c][i] = in_value[i] · in_eq[c][i].out`. -/
-noncomputable def inTermOf (w : TxWitness 10 2 2) (c i : ℕ) : F :=
+noncomputable def inTermOf {nIn nOut : ℕ} (w : TxWitness 10 nIn nOut) (c i : ℕ) : F :=
   inValue w i * eqOut (inAsset w i) (candOf w c)
 
 /-- `out_term[c][j] = out_value[j] · out_eq[c][j].out`. -/
-noncomputable def outTermOf (w : TxWitness 10 2 2) (c j : ℕ) : F :=
+noncomputable def outTermOf {nIn nOut : ℕ} (w : TxWitness 10 nIn nOut) (c j : ℕ) : F :=
   outValue w j * eqOut (outAsset w j) (candOf w c)
 
 /-- The `lhs[c][·]` accumulator, from the public bucket up through the input terms. -/
-noncomputable def lhsOf (w : TxWitness 10 2 2) (c : ℕ) : ℕ → F :=
+noncomputable def lhsOf {nIn nOut : ℕ} (w : TxWitness 10 nIn nOut) (c : ℕ) : ℕ → F :=
   accOf (w.publicIn * eqOut w.publicAssetId (candOf w c)) (inTermOf w c)
 
 /-- The `rhs[c][·]` accumulator. -/
-noncomputable def rhsOf (w : TxWitness 10 2 2) (c : ℕ) : ℕ → F :=
+noncomputable def rhsOf {nIn nOut : ℕ} (w : TxWitness 10 nIn nOut) (c : ℕ) : ℕ → F :=
   accOf (w.publicOut * eqOut w.publicAssetId (candOf w c)) (outTermOf w c)
 
 /-- Every witness below has zero blinding, an empty `public_out`, and no address or clue
 data; those are fixed here rather than repeated three times. -/
-noncomputable def ofParts (p : Parts) : TxWitness 10 2 2 :=
-  let base : TxWitness 10 2 2 :=
+noncomputable def ofParts {nIn nOut : ℕ} (p : Parts nIn nOut) : TxWitness 10 nIn nOut :=
+  let base : TxWitness 10 nIn nOut :=
     { z := 0, y := 0
       merkleRoot := p.root
       publicAssetId := p.pubAsset
@@ -512,27 +520,27 @@ noncomputable def ofParts (p : Parts) : TxWitness 10 2 2 :=
     vbOutTerm := outTermOf base
     vbLhs := lhsOf base
     vbRhs := rhsOf base
-    peAcc := hornerAcc (txCoeffs base) (piCount 2 2) base.z
-    y := hornerAcc (txCoeffs base) (piCount 2 2) base.z (piCount 2 2) }
+    peAcc := hornerAcc (txCoeffs base) (piCount nIn nOut) base.z
+    y := hornerAcc (txCoeffs base) (piCount nIn nOut) base.z (piCount nIn nOut) }
 
-@[simp] theorem ofParts_spent (p : Parts) : (ofParts p).spent = p.spent := rfl
-@[simp] theorem ofParts_out (p : Parts) : (ofParts p).out = p.out := rfl
-@[simp] theorem ofParts_root (p : Parts) : (ofParts p).merkleRoot = p.root := rfl
-@[simp] theorem ofParts_pubAsset (p : Parts) : (ofParts p).publicAssetId = p.pubAsset := rfl
-@[simp] theorem ofParts_pubIn (p : Parts) : (ofParts p).publicIn = p.pubIn := rfl
-@[simp] theorem ofParts_pubOut (p : Parts) : (ofParts p).publicOut = 0 := rfl
-@[simp] theorem ofParts_inCvG (p : Parts) : (ofParts p).inCvG = p.inCvG := rfl
-@[simp] theorem ofParts_outCvG (p : Parts) : (ofParts p).outCvG = p.outCvG := rfl
-@[simp] theorem ofParts_inRHG (p : Parts) : (ofParts p).inRHG = fun _ => (0 : G) := rfl
-@[simp] theorem ofParts_outRHG (p : Parts) : (ofParts p).outRHG = fun _ => (0 : G) := rfl
-@[simp] theorem ofParts_pubInG (p : Parts) : (ofParts p).pubInG = p.pubInG := rfl
-@[simp] theorem ofParts_pubOutG (p : Parts) : (ofParts p).pubOutG = 0 := rfl
+@[simp] theorem ofParts_spent {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).spent = p.spent := rfl
+@[simp] theorem ofParts_out {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).out = p.out := rfl
+@[simp] theorem ofParts_root {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).merkleRoot = p.root := rfl
+@[simp] theorem ofParts_pubAsset {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).publicAssetId = p.pubAsset := rfl
+@[simp] theorem ofParts_pubIn {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).publicIn = p.pubIn := rfl
+@[simp] theorem ofParts_pubOut {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).publicOut = 0 := rfl
+@[simp] theorem ofParts_inCvG {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).inCvG = p.inCvG := rfl
+@[simp] theorem ofParts_outCvG {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).outCvG = p.outCvG := rfl
+@[simp] theorem ofParts_inRHG {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).inRHG = fun _ => (0 : G) := rfl
+@[simp] theorem ofParts_outRHG {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).outRHG = fun _ => (0 : G) := rfl
+@[simp] theorem ofParts_pubInG {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).pubInG = p.pubInG := rfl
+@[simp] theorem ofParts_pubOutG {nIn nOut : ℕ} (p : Parts nIn nOut) : (ofParts p).pubOutG = 0 := rfl
 
 /-- The balance intermediates are the canonical ones, so the only obligation left is the
 `lhs[c][N_IN] === rhs[c][N_OUT]` equation itself. -/
-theorem valueBalance_ofParts (p : Parts)
-    (hbal : ∀ c, c < 5 → lhsOf (ofParts p) c 2 = rhsOf (ofParts p) c 2) :
-    PerAssetValueBalanceSat 2 2 (inAsset (ofParts p)) (inValue (ofParts p))
+theorem valueBalance_ofParts {nIn nOut : ℕ} (p : Parts nIn nOut)
+    (hbal : ∀ c, c < nIn + nOut + 1 → lhsOf (ofParts p) c nIn = rhsOf (ofParts p) c nOut) :
+    PerAssetValueBalanceSat nIn nOut (inAsset (ofParts p)) (inValue (ofParts p))
       (outAsset (ofParts p)) (outValue (ofParts p)) (ofParts p).publicAssetId
       (ofParts p).publicIn (ofParts p).publicOut (ofParts p).vbPubInv (ofParts p).vbPubEq
       (ofParts p).vbInInv (ofParts p).vbInEq (ofParts p).vbOutInv (ofParts p).vbOutEq
@@ -550,7 +558,7 @@ theorem valueBalance_ofParts (p : Parts)
 generic — the comparator and accumulator witnesses, the public-bucket wiring, the zero
 blinding factors and the `PolyEval` chain — is discharged here; the hypotheses are exactly
 the facts that depend on which notes the transaction moves. -/
-theorem transactSat_ofParts (p : Parts)
+theorem transactSat_ofParts {nIn nOut : ℕ} (p : Parts nIn nOut)
     (hspent : ∀ i, SpentNoteSat (p.spent i))
     (hroot : ∀ i, (p.spent i).root = p.root)
     (hdummy : ∀ i, IsBit (p.spent i).isDummy ∧ (p.spent i).isDummy * (p.spent i).value = 0)
@@ -558,8 +566,8 @@ theorem transactSat_ofParts (p : Parts)
     (hout : ∀ j, OutputNoteSat (p.out j))
     (hpubAsset : Num2BitsSat 64 p.pubAsset p.pubAssetBits)
     (hpubIn : Num2BitsSat 64 p.pubIn p.pubInBits)
-    (hbal : ∀ c, c < 5 → lhsOf (ofParts p) c 2 = rhsOf (ofParts p) c 2)
-    (hpoint : p.inCvG 0 + p.inCvG 1 + p.pubInG = p.outCvG 0 + p.outCvG 1)
+    (hbal : ∀ c, c < nIn + nOut + 1 → lhsOf (ofParts p) c nIn = rhsOf (ofParts p) c nOut)
+    (hpoint : pointSum p.inCvG nIn + p.pubInG = pointSum p.outCvG nOut)
     (hinCv : ∀ i, (p.spent i).cv = coords (p.inCvG i))
     (houtCv : ∀ j, (p.out j).cv = coords (p.outCvG j))
     (hinRH : ∀ i, (p.spent i).rH = coords 0)
@@ -581,9 +589,8 @@ theorem transactSat_ofParts (p : Parts)
   value_balance := valueBalance_ofParts p hbal
   point_balance := by
     show coords _ = coords _
-    simp only [pointSum, Finset.sum_range_succ, Finset.sum_range_zero, ofParts_inCvG,
-      ofParts_outCvG, ofParts_inRHG, ofParts_outRHG, ofParts_pubInG, ofParts_pubOutG,
-      zero_add, add_zero]
+    simp only [ofParts_inCvG, ofParts_outCvG, ofParts_inRHG, ofParts_outRHG,
+      ofParts_pubInG, ofParts_pubOutG, pointSum_zero, add_zero]
     exact congrArg coords hpoint
   point_in_cv i _ := hinCv i
   point_out_cv j _ := houtCv j
@@ -595,12 +602,17 @@ theorem transactSat_ofParts (p : Parts)
 
 /-! ## The padding transaction
 
-Both inputs are padding and both outputs are empty notes of asset `1`. It moves no value,
+Every input is padding and every output is an empty note of asset `1`. It moves no value,
 but it discharges every constraint — the full ten-level Merkle chain, both value
-commitments, all five balance candidates and the thirty-coefficient Horner evaluation.
+commitments, every balance candidate and the whole Horner evaluation.
+
+Written once for an arbitrary arity. Nothing about it is shape-specific: every slot vector
+is index-generic, and the balance sums are zero whichever candidate is selected. That is
+what lets the same construction serve `Transact(10, 2, 2)` and the deployed
+`Transact(10, 3, 3)`, whose soundness results each need a witness of their own type.
 -/
 
-noncomputable def padParts : Parts where
+noncomputable def padParts (nIn nOut : ℕ) : Parts nIn nOut where
   spent := fun _ => padSlot (rootFrom padLeaf)
   out := padOut
   root := rootFrom padLeaf
@@ -612,20 +624,26 @@ noncomputable def padParts : Parts where
   outCvG := fun _ => 0
   pubInG := 0
 
-noncomputable def padTx : TxWitness 10 2 2 := ofParts padParts
+noncomputable def padTx (nIn nOut : ℕ) : TxWitness 10 nIn nOut := ofParts (padParts nIn nOut)
 
-theorem padTx_sat : TransactSat padTx :=
-  transactSat_ofParts padParts
+theorem padTx_sat (nIn nOut : ℕ) : TransactSat (padTx nIn nOut) :=
+  transactSat_ofParts (padParts nIn nOut)
     (fun _ => padSlot_sat _)
     (fun _ => rfl)
     (fun _ => padSlot_dummy _)
     (fun _ => rfl)
     padOut_sat
     (num2Bits_zero 64) (num2Bits_zero 64)
-    -- Every value is zero, so both accumulators are zero whichever candidate is selected.
-    (fun _ _ => by
-      simp [lhsOf, rhsOf, accOf, inTermOf, outTermOf, inAsset, inValue, outAsset, outValue,
-        padParts, padSlot, padOut, outSlotOf])
+    -- Every note carries value zero and the public bucket is empty, so both accumulators
+    -- start at zero and never move, whichever candidate is selected.
+    (fun c _ => by
+      have hin : ∀ i, inTermOf (ofParts (padParts nIn nOut)) c i = 0 := fun i => by
+        simp [inTermOf, inValue, padParts, padSlot]
+      have hout : ∀ j, outTermOf (ofParts (padParts nIn nOut)) c j = 0 := fun j => by
+        simp [outTermOf, outValue, padParts, padOut, outSlotOf]
+      have hpubIn : (padParts nIn nOut).pubIn = 0 := rfl
+      simp only [lhsOf, rhsOf, ofParts_pubIn, ofParts_pubOut, hpubIn, zero_mul]
+      rw [accOf_zero hin, accOf_zero hout])
     (by simp [padParts])
     (fun _ => cvOf_zero_coords 0)
     (fun _ => cvOf_zero_coords 1)
@@ -689,7 +707,7 @@ theorem spendOut_cv (j : ℕ) : (spendOut j).cv = coords (if j = 0 then assetGen
 theorem spendOut_rH (j : ℕ) : (spendOut j).rH = coords 0 :=
   pair_forall (P := fun o : OutputSlot => o.rH = coords 0) rH_eq (fun _ => rH_eq) j
 
-noncomputable def spendParts : Parts where
+noncomputable def spendParts : Parts 2 2 where
   spent := spendIn
   out := spendOut
   root := realRoot
@@ -749,7 +767,7 @@ theorem dualOut_cv (j : ℕ) :
 theorem dualOut_rH (j : ℕ) : (dualOut j).rH = coords 0 :=
   pair_forall (P := fun o : OutputSlot => o.rH = coords 0) rH_eq (fun _ => rH_eq) j
 
-noncomputable def dualParts : Parts where
+noncomputable def dualParts : Parts 2 2 where
   spent := spendIn
   out := dualOut
   root := realRoot
@@ -776,7 +794,7 @@ theorem dualTx_sat : TransactSat dualTx :=
       norm_num [ofParts_spent, ofParts_out, dualParts, spendIn, dualOut, pair, realSlot,
         padSlot, outSlotOf]
       ring)
-    (by simp [dualParts])
+    (by simp [dualParts, pointSum, Finset.sum_range_succ])
     spendIn_cv dualOut_cv spendIn_rH dualOut_rH (vTOf_one 2)
 
 end Witness
@@ -784,11 +802,22 @@ end Witness
 /-- **`transact_sound` is not vacuous.** There is an assignment satisfying the whole
 constraint system of `Transact(10, 2, 2)`, so the implication has non-empty domain. -/
 theorem transactSat_satisfiable : ∃ w : Transact2x2, TransactSat w :=
-  ⟨Witness.padTx, Witness.padTx_sat⟩
+  ⟨Witness.padTx 2 2, Witness.padTx_sat 2 2⟩
 
 /-- …and the conclusion really is derivable for it. -/
-theorem transact_wellFormed_witness : TxWellFormed Witness.padTx :=
-  transact2x2_sound Witness.padTx_sat
+theorem transact_wellFormed_witness : TxWellFormed (Witness.padTx 2 2) :=
+  transact2x2_sound (Witness.padTx_sat 2 2)
+
+/-- **`transact3x3_sound` is not vacuous.** The same at `Transact(10, 3, 3)` — the shape
+`src/3x3.circom` instantiates and the one wired on-chain. `Transact3x3` is a distinct type
+from `Transact2x2`, so this does not follow from `transactSat_satisfiable`; without it the
+soundness result on the deployed path would read vacuously. -/
+theorem transact3x3Sat_satisfiable : ∃ w : Transact3x3, TransactSat w :=
+  ⟨Witness.padTx 3 3, Witness.padTx_sat 3 3⟩
+
+/-- …and the conclusion is derivable at the deployed shape too. -/
+theorem transact3x3_wellFormed_witness : TxWellFormed (Witness.padTx 3 3) :=
+  transact3x3_sound (Witness.padTx_sat 3 3)
 
 /-- **`SpentReal` is inhabited.** `spentNote_sound` concludes `SpentReal` from
 `is_dummy = 0`, and every slot in the padding witness is a dummy — so on its own that

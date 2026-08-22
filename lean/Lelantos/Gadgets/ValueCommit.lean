@@ -27,10 +27,12 @@ Two modelling points:
   assumption that the two instances receive equal `bits` and `gen`, so the model stays
   on the safe (weaker) side.
 
-* `MulH` decomposes its scalar with `Num2Bits(253)`. Since `2^253 < p` that decomposition
-  is alias-free, but the subgroup order is `ell ≈ 2^251`, so `rcv` is not uniquely
-  recoverable from `rcv · H`. That affects extraction of the blinding factor only, and no
-  theorem here claims it.
+* `MulH` decomposes its scalar with `Num2Bits(252)`. Since `2^252 < p` that decomposition
+  is alias-free — `blindScalar_eq_val` is where that bound is discharged, and it is what
+  lets `valueCommit_opens` name the `rcv` signal rather than its bit array. The subgroup
+  order is `ell ≈ 2^251`, so `rcv` is still not uniquely recoverable from `rcv · H`; that
+  is extraction of the blinding factor from the *point*, a different claim, and no theorem
+  here makes it.
 -/
 
 namespace Lelantos
@@ -40,12 +42,12 @@ via `EscalarMulAny(64)`. -/
 def ValueScalarMulSat (bits : ℕ → F) (gen out : Pt) : Prop :=
   out = escalarMul (bitsNat bits 64) gen
 
-/-- `MulH` — `src/lib/value_commit.circom:41-58`: `Num2Bits(253)` then `EscalarMulFix`. -/
+/-- `MulH` — `src/lib/value_commit.circom:41-66`: `Num2Bits(252)` then `FixedBaseMul`. -/
 structure MulHSat (scalar : F) (sbits : ℕ → F) (out : Pt) : Prop where
-  /-- `:49-50` — the 253-bit decomposition of the blinding scalar. -/
-  scalar_bits : Num2BitsSat 253 scalar sbits
-  /-- `:52-57` — `EscalarMulFix(253, H)`. -/
-  out_def : out = escalarMul (bitsNat sbits 253) (coords H)
+  /-- `:57-58` — the 252-bit decomposition of the blinding scalar. -/
+  scalar_bits : Num2BitsSat 252 scalar sbits
+  /-- `:60-64` — `FixedBaseMul(252, H)`. -/
+  out_def : out = escalarMul (bitsNat sbits 252) (coords H)
 
 /-- `ValueCommit` — `src/lib/value_commit.circom:126-153`. Note slots instantiate the
 two-blinder `ValueCommitPair` (`:77-124`) instead; see the module note for why modelling
@@ -62,8 +64,8 @@ structure ValueCommitSat (bits : ℕ → F) (gen : Pt) (rcv : F) (sbits : ℕ �
 /-- The value a bit array commits to, as a subgroup scalar. -/
 def valScalar (bits : ℕ → F) : ZMod ell := (bitsNat bits 64 : ℕ)
 
-/-- The blinding scalar a 253-bit array commits to. -/
-def blindScalar (sbits : ℕ → F) : ZMod ell := (bitsNat sbits 253 : ℕ)
+/-- The blinding scalar a 252-bit array commits to. -/
+def blindScalar (sbits : ℕ → F) : ZMod ell := (bitsNat sbits 252 : ℕ)
 
 /-- **Soundness of `ValueCommit`.** A satisfying assignment opens to
 `value · gen + rcv · H` in the subgroup. -/
@@ -89,13 +91,27 @@ theorem valScalar_eq_val {v : F} {bits : ℕ → F} (h : Num2BitsSat 64 v bits) 
   unfold valScalar
   rw [(num2Bits_sound (le_of_lt two_pow_64_lt_p) h).1]
 
+/-- **The bit array is the note's blinder.** The counterpart of `valScalar_eq_val` for
+`rcv`, and it earns its keep the same way: without it the blinding term of `cv` is stated
+over an opaque 252-bit array, and nothing connects it to the `rcv` *signal* that `MulHSat`
+decomposes — so `cv` would be pinned in its value component and free in its blinding one.
+
+`2^252 < p` is what makes the reading unique: it is exactly the hypothesis `num2Bits_sound`
+needs for `Num2Bits(252)` to be alias-free, and `RCV_BITS` in
+`src/lib/value_commit.circom` is chosen to keep it true. -/
+theorem blindScalar_eq_val {r : F} {sbits : ℕ → F} (h : Num2BitsSat 252 r sbits) :
+    blindScalar sbits = (r.val : ZMod ell) := by
+  unfold blindScalar
+  rw [(num2Bits_sound (le_of_lt two_pow_252_lt_p) h).1]
+
 /-- **`cv` opens to the note's own `(asset_id, value)`.** The full statement the gadget is
 there to provide: the commitment is `value · V^asset + rcv · H`, with `value` the range-
 checked signal and `V^asset` the generator for the note's asset id. -/
 theorem valueCommit_opens {v rcv a : F} {bits sbits : ℕ → F} {vT rH cv : Pt}
     (hbits : Num2BitsSat 64 v bits)
     (h : ValueCommitSat bits (coords (assetGen a)) rcv sbits vT rH cv) :
-    cv = coords ((v.val : ZMod ell) • assetGen a + blindScalar sbits • H) := by
-  rw [(valueCommit_group h).1, valScalar_eq_val hbits]
+    cv = coords ((v.val : ZMod ell) • assetGen a + (rcv.val : ZMod ell) • H) := by
+  rw [(valueCommit_group h).1, valScalar_eq_val hbits,
+    blindScalar_eq_val h.blind_term.scalar_bits]
 
 end Lelantos

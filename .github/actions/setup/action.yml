@@ -1,0 +1,41 @@
+name: Setup toolchain
+description: >-
+  Node, just, and optionally circom, with dependencies installed. Shared by
+  build/fuzz/lint/picus/test so the Node major and the circom version cannot
+  drift between the job that compiles the circuits and the job that tests them.
+
+  publish.yml does not use this: it needs registry-url / scope / always-auth on
+  setup-node, and interleaves a tag-version check and a ptau cache between these
+  steps.
+
+inputs:
+  node-version:
+    description: Node major version.
+    required: false
+    default: "24"
+  circom:
+    description: Install circom. Set to "false" for jobs that never compile.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+
+    - name: Install just
+      uses: extractions/setup-just@v2
+
+    # No version passed on purpose: the pin lives in setup-circom and nowhere
+    # else. An empty input would override that default rather than fall back to it.
+    - name: Setup circom
+      if: inputs.circom != 'false'
+      uses: ./.github/actions/setup-circom
+
+    - name: Install npm dependencies
+      shell: bash
+      run: npm ci

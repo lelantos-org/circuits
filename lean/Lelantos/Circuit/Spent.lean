@@ -141,10 +141,10 @@ structure SpentReal {depth : ℕ} (s : SpentSlot depth) : Prop where
   The point published on-chain commits to the `value` that `cm` binds, not to some
   unrelated 64-bit number. -/
   cvOpens : s.cv = coords ((s.value.val : ZMod ell) • assetGen s.assetId
-    + blindScalar s.rcvBits • H)
+    + (s.rcv.val : ZMod ell) • H)
   /-- …and `cv_dep`, the one hashed into the leaf, opens to the same value. -/
   cvDepOpens : s.cvDep = coords ((s.value.val : ZMod ell) • assetGen s.assetId
-    + blindScalar s.rcvDepBits • H)
+    + (s.rcvDep.val : ZMod ell) • H)
 
 /-- **Soundness of `SpentNote` on a real slot.** -/
 theorem spentNote_sound {depth : ℕ} {s : SpentSlot depth}

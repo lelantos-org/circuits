@@ -4,11 +4,11 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 include "../../node_modules/circomlib/circuits/babyjub.circom";
 include "../../node_modules/circomlib/circuits/comparators.circom";
 include "../../node_modules/circomlib/circuits/escalarmulany.circom";
-include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
+include "fixed_base_mul.circom";
 
 // Baby-Jubjub value commitments: cv = value·gen + rcv·H.
 //   gen — HashToAssetGen output, or the transparent-bucket point.
-//   rcv — 253-bit blinder.
+//   rcv — blinder, RCV_BITS wide (see below).
 // H is Pedersen BASE[2] and gen derives from BASE[0], so their images are
 // disjoint.
 
@@ -18,6 +18,18 @@ function H_BASE_X() {
 function H_BASE_Y() {
     return 5980429700218124965372158798884772646841287887664001482443826541541529227896;
 }
+
+// Width of the `rcv` / `rcv_dep` blinding scalars.
+//
+// 252 rather than the 251 the subgroup order admits: `ceil(252/4) ==
+// ceil(251/4)`, so both cost 63 windows and 252 is one constraint dearer.
+// Narrowing to 251 would additionally require regenerating every committed
+// vector, since `deterministicDummyBlinders` (`BLINDER_MASK` in
+// src/test/ref/witness.ts) masks to 252.
+//
+// Must satisfy 2^RCV_BITS < p for the Num2Bits decomposition to be alias-free
+// (`lean/Lelantos/Model/Field.lean :: two_pow_252_lt_p`).
+function RCV_BITS() { return 252; }
 
 // Variable-base scalar multiplication value·gen, bits LSB-first from
 // RangeCheck64. value = 0 yields the identity (0, 1).
@@ -37,7 +49,11 @@ template ValueScalarMul() {
     out[1] <== mul.out[1];
 }
 
-// Fixed-base scalar multiplication rcv·H with a 253-bit scalar.
+// Fixed-base scalar multiplication rcv·H.
+//
+// FixedBaseMul replaces circomlib's EscalarMulFix, which cost 3,864 constraints
+// here against 748 for the same group element — see fixed_base_mul.circom for
+// why. It owns its Num2Bits, so the window selectors cannot lose booleanity.
 template MulH() {
     signal input scalar;
     signal output out[2];
@@ -46,13 +62,9 @@ template MulH() {
     H[0] = H_BASE_X();
     H[1] = H_BASE_Y();
 
-    component bits = Num2Bits(253);
-    bits.in <== scalar;
+    component mul = FixedBaseMul(RCV_BITS(), H);
+    mul.scalar <== scalar;
 
-    component mul = EscalarMulFix(253, H);
-    for (var i = 0; i < 253; i++) {
-        mul.e[i] <== bits.out[i];
-    }
     out[0] <== mul.out[0];
     out[1] <== mul.out[1];
 }

@@ -29,6 +29,7 @@ import Lelantos.Circuit.TreeUpdateBatch
 
 -- Results about the finished system: which assignments exist, and which cannot.
 import Lelantos.Proofs.Completeness
+import Lelantos.Proofs.BatchCompleteness
 import Lelantos.Proofs.Rejection
 
 /-!

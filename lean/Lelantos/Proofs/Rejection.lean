@@ -19,7 +19,7 @@ namespace Lelantos
 
 variable {depth nIn nOut : ℕ} {w : TxWitness depth nIn nOut}
 
-/-- Conservation with the sums expanded, for the deployed two-in/two-out shape. -/
+/-- Conservation with the sums expanded, at the two-in/two-out shape. -/
 private theorem conservation_2x2 (h : TransactSat w) (hnIn : nIn = 2) (hnOut : nOut = 2)
     (a : F) :
     w.publicIn.val * indN (w.publicAssetId = a)

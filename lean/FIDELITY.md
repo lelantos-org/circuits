@@ -20,11 +20,9 @@ A fourth failure mode is worse than any of these and has its own check: if the m
 irrelevant. `Lelantos.transactSat_satisfiable` (`Completeness.lean`) rules that out by
 constructing a satisfying assignment for `Transact(10, 2, 2)` that exercises the full
 10-level Merkle chain, both value commitments, all five balance candidates and the
-30-coefficient Horner evaluation.
-
-That construction is at the `2x2` shape only. `transact3x3_sound` has no exhibited witness,
-so at the deployed shape this fourth failure mode is **not** ruled out — see
-`lean/README.md § What is not proved`.
+30-coefficient Horner evaluation. `Lelantos.transact3x3Sat_satisfiable` does the same at
+`Transact(10, 3, 3)`, so the deployed shape is covered too, and
+`Lelantos.batchSat_satisfiable` (`BatchCompleteness.lean`) covers `TreeUpdateBatch(10, 4)`.
 
 Known deliberate omissions, all in the safe direction:
 
@@ -43,13 +41,28 @@ Known deliberate omissions, all in the safe direction:
 
 ## Defence 1 — constraint-by-constraint table
 
-Every `===` / `<==` written in `src/lib/*.circom` — the transitive closure of `src/2x2.circom`
-and `src/tree_update_batch.circom`, minus `node_modules/circomlib` — appears in the tables
-below, with one stated exception: `src/lib/frontier_root.circom` is **not** modelled, so its
-constraints have no rows here. See "What is not proved" in [README.md](README.md). The three top-level files do
-nothing but instantiate `Transact(10, 2, 2)`, `Transact(10, 2, 3)` and `Transact(10, 3, 3)`;
-the wiring they used to hold now lives in `src/lib/transact.circom`, and the tables cite that
-file as `transact:`.
+Every `===` / `<==` written in `src/lib/*.circom` — the transitive closure of `src/2x2.circom`,
+`src/3x3.circom` and `src/tree_update_batch.circom`, minus `node_modules/circomlib` — appears
+in the tables below, with **three** stated exceptions, all of them repo-owned code that is
+collapsed rather than transcribed:
+
+1. `src/lib/frontier_root.circom` is not modelled at all, so its 29 constraint lines have no
+   rows here. `README.md` calls this the largest remaining gap in the batch proof.
+2. `src/lib/fixed_base_mul.circom` — `FixedBaseMulBits` / `FixedBaseMul`, ~110 lines and 748
+   constraints — is collapsed into the `escalarMul` / `escalarMul_spec` axiom pair
+   (`Lelantos/Model/Jubjub.lean`). Note this is **not** covered by the circomlib carve-out
+   below: `MulH` deliberately does not use circomlib's `EscalarMulFix`
+   (`src/lib/value_commit.circom`), so this is the repo's own gadget behind an axiom.
+3. `EmptySubtreeHashes` / `EMPTY_SUBTREE` (`src/lib/common.circom`) has no rows. In Lean
+   `zeros : ℕ → F` is a free parameter (`Gadgets/Insert.lean`,
+   `Circuit/TreeUpdateBatch.lean`), never tied to the eleven hard-coded constants. This is
+   the safe direction — `InsertsTo` says "whatever fill the witness supplied" rather than
+   "the empty subtree" — but it is a gap, not a transcription.
+
+See "What is not proved" in [README.md](README.md). The two transact top-level files
+instantiate `Transact(10, 2, 2)` and `Transact(10, 3, 3)`; `src/3x3.circom` is the deployed
+one. Their shared wiring lives in `src/lib/transact.circom`, which the tables cite as
+`transact:`.
 
 The correspondence is one row to one Lean field, with three documented exceptions:
 
@@ -106,7 +119,8 @@ The one property the development *does* assume is the axiom `assetMul` (`Jubjub.
 `assetGen a` is a known multiple of `BASE0`. That is a **weakness** of the circuit, deliberately
 imported so `pointBalance_not_sound` can exhibit it, and `assetMul_arith` (`assetMul 1 +
 assetMul 3 = 2 · assetMul 2`) is checked against the real gadget at runtime by
-`src/test/transact.test.ts:847`. No positive result depends on either.
+`src/test/transact/multi_asset.test.ts` ("FAILS on cross-asset cancellation V^1 + V^3 ==
+2·V^2"). No positive result depends on either.
 
 ### `src/lib/common.circom` / `src/lib/merkle.circom`
 
@@ -195,7 +209,7 @@ coefficients, which the TypeScript suite asserts against the circuit's own `y` o
 | circom | Lean |
 |---|---|
 | `:24-38` `ValueScalarMul` | `ValueScalarMulSat` |
-| `:41-58` `MulH` (`Num2Bits(253)` + `EscalarMulFix`) | `MulHSat` |
+| `:41-64` `MulH` (`Num2Bits(252)` + `FixedBaseMul`) | `MulHSat` |
 | `:77-124` `ValueCommitPair` — one shared `value·gen`, two blinders | two independent `ValueCommitSat` instances per note slot (same constraint set; see the `Gadgets/ValueCommit.lean` module note) |
 | `:143-150` `cv = BabyAdd(vT, rH)` | `ValueCommitSat` third conjunct; opened by `valueCommit_opens` |
 | `:167-181` `PointSum` chain | `pointSum` |
@@ -226,7 +240,7 @@ mirrors. They can be read side by side with the originals and checked a row at a
 witness plus `build/2x2.sym`, checks `TransactSat` evaluates to `true` on it, and compares
 every modelled intermediate signal against the circom-computed value at the matching
 label; plus a negative pass replaying the ~65 rejecting cases from
-[transact.test.ts](../src/test/transact.test.ts) and asserting the model rejects them too.
+[src/test/transact/](../src/test/transact/) and asserting the model rejects them too.
 
 This is the defence that would catch a model *stronger* than the circuit — the dangerous
 direction in the table above. Until it exists, the table and the layout check are the only
@@ -248,7 +262,7 @@ Checks, each mechanical:
 |---|---|
 | Lean → `expected/layout-{2x2,3x3}.txt` | `lean/scripts/dump-layout.sh`, one dump per instantiated shape |
 | `expected/layout-2x2.txt` → SDK | `src/test/formal/layout_parity.test.ts`, sentinel-per-field so any transposition fails |
-| SDK → circuit | existing PolyEval binding cases, `src/test/transact.test.ts:645-729` |
+| SDK → circuit | existing PolyEval binding cases, `src/test/transact/binding.test.ts` |
 
 The sentinel-per-field table in the second row is hand-written and exists for the **2x2
 shape only**; it is what catches a transposition between two slots of the same type. For

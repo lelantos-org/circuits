@@ -1,152 +1,39 @@
-// Fuzz coverage for the H-1 frontier-binding fix at DEPTH=10 / MAX_L=8.
+// Fuzz coverage for frontier binding at production depth.
 //
-// `lib/frontier_root.circom` rebinds `frontier_in` to public `old_root` so a
-// malicious relayer cannot pair a real `oldRoot` with a forged frontier.
-// The existing `frontier_root.test.ts` only exercises a depth-3 wrapper plus a
-// handful of canned indices. This file drives the FULL `tree_update_batch`
-// circuit at the production depth across random:
-//   - edge-digit `start_index` patterns (digits ∈ {0, 3}, i.e. minimal /
-//     maximal slot fill at each of the 10 levels);
-//   - active-leaf counts `k ∈ [1, MAX_L]`, odd counts included (so every
-//     padding shape — none, partial, full — is fuzzed alongside the rebuild);
-//   - tamper coordinates `(level, slot)` over the filled siblings.
+// `lib/frontier_root.circom` rebinds `frontier_in` to public `old_root`, so a
+// relayer cannot pair a real `oldRoot` with a forged frontier.
+// `frontier_root.test.ts` covers a depth-3 wrapper over canned indices; this
+// file drives the full `tree_update_batch` circuit at DEPTH = 10 over random:
+//   - edge-digit `start_index` patterns (digits ∈ {0, 3}: minimal or maximal
+//     slot fill at each of the 10 levels);
+//   - active-leaf counts k ∈ [1, MAX_L], odd counts included, so every padding
+//     shape is covered alongside the rebuild;
+//   - tamper coordinates (level, slot) over the filled siblings.
 //
-// Property: any perturbation of a filled frontier slot must reject the
-// witness. The same SNARK is the one whose proof the contract layer
-// (`MASP._verifyProofs`) consumes; if the circuit rejects, the on-chain
-// `verifyProof` call also rejects ⇒ tampered batches cannot corrupt the
-// authoritative root.
+// Property: any perturbation of a filled frontier slot rejects the witness.
+// The contract layer (`MASP._verifyProofs`) consumes a proof of this same
+// circuit, so a rejection here means `verifyProof` also rejects and a tampered
+// batch cannot corrupt the authoritative root.
 //
-// SLOW: each fast-check trial builds two depth-10 batch witnesses. The
-// suite respects the shared `FUZZ` env (`light` / `medium` / `heavy`).
+// Slow: each fast-check trial builds two depth-10 batch witnesses. Run count
+// follows the shared `FUZZ` env (`light` / `medium` / `heavy`).
 
 import * as fc from "fast-check";
 
-import {
-    Poseidon,
-    Jubjub,
-    MerkleTree,
-    buildNoteCommitment,
-    fiatShamirZ,
-    hornerEval,
-    type Field,
-    type Point,
-} from "../helpers";
-import { loadCircuit, srcPath } from "../lib/circuit";
-import { treeUpdateBatchInputJson, treeUpdateBatchCoeffs, padToSlots } from "../lib/inputs";
-import { expectWitnessFails } from "../lib/expect";
+import { Jubjub, Poseidon } from "../helpers";
+import { loadCircuit, srcPath, type CircuitTester } from "../lib/circuit";
+import { treeUpdateBatchInputJson } from "../lib/inputs";
+import { expectAccepts, expectWitnessFails } from "../lib/expect";
+import { buildHonest, seededLeaf, type BatchWitness, type LeafWitness } from "../lib/batch";
+import { DEPTH, MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
 import { fcParamsFor } from "./arbitraries";
 
-const DEPTH = 10;
-const MAX_L = 8;
-const TAG_LEAF = 10n;
 const CAPACITY = 4 ** DEPTH;
 const WRAPPER = srcPath("tree_update_batch.circom");
 
-// Suite-tuned run count. `FRONTIER` scale defaults to 0.5x NUM_RUNS in
-// arbitraries.ts; override via `FUZZ_RUNS_FRONTIER=N`. Suite is the slowest
-// in the tree because each trial builds two depth-10 witnesses.
-const fcParams = fcParamsFor("FRONTIER");
-
-interface Leaf {
-    cm: Field;
-    cvDep: Point;
-    leafAsset: Field;
-    leafPublicIn: Field;
-    isDeposit: 0 | 1;
-    rcv: Field;
-}
-
-function buildLeaf(P: Poseidon, J: Jubjub, seed: number, isDeposit: 0 | 1): Leaf {
-    const asset = 7n;
-    const val = BigInt(100 + seed);
-    const pk = BigInt(0xb000 + seed);
-    const rho = BigInt(1 + 2 * seed);
-    const rcm = BigInt(3 + 2 * seed);
-    const rcv = BigInt(11 + 7 * seed);
-    const cm = buildNoteCommitment(P, { asset, value: val, pk, rho, rcm });
-    const assetGen = J.hashToAssetGen(asset);
-    const cvDep = J.valueCommit(val, assetGen, rcv);
-    // A deposit leaf is pinned directly to its own value, so the claimed
-    // public_in is exactly `val`.
-    return {
-        cm,
-        cvDep,
-        leafAsset: isDeposit === 1 ? asset : 0n,
-        leafPublicIn: isDeposit === 1 ? val : 0n,
-        isDeposit,
-        rcv,
-    };
-}
-
-function leafOf(P: Poseidon, cm: Field, cvDep: Point): Field {
-    return P.hash([TAG_LEAF, cm, cvDep[0], cvDep[1]]);
-}
-
-interface Witness {
-    oldRoot: Field;
-    newRoot: Field;
-    startIndex: number;
-    actualCount: number;
-    cms: Field[];
-    cvDep: Point[];
-    leafAsset: Field[];
-    leafPublicIn: Field[];
-    isDeposit: number[];
-    rcv: Field[];
-    frontier: Field[][];
-    z: Field;
-    y: Field;
-}
-
-function buildHonest(P: Poseidon, J: Jubjub, prefilled: number, leaves: Leaf[]): Witness {
-    const tree = new MerkleTree(P, DEPTH);
-    for (let i = 0; i < prefilled; i++) tree.insert(BigInt(0xdead + i));
-    const oldRoot = tree.root();
-    const frontier = tree.frontier();
-
-    for (const l of leaves) {
-        tree.insert(leafOf(P, l.cm, l.cvDep));
-    }
-    const newRoot = tree.root();
-
-    const cmsPadded = padToSlots(leaves.map(l => l.cm), MAX_L, 0n);
-    const cvDepPadded = padToSlots(leaves.map(l => l.cvDep), MAX_L, [0n, 0n] as Point);
-    const leafAssetPadded = padToSlots(leaves.map(l => l.leafAsset), MAX_L, 0n);
-    const leafPublicInPadded = padToSlots(leaves.map(l => l.leafPublicIn), MAX_L, 0n);
-    const isDepositPadded = padToSlots(leaves.map(l => l.isDeposit as number), MAX_L, 0);
-    const rcvPadded = padToSlots(leaves.map(l => l.rcv), MAX_L, 0n);
-
-    const coeffs = treeUpdateBatchCoeffs({
-        oldRoot,
-        newRoot,
-        startIndex: prefilled,
-        actualCount: leaves.length,
-        cms: cmsPadded,
-        cvDep: cvDepPadded,
-        leafAsset: leafAssetPadded,
-        leafPublicIn: leafPublicInPadded,
-        isDeposit: isDepositPadded,
-    });
-    const z = fiatShamirZ(coeffs);
-    const y = hornerEval(coeffs, z);
-
-    return {
-        oldRoot,
-        newRoot,
-        startIndex: prefilled,
-        actualCount: leaves.length,
-        cms: cmsPadded,
-        cvDep: cvDepPadded,
-        leafAsset: leafAssetPadded,
-        leafPublicIn: leafPublicInPadded,
-        isDeposit: isDepositPadded,
-        rcv: rcvPadded,
-        frontier,
-        z,
-        y,
-    };
-}
+// Run count comes from `fcParamsFor("FRONTIER")` at the call site below.
+// `FRONTIER` scales to 0.5x NUM_RUNS in arbitraries.ts; override with
+// `FUZZ_RUNS_FRONTIER=N`.
 
 /// Compose a `start_index` whose quaternary digits at every level are
 /// in {0, 3} — the "edge" slot positions at each tree level. Returns the
@@ -166,10 +53,10 @@ function tamperableLevels(digits: number[]): number[] {
     return out;
 }
 
-describe("frontier_root [fuzz, depth=10, MAX_L=8]", function () {
-    this.timeout(3_600_000);
+describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
+    this.timeout(TIMEOUT_HEAVY);
 
-    let circuit: any;
+    let circuit: CircuitTester;
     let P: Poseidon;
     let J: Jubjub;
 
@@ -179,12 +66,11 @@ describe("frontier_root [fuzz, depth=10, MAX_L=8]", function () {
         circuit = await loadCircuit(WRAPPER);
     });
 
-    it("any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..8 leaves)", async () => {
-        // Compose digits + k together so k always fits the remaining capacity,
-        // avoiding a discard when the draw would overflow.
-        // We also require at least one digit==3 so `tamperableLevels` is
-        // non-empty; if the random draw gives all-zero digits we clear the
-        // top level to 3 (still a valid edge-digit pattern).
+    it(`any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..${MAX_L} leaves)`, async () => {
+        // Compose digits and k together so k always fits the remaining capacity,
+        // avoiding a discard when the draw would overflow. At least one digit
+        // must be 3 for `tamperableLevels` to be non-empty; an all-zero draw has
+        // its top level set to 3, still a valid edge-digit pattern.
         const arbDigitsK = fc.array(fc.constantFrom(0, 3), { minLength: DEPTH, maxLength: DEPTH })
             .chain(rawDigits => {
                 const digits = rawDigits.some(d => d === 3) ? rawDigits : (() => {
@@ -212,31 +98,30 @@ describe("frontier_root [fuzz, depth=10, MAX_L=8]", function () {
             async ({ digits, k, level }, slotIdx, depositFlags) => {
                 const startIndex = startIndexFromEdgeDigits(digits);
 
-                const leaves: Leaf[] = [];
+                const leaves: LeafWitness[] = [];
                 for (let i = 0; i < k; i++) {
-                    leaves.push(buildLeaf(P, J, i, depositFlags[i]));
+                    leaves.push(seededLeaf(P, J, i, depositFlags[i]));
                 }
                 const honest = buildHonest(P, J, startIndex, leaves);
 
                 // Sanity: honest witness must verify. Without this, a
                 // tamper-rejection assertion below would be vacuous.
-                const wHonest = await circuit.calculateWitness(treeUpdateBatchInputJson(honest), true);
-                await circuit.checkConstraints(wHonest);
+                await expectAccepts(circuit, treeUpdateBatchInputJson(honest));
 
-                // At digit==3 every slot 0..2 holds a real filled sibling
-                // (MerkleTree.frontier zeros only `k >= currentSlot`).
-                // Bump by 1 — still inside the BN254 scalar field since
-                // Poseidon outputs are bounded well below R/2.
-                const tampered: Witness = {
+                // At digit == 3 every slot 0..2 holds a filled sibling
+                // (MerkleTree.frontier zeros only `k >= currentSlot`). A bump of
+                // 1 stays inside BN254 Fr, since Poseidon outputs are bounded
+                // well below R/2.
+                const tampered: BatchWitness = {
                     ...honest,
                     frontier: honest.frontier.map(lvl => lvl.slice()),
                 };
                 tampered.frontier[level][slotIdx] = tampered.frontier[level][slotIdx] + 1n;
 
-                // Rebind Fiat-Shamir (frontier is NOT in the PolyEval
-                // coefficient vector — see `treeUpdateBatchCoeffs`) so the
-                // failure can only come from FrontierRoot's `old_root ===
-                // rebuilt` check, not from a (z, y) mismatch.
+                // No Fiat-Shamir rebind: the frontier is not in the PolyEval
+                // coefficient vector (see `treeUpdateBatchCoeffs`), so the only
+                // possible failure is FrontierRoot's `old_root === rebuilt`
+                // check rather than a (z, y) mismatch.
                 await expectWitnessFails(
                     circuit,
                     treeUpdateBatchInputJson(tampered),

@@ -65,9 +65,9 @@ export function buildLeaf(P: Poseidon, cm: Field, cvDep: Point): Field {
  * nf = Poseidon(TAG_NF, nk, rho, cm). Mirrors Nullifier in note.circom.
  *
  * Takes nk directly so FVK holders (nk without nsk) can recompute nullifiers.
- * `cm` is in the preimage so the nullifier identifies the exact note: without
- * it, two notes sharing a rho share a nullifier and spending either bricks the
- * other — the faerie-gold attack.
+ * `cm` is in the preimage so the nullifier identifies the exact note. Without
+ * it, two notes sharing a rho share a nullifier and spending either permanently
+ * locks the other: the faerie-gold attack.
  */
 export function buildNullifier(P: Poseidon, nk: Field, rho: Field, cm: Field): Field {
     return P.hash([TAG_NF, nk, rho, cm]);

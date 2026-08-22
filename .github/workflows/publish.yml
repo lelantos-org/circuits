@@ -1,13 +1,13 @@
 name: publish
 
-# Tag-driven release. Push a tag matching `v*` (e.g. `v0.1.0`) and CI
-# rebuilds artifacts from circom + ptau, runs sanity checks, publishes
-# to GitHub Packages, and writes per-release SHA-256 hashes into the
-# release body for downstream verification.
+# Tag-driven release. Pushing a tag matching `v*` (e.g. `v0.1.0`) rebuilds the
+# artifacts from circom and ptau, runs the sanity checks, publishes to GitHub
+# Packages, and writes per-release SHA-256 hashes into the release body for
+# downstream verification.
 #
-# The trusted-setup ceremony is non-deterministic (snarkjs mixes fresh
-# randomness into the contribution regardless of `-e`), so the zkey +
-# vkey SHA-256 are recorded per-release, not pinned in advance.
+# The trusted-setup ceremony is non-deterministic — snarkjs mixes fresh
+# randomness into the contribution regardless of `-e` — so the zkey and vkey
+# SHA-256 are recorded per release rather than pinned in advance.
 
 on:
   push:
@@ -28,7 +28,6 @@ jobs:
       contents: write   # required to attach SHAs to the release body
       packages: write
     env:
-      CIRCOM_VERSION: v2.2.3
       PTAU_FILE: powersOfTau28_hez_final_17.ptau
     steps:
       - uses: actions/checkout@v4
@@ -54,10 +53,12 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
+      # Version pinned inside the action, so the release compiles with the same
+      # circom as CI. This job does not use ./.github/actions/setup: it needs
+      # registry-url / scope / always-auth on setup-node, and interleaves the
+      # tag-version check and the ptau cache between these steps.
       - name: Setup circom
         uses: ./.github/actions/setup-circom
-        with:
-          version: ${{ env.CIRCOM_VERSION }}
 
       - name: Cache ptau
         uses: actions/cache@v4
@@ -73,7 +74,7 @@ jobs:
       - name: Build + verify 2x2 + 3x3 artifacts
         id: build
         run: |
-          # Tee stdout so we keep the human-readable lines AND capture
+          # Tee stdout to keep the human-readable lines while capturing
           # the structured SHA output for the release body.
           just package | tee /tmp/check-artifacts.log
           # Extract the per-file SHA lines and the single-line JSON

@@ -9,12 +9,13 @@ import { flatten } from "../helpers";
 
 // Public-input layout parity between the Lean model and `ref/compress.ts`.
 //
-// The 31-slot ordering exists in four places -- `TransactCompressN`
-// (src/lib/poly_eval.circom:41), `PubInputs.sol :: compress(Transact, aux)`,
+// The 31-slot ordering exists in four places: `TransactCompressN`
+// (src/lib/poly_eval.circom), `PubInputs.sol :: compress(Transact, aux)`,
 // `src/test/ref/compress.ts :: flatten`, and `Lelantos.piSlot`
-// (lean/Lelantos/Circuit/Witness.lean). A transposition between any two of them silently
-// breaks proof verification, and `PolyEval` binding is stated *about* this layout, so a
-// wrong layout in Lean would make `transact_sound`'s compression clause meaningless.
+// (lean/Lelantos/Circuit/Witness.lean). A transposition between any two breaks
+// proof verification silently, and PolyEval binding is stated about this
+// layout, so a wrong layout in Lean would empty `transact_sound`'s compression
+// clause.
 //
 // `lean/expected/layout-2x2.txt` is generated from the Lean definition by
 // `lean/scripts/dump-layout.sh`, which also guards it against drift on the Lean side.

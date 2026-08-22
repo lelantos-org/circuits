@@ -1,0 +1,51 @@
+name: picus
+
+# Formal under-constrainedness checking (Veridise Picus + z3).
+#
+# Not on pull_request: the run builds a Docker image from upstream source and
+# then solves each circuit's R1CS, which is too slow for a PR gate. The
+# properties it checks regress when a gadget is added rather than on an ordinary
+# change.
+#
+# Weak safety, matching `just picus-all` with no STRONG argument: every output
+# is uniquely determined by the inputs. Strong safety extends that to
+# intermediate signals at considerably more solver time; run `just picus-all 1`
+# by hand when a new gadget lands.
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A nightly run that is still solving when the next one fires should be left
+# alone rather than cancelled — a partial verdict is worth less than a late one.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  picus:
+    runs-on: [ubuntu-latest]
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup
+
+      # docker/picus-arm64.Dockerfile is a native arm64 build for local use.
+      # Runners are x86_64, so build the fallback image `just picus` looks for
+      # second, tagged `picus:local`.
+      - name: Build Picus image
+        run: docker build -t picus:local https://github.com/Veridise/Picus.git
+
+      # Exits non-zero if any circuit comes back UNDER-CONSTRAINED or unknown.
+      # `picus-all` keeps going after a failure so one bad circuit does not hide
+      # the verdicts for the others.
+      - name: Check all circuits are properly constrained
+        run: just picus-all

@@ -3,8 +3,8 @@ pragma circom 2.2.3;
 include "lib/transact.circom";
 
 // 2-input × 2-output transact circuit. Logic is in Transact (lib/transact.circom).
-// Not the deployed shape — see 3x3.circom. Retained as a second instantiation of
-// Transact, and as the shape the Lean satisfiability witnesses are built at.
+// Not the deployed shape (see 3x3.circom): a second instantiation of Transact,
+// and the shape the Lean satisfiability witnesses are built at.
 //
 // DEPTH = 10 matches the on-chain CommitmentTree: 4^10 = 1,048,576 leaves.
 //

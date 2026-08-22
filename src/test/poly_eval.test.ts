@@ -1,28 +1,19 @@
 import { expect } from "chai";
 
-import { BN254_FR } from "./helpers";
-import { fixturePath, loadCircuit } from "./lib/circuit";
+import { BN254_FR, hornerEval, mod } from "./helpers";
+import { fixturePath, loadCircuit, type CircuitTester } from "./lib/circuit";
+import { TIMEOUT_CIRCUIT } from "./lib/constants";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
+// Must match `PolyEval(N)` in the fixture. The gadget is arity-generic, so this
+// is a size the wrapper picked, not one any production circuit uses — 2x2
+// compresses to 31 slots and tree_update_batch to 4 + 6·MAX_L.
 const N = 26;
 
-function mod(a: bigint, p: bigint): bigint {
-    const r = a % p;
-    return r < 0n ? r + p : r;
-}
-
-function hornerEval(coeffs: bigint[], z: bigint): bigint {
-    let acc = 0n;
-    for (let i = coeffs.length - 1; i >= 0; i--) {
-        acc = mod(acc * z + coeffs[i], BN254_FR);
-    }
-    return acc;
-}
-
 describe("PolyEval (Horner-form binding gadget)", function () {
-    this.timeout(120000);
+    this.timeout(TIMEOUT_CIRCUIT);
 
-    let circuit: any;
+    let circuit: CircuitTester;
 
     before(async () => {
         circuit = await loadCircuit(WRAPPER);

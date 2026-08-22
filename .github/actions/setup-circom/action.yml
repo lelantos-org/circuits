@@ -1,14 +1,18 @@
 name: Setup circom
 description: >-
   Install a pinned circom on PATH, with the binary and cargo artifacts cached.
-  Extracted from build/test/fuzz/publish, which carried byte-identical copies of
-  this block; a drift between them would mean CI compiled the circuits with a
-  different compiler than the release did.
+  Shared by every job that compiles a circuit, so CI and the release build with
+  the same compiler.
 
 inputs:
   version:
-    description: circom release tag, e.g. v2.2.3
-    required: true
+    description: >-
+      circom release tag, e.g. v2.2.3. Defaults to the pin below, which must
+      match the `pragma circom` line at the top of every src/**.circom — a
+      mismatch means CI compiles with a different compiler than the sources
+      declare. Pass a value only to test an upgrade.
+    required: false
+    default: v2.2.3
 
 runs:
   using: composite
@@ -58,9 +62,9 @@ runs:
       shell: bash
       run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-    # Fails loudly if a cache entry was restored for the wrong version — the
-    # cache key covers the version, but a stale key would otherwise go unnoticed
-    # until a circuit miscompiled.
+    # Fails if a cache entry was restored for the wrong version. The cache key
+    # covers the version, but a stale key would otherwise go unnoticed until a
+    # circuit miscompiled.
     - name: Verify circom
       shell: bash
       env:
