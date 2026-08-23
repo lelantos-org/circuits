@@ -8,6 +8,10 @@ name: publish
 # The trusted-setup ceremony is non-deterministic — snarkjs mixes fresh
 # randomness into the contribution regardless of `-e` — so the zkey and vkey
 # SHA-256 are recorded per release rather than pinned in advance.
+#
+# Everything that can fail cheaply runs before `npm publish`, because publishing
+# to GitHub Packages cannot be undone: a version number is spent even if the
+# release step afterwards fails.
 
 on:
   push:
@@ -27,8 +31,6 @@ jobs:
     permissions:
       contents: write   # required to attach SHAs to the release body
       packages: write
-    env:
-      PTAU_FILE: powersOfTau28_hez_final_17.ptau
     steps:
       - uses: actions/checkout@v4
 
@@ -60,62 +62,93 @@ jobs:
       - name: Setup circom
         uses: ./.github/actions/setup-circom
 
+      # All three shapes size to a 2^16 domain, so one ptau serves every
+      # ceremony in this job.
       - name: Cache ptau
         uses: actions/cache@v4
         with:
-          path: ptau/${{ env.PTAU_FILE }}
-          key: ptau-17
+          path: ptau/powersOfTau28_hez_final_16.ptau
+          key: ptau-16
 
       - name: Install npm dependencies
         run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # The package ships vectors/ as the cross-repo contract the SDK checks
+      # itself against. Nothing else in this job would notice them being stale,
+      # and regenerating is far cheaper than the ceremonies below.
+      - name: Golden vectors are current
+        run: just vectors-check
+
       - name: Build + verify 2x2 + 3x3 artifacts
-        id: build
-        run: |
-          # Tee stdout to keep the human-readable lines while capturing
-          # the structured SHA output for the release body.
-          just package | tee /tmp/check-artifacts.log
-          # Extract the per-file SHA lines and the single-line JSON
-          # summary into step outputs.
-          grep -E '^(2x2\.wasm|2x2_final\.zkey|verification_key\.json|3x3\.wasm|3x3_final\.zkey|3x3_verification_key\.json)=' /tmp/check-artifacts.log > /tmp/shas.txt
-          {
-              echo 'shas<<EOF'
-              cat /tmp/shas.txt
-              echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-          grep '^circuits-shas=' /tmp/check-artifacts.log >> "$GITHUB_OUTPUT"
+        run: just package
 
       - name: Build tree_update_batch artifacts
-        id: build_batch
         run: |
           just compile-batch setup-batch
-          # Stage flat wasm next to its r1cs for release upload.
+          # Stage the flat wasm next to its r1cs for release upload.
           cp build/tree_update_batch_js/tree_update_batch.wasm build/tree_update_batch.wasm
-          # Patch contract name then rename to clean release asset name.
+
+      # `setup` writes the 2x2 verifier to build/Verifier.sol and `setup-3x3`
+      # writes the deployed one to build/Verifier3x3.sol. Uploading the former
+      # under the bare name `Verifier.sol` invites a downloader to install the
+      # NON-deployed shape — the same filename hazard the justfile warns about
+      # for the contracts sync. Every release asset is named for its shape.
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp build/2x2.r1cs                          release/2x2.r1cs
+          cp build/2x2.wasm                          release/2x2.wasm
+          cp build/2x2_final.zkey                    release/2x2_final.zkey
+          cp build/verification_key.json             release/2x2_verification_key.json
+          cp build/Verifier.sol                      release/Verifier2x2.sol
+          cp build/3x3.r1cs                          release/3x3.r1cs
+          cp build/3x3.wasm                          release/3x3.wasm
+          cp build/3x3_final.zkey                    release/3x3_final.zkey
+          cp build/3x3_verification_key.json         release/3x3_verification_key.json
+          cp build/Verifier3x3.sol                   release/Verifier3x3.sol
+          cp build/tree_update_batch.r1cs            release/tree_update_batch.r1cs
+          cp build/tree_update_batch.wasm            release/tree_update_batch.wasm
+          cp build/tree_update_batch_final.zkey      release/tree_update_batch_final.zkey
+          cp build/tree_update_batch_verification_key.json \
+                                                     release/tree_update_batch_verification_key.json
+          # The generated contract name collides with the transact verifiers, so
+          # rename it before anyone compiles the three together.
           sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' \
-            build/TreeUpdateBatchVerifier.sol > build/TreeUpdateBatchVerifier.patched.sol
-          cp build/TreeUpdateBatchVerifier.patched.sol build/TreeUpdateBatchVerifier.sol
-          # Compute SHA-256 for every release asset (used in the body).
+            build/TreeUpdateBatchVerifier.sol > release/TreeUpdateBatchVerifier.sol
+
+      - name: Record release asset hashes
+        id: shas
+        run: |
+          set -euo pipefail
           {
               echo 'release_shas<<EOF'
-              sha256sum \
-                build/2x2.r1cs \
-                build/2x2.wasm \
-                build/2x2_final.zkey \
-                build/Verifier.sol \
-                build/3x3.r1cs \
-                build/3x3.wasm \
-                build/3x3_final.zkey \
-                build/3x3_verification_key.json \
-                build/Verifier3x3.sol \
-                build/tree_update_batch.r1cs \
-                build/tree_update_batch.wasm \
-                build/tree_update_batch_final.zkey \
-                build/TreeUpdateBatchVerifier.sol
+              ( cd release && sha256sum -- * )
               echo 'EOF'
           } >> "$GITHUB_OUTPUT"
+
+      # `files` in package.json is a whitelist, and npm silently skips an entry
+      # that does not exist — so a stale filename there ships a package whose
+      # index.json references a vector the tarball does not contain. Assert the
+      # tarball actually holds what index.json advertises.
+      - name: Package contents match the vector index
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const pack = require("/tmp/pack.json")[0];
+            const shipped = new Set(pack.files.map(f => f.path));
+            const index = require("./vectors/index.json");
+            const missing = ["vectors/index.json", ...Object.keys(index.files).map(f => `vectors/${f}`)]
+              .filter(f => !shipped.has(f));
+            if (missing.length) {
+              console.error(`::error::package.json files/exports omit: ${missing.join(", ")}`);
+              process.exit(1);
+            }
+            console.log(`package ships ${shipped.size} files, including every published vector`);
+          '
 
       - name: Publish to GitHub Packages
         run: npm publish
@@ -125,39 +158,27 @@ jobs:
       - name: Attach artifacts + release notes
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            build/2x2.r1cs
-            build/2x2.wasm
-            build/2x2_final.zkey
-            build/Verifier.sol
-            build/3x3.r1cs
-            build/3x3.wasm
-            build/3x3_final.zkey
-            build/3x3_verification_key.json
-            build/Verifier3x3.sol
-            build/tree_update_batch.r1cs
-            build/tree_update_batch.wasm
-            build/tree_update_batch_final.zkey
-            build/TreeUpdateBatchVerifier.sol
+          files: release/*
           body: |
             Published `@lelantos-org/circuits@${{ github.ref_name }}` to GitHub Packages.
 
             **PROTOTYPE — single-contributor trusted setup. NOT mainnet-safe.**
 
+            `Verifier3x3.sol` is the deployed transact verifier. `Verifier2x2.sol`
+            is the second instantiation and is **not** deployed — do not install it
+            as `contracts/src/verifiers/Verifier.sol`.
+
             ### Release asset SHA-256
 
             ```
-            ${{ steps.build_batch.outputs.release_shas }}
+            ${{ steps.shas.outputs.release_shas }}
             ```
 
             Verify a downloaded asset locally:
             ```
-            shasum -a 256 2x2.r1cs 2x2.wasm 2x2_final.zkey Verifier.sol \
-                          tree_update_batch.r1cs tree_update_batch.wasm tree_update_batch_final.zkey \
-                          TreeUpdateBatchVerifier.sol
+            shasum -a 256 <file>
             ```
 
-            The `*_final.zkey` (and the npm tarball's `verification_key.json`)
-            SHAs differ across builds because the contribution step is non-
-            deterministic. Hashes recorded above are the canonical values
-            for this exact release.
+            The `*_final.zkey` and `*verification_key.json` SHAs differ across
+            builds because the contribution step is non-deterministic. The hashes
+            recorded above are the canonical values for this exact release.

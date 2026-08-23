@@ -37,11 +37,15 @@ interface ArtifactCheck {
 }
 
 /// Size bands are wide by design. The 2x2 circuit produces:
-///   - 2x2.wasm                ~5 MB   (deterministic from circom)
-///   - 2x2_final.zkey          ~35-45 MB (varies with ceremony randomness)
-///   - verification_key.json   ~3 KB   (derived from the zkey)
+///   - 2x2.wasm                ~3.9 MB  (deterministic from circom)
+///   - 2x2_final.zkey          ~22 MB   (tracks the 2^16 FFT domain)
+///   - verification_key.json   ~3 KB    (derived from the zkey)
 /// A size outside these bands indicates a broken build rather than a new
 /// ceremony output.
+///
+/// zkey size follows the FFT domain and the wire count, not the ceremony
+/// randomness, so these are re-measured whenever the circuits change size.
+/// Measured at the counts in budget.json, all three on ptau-16.
 const FILES: ArtifactCheck[] = [
     {
         // The band is a broken-build detector rather than a size budget, so the
@@ -55,8 +59,9 @@ const FILES: ArtifactCheck[] = [
     {
         name: "2x2_final.zkey",
         path: resolve(BUILD, "2x2_final.zkey"),
-        minBytes: 30_000_000,
-        maxBytes: 50_000_000,
+        // Measured 21.7 MB.
+        minBytes: 12_000_000,
+        maxBytes: 36_000_000,
     },
     {
         name: "verification_key.json",
@@ -75,10 +80,9 @@ const FILES: ArtifactCheck[] = [
     /// Cost of that choice: ~26 MB gzipped added to every install, including
     /// 2x2-only consumers. `tree_update_batch` stays release-asset-only.
     ///
-    /// Bands are measured, not scaled from 2x2: the witness wasm is *smaller*
-    /// than 2x2's (wasm size tracks generated witness code, not constraint
-    /// count) while the zkey is larger at ~49 MB, which would have tripped a
-    /// band copied from the 2x2 entry.
+    /// Bands are measured, not scaled from 2x2: wasm size tracks generated
+    /// witness code rather than constraint count, so the two shapes' wasm files
+    /// are close in size while their zkeys are not.
     {
         name: "3x3.wasm",
         path: resolve(BUILD, "3x3.wasm"),
@@ -88,8 +92,9 @@ const FILES: ArtifactCheck[] = [
     {
         name: "3x3_final.zkey",
         path: resolve(BUILD, "3x3_final.zkey"),
-        minBytes: 40_000_000,
-        maxBytes: 70_000_000,
+        // Measured 30.0 MB.
+        minBytes: 18_000_000,
+        maxBytes: 48_000_000,
     },
     {
         name: "3x3_verification_key.json",

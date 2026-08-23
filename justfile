@@ -5,9 +5,10 @@ ROOT := justfile_directory()
 BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
 PTAU_URL_BASE := "https://storage.googleapis.com/zkevm/ptau"
+# All three shapes size to `cirPower = 16`, so one ptau serves the whole repo.
+# snarkjs picks the domain from `nConstraints + nPubInputs + nOutputs`, which
+# caps a 2^16 ceremony at 65,533 constraints — see `budget` below.
 PTAU16 := "powersOfTau28_hez_final_16.ptau"
-PTAU17 := "powersOfTau28_hez_final_17.ptau"
-PTAU20 := "powersOfTau28_hez_final_20.ptau"
 
 # Sync targets in sibling contracts/ checkout. Updated for new src/ layout
 # (verifiers grouped under src/verifiers/).
@@ -24,9 +25,9 @@ compile: (_compile "2x2")
 
 # Phase-2 trusted setup (single-contributor; INSECURE — prototype only).
 setup:
-    just _fetch-ptau "{{PTAU17}}"
+    just _fetch-ptau "{{PTAU16}}"
     echo "==> Phase-2 setup"
-    npx snarkjs groth16 setup "{{BUILD}}/2x2.r1cs" "{{PTAU_DIR}}/{{PTAU17}}" "{{BUILD}}/2x2_0.zkey"
+    npx snarkjs groth16 setup "{{BUILD}}/2x2.r1cs" "{{PTAU_DIR}}/{{PTAU16}}" "{{BUILD}}/2x2_0.zkey"
     echo "==> Single contribution (PROTOTYPE ONLY)"
     npx snarkjs zkey contribute "{{BUILD}}/2x2_0.zkey" "{{BUILD}}/2x2_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
     echo "==> Export verification key"
@@ -62,16 +63,20 @@ compile-3x3: (_compile "3x3")
 
 # Phase-2 trusted setup for 3x3 (single-contributor; INSECURE — prototype only).
 setup-3x3:
-    just _fetch-ptau "{{PTAU17}}"
+    just _fetch-ptau "{{PTAU16}}"
     echo "==> Phase-2 setup (3x3)"
-    npx snarkjs groth16 setup "{{BUILD}}/3x3.r1cs" "{{PTAU_DIR}}/{{PTAU17}}" "{{BUILD}}/3x3_0.zkey"
+    npx snarkjs groth16 setup "{{BUILD}}/3x3.r1cs" "{{PTAU_DIR}}/{{PTAU16}}" "{{BUILD}}/3x3_0.zkey"
     echo "==> Single contribution (PROTOTYPE ONLY)"
     npx snarkjs zkey contribute "{{BUILD}}/3x3_0.zkey" "{{BUILD}}/3x3_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
     echo "==> Export verification key"
     npx snarkjs zkey export verificationkey "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/3x3_verification_key.json"
     echo "==> Export Solidity verifier"
     npx snarkjs zkey export solidityverifier "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/Verifier3x3.sol"
-    echo "==> Done. Verifier at {{BUILD}}/Verifier3x3.sol — run `just rebuild-3x3` to sync it"
+    # Single quotes, not backticks: this recipe runs under `bash -ceuo pipefail`,
+    # where a backtick inside a double-quoted string is command substitution.
+    # Backticking `just rebuild-3x3` here made the echo re-invoke this recipe
+    # through its own dependency chain, recursing until the job timed out.
+    echo "==> Done. Verifier at {{BUILD}}/Verifier3x3.sol — run 'just rebuild-3x3' to sync it"
 
 # Used by `package`, since publish CI has no sibling contracts checkout. Local
 # circuit authors should prefer `rebuild-3x3`, which also pushes the verifier
@@ -86,12 +91,14 @@ build-artifacts-3x3: compile-3x3 setup-3x3
 compile-batch: (_compile "tree_update_batch")
 
 # tree_update_batch at MAX_L=4 has 57,106 constraints and so uses the 2^16 FFT
-# domain and PTAU16, with 8,430 constraints of headroom. A leaf slot costs
-# roughly 12k constraints, and `just budget` pins the domain so growth past it
-# fails CI rather than doubling proving time.
+# domain, with 8,427 constraints of headroom. A leaf slot costs roughly 12k
+# constraints, and `just budget` pins the domain so growth past it fails CI
+# rather than doubling proving time.
 #
-# 2x2 (44,406) and 3x3 (65,523) also fit 2^16, but their setup recipes still
-# fetch PTAU17; switching them is a separate change, and 3x3 clears 2^16 by 13.
+# 2x2 (44,406) and 3x3 (65,523) size to the same domain and share this ptau.
+# 3x3 clears it by 10 constraints, so a ceremony is also the second line of
+# defence: at 65,534 `groth16 setup` fails outright rather than silently
+# building a 2^17 zkey.
 
 # Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
 setup-batch:

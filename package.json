@@ -1,6 +1,6 @@
 {
   "name": "@lelantos-org/circuits",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Lelantos MASP Groth16 prover artifacts.",
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,7 @@
     "vectors/index.json",
     "vectors/transact-2x2.json",
     "vectors/transact-3x3.json",
-    "vectors/tree-update-batch-8.json",
+    "vectors/tree-update-batch-4.json",
     "README.md"
   ],
   "exports": {
@@ -27,7 +27,7 @@
     "./vectors": "./vectors/index.json",
     "./vectors/transact-2x2.json": "./vectors/transact-2x2.json",
     "./vectors/transact-3x3.json": "./vectors/transact-3x3.json",
-    "./vectors/tree-update-batch-8.json": "./vectors/tree-update-batch-8.json"
+    "./vectors/tree-update-batch-4.json": "./vectors/tree-update-batch-4.json"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",

@@ -660,9 +660,11 @@ R1CS totals from `snarkjs r1cs info`. Each circuit has one public input
 | `Transact(10, 3, 3)` | 65,523 | 65,624 | 210 |
 | `TreeUpdateBatch(10, 4)` | 57,106 | 57,054 | 62 |
 
-All three now fit the **2^16** FFT domain, and `just budget` pins each to
-it so regrowth is a CI failure rather than a silent doubling of proving
-time.
+All three fit the **2^16** FFT domain, so one ptau — `powersOfTau28_hez_final_16`
+— serves every ceremony in the repo. `just budget` pins each shape to that
+domain, so regrowth is a CI failure rather than a silent doubling of proving
+time; and because no larger ptau is fetched, a shape that outgrew 2^16 would
+also fail outright at `groth16 setup` rather than quietly building a 2^17 zkey.
 
 `Transact(10, 3, 3)` clears it by **10** constraints. snarkjs sizes the
 domain from `nConstraints + nPubInputs + nOutputs`, so the largest count
