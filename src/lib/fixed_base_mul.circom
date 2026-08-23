@@ -17,6 +17,26 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 // Window size 4 is optimal: a k-bit window costs 2^(k-1) - k + 8 constraints
 // over ceil(N/k) windows, so at N = 252, k=2 costs 1008, k=3 and k=4 tie at
 // 756, and k=5 costs 969.
+//
+// PERFORMANCE CONTRACT — the table must reach the gadget as a template
+// parameter, never as a `var` computed in a template body.
+//
+// "No constraint cost" is not "no cost". circom emits a template body into the
+// witness generator as well as into the constraint system, and it does not
+// prove that a `var` chain is input-independent: a `windowTable` call in the
+// body is compiled to wasm and re-executed on every proof, per component
+// instance. Each `bjAdd` is two field divisions — modular inversions — and a
+// 252-bit scalar costs 18 of them per window over 63 windows, so the 12 `MulH`
+// instances of `Transact(10, 3, 3)` paid ~27,000 inversions per witness. That
+// was ~345 ms, more than the entire Groth16 phase it saves.
+//
+// Template *arguments*, by contrast, must be compile-time known, so circom
+// evaluates them during instantiation and folds the results into the emitted
+// coefficients. `fixedBaseCoefs` below is therefore called only from an
+// argument position, and `FixedBaseMulBits` takes coefficients rather than a
+// base point. Moving that call into the body would restore the old cost
+// silently — the constraint count, the `vectors/`, and every test would still
+// pass, and only witness-generation time would regress.
 
 // Baby-Jubjub twisted Edwards addition, evaluated at compile time. Same formula
 // as circomlib's BabyAdd; complete, so it doubles and handles the identity
@@ -83,7 +103,63 @@ function mobius8(W, half, coord) {
     return coef;
 }
 
-// out = e * BASE, with `e` given as N_BITS LSB-first bits.
+// Windows covered by `fixedBaseCoefs`: enough for a 252-bit scalar, the widest
+// the field admits alias-free (2^252 < p) and the width `RCV_BITS()` uses.
+//
+// A literal rather than a function of N_BITS because circom requires array
+// lengths inside a `function` to be constant — a function's own parameters do
+// not qualify, unlike a template's.
+function FIXED_BASE_WINDOWS() { return 63; }
+
+// Per-window multilinear coefficients for BASE, indexed [window][row][mask]:
+//
+//   row 0  loX      row 1  hiX - loX
+//   row 2  loY      row 3  hiY - loY
+//
+// The hi-minus-lo differences are taken here rather than in the template so the
+// body holds no compile-time arithmetic at all.
+//
+// Window i is built over base 16^i * BASE, advanced by four doublings per step.
+// The sequence does not depend on the scalar width, so a narrower instance
+// reads a prefix of the same table and one table serves every width.
+//
+// CALL ONLY FROM A TEMPLATE ARGUMENT POSITION — see the performance contract
+// above. This is the expensive function; in an argument position it runs once
+// per instantiation in the compiler and never reaches the witness generator.
+function fixedBaseCoefs(BASE) {
+    var C[63][4][8];
+
+    var bx = BASE[0];
+    var by = BASE[1];
+
+    for (var i = 0; i < FIXED_BASE_WINDOWS(); i++) {
+        var W[16][2] = windowTable(bx, by);
+
+        var loX[8] = mobius8(W, 0, 0);
+        var hiX[8] = mobius8(W, 1, 0);
+        var loY[8] = mobius8(W, 0, 1);
+        var hiY[8] = mobius8(W, 1, 1);
+
+        for (var m = 0; m < 8; m++) {
+            C[i][0][m] = loX[m];
+            C[i][1][m] = hiX[m] - loX[m];
+            C[i][2][m] = loY[m];
+            C[i][3][m] = hiY[m] - loY[m];
+        }
+
+        // Advance the window base by 2^4.
+        for (var k = 0; k < 4; k++) {
+            var dbl[2] = bjAdd(bx, by, bx, by);
+            bx = dbl[0];
+            by = dbl[1];
+        }
+    }
+
+    return C;
+}
+
+// out = e * BASE, with `e` given as N_BITS LSB-first bits and BASE supplied
+// through `COEFS = fixedBaseCoefs(BASE)`.
 //
 // DANGER: the caller MUST constrain every e[i] to {0,1}. The window lookup is a
 // multilinear extension of the table and agrees with it only on the boolean
@@ -93,16 +169,20 @@ function mobius8(W, half, coord) {
 // booleanity constraint can make the circuit under-constrained.
 //
 // Use `FixedBaseMul` below unless the caller already holds a constrained bit
-// array to share.
+// array to share; it derives COEFS itself and cannot be handed a table that
+// disagrees with the base it meant.
 //
 // Bits above the top window are zero-padded, so N_BITS need not be a multiple
 // of 4. The scalar is reduced modulo the subgroup order by the group itself; no
 // range check is implied here.
-template FixedBaseMulBits(N_BITS, BASE) {
+template FixedBaseMulBits(N_BITS, COEFS) {
     signal input e[N_BITS];
     signal output out[2];
 
     var nWindows = (N_BITS + 3) \ 4;
+    // COEFS carries FIXED_BASE_WINDOWS() windows and this reads a prefix of it.
+    // N_BITS is a template parameter, so this folds away at compile time.
+    assert(nWindows <= FIXED_BASE_WINDOWS());
 
     signal sel[nWindows][4];
     // prod[m] = product of the selector bits in mask m, indexed so that
@@ -113,12 +193,7 @@ template FixedBaseMulBits(N_BITS, BASE) {
 
     component adder[nWindows - 1];
 
-    var bx = BASE[0];
-    var by = BASE[1];
-
     for (var i = 0; i < nWindows; i++) {
-        var W[16][2] = windowTable(bx, by);
-
         for (var b = 0; b < 4; b++) {
             var pos = 4 * i + b;
             sel[i][b] <== pos < N_BITS ? e[pos] : 0;
@@ -136,20 +211,15 @@ template FixedBaseMulBits(N_BITS, BASE) {
         // Split on the top bit: out = lo + s3 * (hi - lo), where lo and hi
         // interpolate the bottom and top halves of the table. One constraint per
         // coordinate, the four products above shared between them.
-        var loX[8] = mobius8(W, 0, 0);
-        var hiX[8] = mobius8(W, 1, 0);
-        var loY[8] = mobius8(W, 0, 1);
-        var hiY[8] = mobius8(W, 1, 1);
-
         var accLoX = 0;
         var accHiX = 0;
         var accLoY = 0;
         var accHiY = 0;
         for (var m = 0; m < 8; m++) {
-            accLoX += loX[m] * prod[i][m];
-            accHiX += (hiX[m] - loX[m]) * prod[i][m];
-            accLoY += loY[m] * prod[i][m];
-            accHiY += (hiY[m] - loY[m]) * prod[i][m];
+            accLoX += COEFS[i][0][m] * prod[i][m];
+            accHiX += COEFS[i][1][m] * prod[i][m];
+            accLoY += COEFS[i][2][m] * prod[i][m];
+            accHiY += COEFS[i][3][m] * prod[i][m];
         }
 
         wx[i] <== accHiX * sel[i][3] + accLoX;
@@ -167,13 +237,6 @@ template FixedBaseMulBits(N_BITS, BASE) {
             }
             adder[i - 1].x2 <== wx[i];
             adder[i - 1].y2 <== wy[i];
-        }
-
-        // Advance the window base by 2^4.
-        for (var k = 0; k < 4; k++) {
-            var dbl[2] = bjAdd(bx, by, bx, by);
-            bx = dbl[0];
-            by = dbl[1];
         }
     }
 
@@ -200,7 +263,7 @@ template FixedBaseMul(N_BITS, BASE) {
     component bits = Num2Bits(N_BITS);
     bits.in <== scalar;
 
-    component mul = FixedBaseMulBits(N_BITS, BASE);
+    component mul = FixedBaseMulBits(N_BITS, fixedBaseCoefs(BASE));
     for (var i = 0; i < N_BITS; i++) {
         mul.e[i] <== bits.out[i];
     }

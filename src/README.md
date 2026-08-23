@@ -397,6 +397,26 @@ constraints; with its `Num2Bits(252)` the whole `MulH` is 1,000.
 > [`test/fuzz/fixed_base_mul.fuzz.test.ts`](test/fuzz/fixed_base_mul.fuzz.test.ts),
 > which compares them over arbitrary 252-bit scalars.
 
+> **The window tables must be passed in, not computed in the template body.**
+> circom emits a template body into the witness generator as well as into the
+> constraint system, and it does not prove that a `var` chain is
+> input-independent. Through 0.9.2 `FixedBaseMulBits` called `windowTable` from
+> its body, so the tables were rebuilt on *every proof*, once per component
+> instance: each `bjAdd` is two modular inversions, 18 per window over 63
+> windows, and the 12 `MulH` instances of `Transact(10, 3, 3)` came to roughly
+> 27,000 inversions per witness — about 345 ms, more than the whole Groth16
+> phase the constraint saving buys back. Template *arguments* must be
+> compile-time known, so circom evaluates them during instantiation and folds
+> the result into the emitted coefficients. `FixedBaseMulBits` therefore takes
+> `COEFS`, and `fixedBaseCoefs` is only ever called from an argument position.
+> Moving that call back into the body regresses witness generation ~3.7× while
+> leaving the constraint count, the `vectors/` and every test unchanged.
+>
+> Fixed in 0.10.0. The constraint system is untouched — the r1cs of all three
+> shapes is byte-identical to 0.9.2, so the zkeys, verification keys, exported
+> verifiers and committed `vectors/` all carry over and no ceremony is implied.
+> Only `2x2.wasm` and `3x3.wasm` change.
+
 `ValueCommit` exposes the `rH = rcv · H` component so balance can sum
 points; collapsing it to a scalar `Σrcv_in − Σrcv_out` would wrap into 254
 bits when outputs exceed inputs and break the decomposition.
@@ -760,7 +780,7 @@ cheaper to verify, it caps how many deposits share one verification.
 | [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library suite, including the `EMPTY_SUBTREE` table read out of the circom source. |
 | [`test/frontier_root.test.ts`](test/frontier_root.test.ts) | FrontierRoot corruption tests. |
 | [`test/poly_eval.test.ts`](test/poly_eval.test.ts) | PolyEval suite. |
-| [`test/fixed_base_mul.test.ts`](test/fixed_base_mul.test.ts) | FixedBaseMul: window tables, the 4-bit mux, the accumulator chain, and agreement with circomlib's `EscalarMulFix`. |
+| [`test/fixed_base_mul.test.ts`](test/fixed_base_mul.test.ts) | FixedBaseMul: the precomputed window coefficients, the 4-bit mux, the accumulator chain, and agreement with circomlib's `EscalarMulFix`. |
 | [`test/reference.test.ts`](test/reference.test.ts) | Unit tests for the parts of `test/ref/` no circuit test reaches transitively. |
 | [`test/check_budget.test.ts`](test/check_budget.test.ts) | Coverage for the constraint-budget gate itself. |
 | [`test/formal/layout_parity.test.ts`](test/formal/layout_parity.test.ts) | Pins the PI slot order of both shipped shapes against the Lean dumps `lean/expected/layout-{2x2,3x3}.txt`. |

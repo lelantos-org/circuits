@@ -16,7 +16,7 @@ template TestFixedBaseMulBits() {
     H[0] = H_BASE_X();
     H[1] = H_BASE_Y();
 
-    component mul = FixedBaseMulBits(RCV_BITS(), H);
+    component mul = FixedBaseMulBits(RCV_BITS(), fixedBaseCoefs(H));
     for (var i = 0; i < 252; i++) {
         mul.e[i] <== e[i];
     }
