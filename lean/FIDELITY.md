@@ -48,7 +48,7 @@ collapsed rather than transcribed:
 
 1. `src/lib/frontier_root.circom` is not modelled at all, so its 29 constraint lines have no
    rows here. `README.md` calls this the largest remaining gap in the batch proof.
-2. `src/lib/fixed_base_mul.circom` — `FixedBaseMulBits` / `FixedBaseMul`, ~110 lines and 748
+2. `src/lib/fixed_base_mul.circom` — `FixedBaseMulBits` / `FixedBaseMul`, ~270 lines and 748
    constraints — is collapsed into the `escalarMul` / `escalarMul_spec` axiom pair
    (`Lelantos/Model/Jubjub.lean`). Note this is **not** covered by the circomlib carve-out
    below: `MulH` deliberately does not use circomlib's `EscalarMulFix`
