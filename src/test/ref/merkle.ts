@@ -85,6 +85,54 @@ export class MerkleTree {
         this.nodeCache.clear();
     }
 
+    /**
+     * Replace the leaf array with `n` copies of `c`, seeding the node cache so
+     * the following `root()` / `frontier()` / handful of `insert`s cost
+     * O(depth · ARITY) hashes rather than the ~(4^depth − 1)/3 a distinct-leaf
+     * fill of the same size costs. At depth 10 that is ~40 hashes instead of
+     * ~350k, which is what makes a production-depth prefill viable inside a
+     * property test (see `test/lib/batch.ts::buildHonest`).
+     *
+     * A full subtree whose every leaf is `c` depends only on its level, so
+     * `constChain` here plays the role `zeros` plays for the empty subtree.
+     * `nodeAt` descends from the root through exactly one *partial* node per
+     * level; the only other nodes it reads are that node's lower-indexed
+     * siblings — full, and seeded below — and its higher-indexed ones, which
+     * `nodeAt` short-circuits to `zeros`. `frontier()` reads the same seeded
+     * siblings, so both agree with a naive fill (`reference.test.ts` checks it).
+     *
+     * Every filled frontier slot at a given level comes out equal under this
+     * fill, so a caller that needs the siblings at one level to differ must use
+     * `insert` / `setLeaves` and pay the full cost.
+     */
+    fillConstant(n: number, c: Field): void {
+        if (!Number.isInteger(n) || n < 0 || n > ARITY ** this.depth) {
+            throw new RangeError(`fillConstant: n must be an integer in 0..${ARITY ** this.depth}, got ${n}`);
+        }
+        this.leaves = new Array<Field>(n).fill(c);
+        this.nodeCache.clear();
+        if (n === 0) return;
+
+        // constChain[lvl] = root of a full level-lvl subtree of `c` leaves.
+        const constChain: Field[] = [c];
+        for (let lvl = 1; lvl <= this.depth; lvl++) {
+            const child = constChain[lvl - 1];
+            constChain.push(this.hashNode(child, child, child, child));
+        }
+
+        // `partial` is the first level-lvl node not wholly below `n`: index
+        // i < partial spans [i·stride, (i+1)·stride) with (i+1)·stride ≤ n, so
+        // it is a full subtree of `c`. The root (lvl == depth) is left to
+        // `nodeAt`; level 0 is read straight out of `leaves`.
+        for (let lvl = 1; lvl < this.depth; lvl++) {
+            const partial = Math.floor(n / this.strides[lvl]);
+            const firstSibling = Math.floor(partial / ARITY) * ARITY;
+            for (let idx = firstSibling; idx < partial; idx++) {
+                this.nodeCache.set(this.cacheKey(lvl, idx), constChain[lvl]);
+            }
+        }
+    }
+
     root(): Field {
         return this.nodeAt(this.depth, 0);
     }

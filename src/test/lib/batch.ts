@@ -94,6 +94,22 @@ export function seededLeaf(P: Poseidon, J: Jubjub, seed: number, isDeposit: 0 | 
 }
 
 /**
+ * Throwaway value for every pre-batch leaf.
+ *
+ * One constant rather than a distinct leaf per slot, so `fillConstant` can build
+ * the prefill in O(depth) hashes. A distinct fill costs ~350k Poseidon calls at
+ * depth 10 (~40s), which the frontier fuzz suite pays once per trial over
+ * `start_index` values near 4^10 — that is what pushed it past its 900s mocha
+ * timeout at FUZZ=heavy.
+ *
+ * The trade-off: all filled frontier slots at one level come out equal here, so
+ * an intra-level permutation of the frontier is invisible to a witness built
+ * from this tree. `frontier_root.test.ts` covers permutation at depth 3 over a
+ * distinct-leaf tree, where the full fill is cheap.
+ */
+const PREFILL_LEAF: Field = 0xdeadn;
+
+/**
  * An honest batch: `prefilled` throwaway leaves already in the tree, then
  * `leaves` inserted on top, with the frontier taken at the old root and the
  * Fiat-Shamir pair derived over the resulting coefficients.
@@ -105,7 +121,7 @@ export function buildHonest(
     leaves: LeafWitness[],
 ): BatchWitness {
     const tree = new MerkleTree(P, DEPTH);
-    for (let i = 0; i < prefilled; i++) tree.insert(BigInt(0xdead + i));
+    tree.fillConstant(prefilled, PREFILL_LEAF);
     const oldRoot = tree.root();
     const frontier = tree.frontier();
 

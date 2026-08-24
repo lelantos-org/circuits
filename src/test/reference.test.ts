@@ -100,6 +100,59 @@ describe("reference / merkle path recomputation", function () {
         }
     });
 
+    // `fillConstant` seeds the node cache instead of hashing every internal
+    // node, so it is only sound while it agrees with a naive fill of the same
+    // leaves — including the frontier, which reads the seeded siblings.
+    it("fillConstant agrees with a naive constant fill (root and frontier)", () => {
+        const C = 0xdeadn;
+        for (const depth of [1, 2, 3]) {
+            const capacity = 4 ** depth;
+            for (let n = 0; n <= capacity; n++) {
+                const naive = new MerkleTree(P, depth);
+                for (let i = 0; i < n; i++) naive.insert(C);
+
+                const fast = new MerkleTree(P, depth);
+                fast.fillConstant(n, C);
+
+                const where = `depth ${depth}, n ${n}`;
+                expect(fast.root(), `root at ${where}`).to.equal(naive.root());
+                expect(fast.frontier(), `frontier at ${where}`).to.deep.equal(naive.frontier());
+
+                // The prefill is only ever a base for further inserts, so the
+                // post-insert state has to agree too.
+                if (n < capacity) {
+                    naive.insert(7n);
+                    fast.insert(7n);
+                    expect(fast.root(), `root after insert at ${where}`).to.equal(naive.root());
+                    expect(fast.frontier(), `frontier after insert at ${where}`)
+                        .to.deep.equal(naive.frontier());
+                }
+            }
+        }
+    });
+
+    // Depth 10 is the production shape and the one the frontier fuzz suite
+    // prefills near capacity; a naive fill there is ~350k hashes, so this
+    // checks the boundary values rather than every n.
+    it("fillConstant agrees with a naive fill at depth 10 boundary counts", () => {
+        const C = 0xdeadn;
+        for (const n of [0, 1, 3, 4, 5, 15, 16, 17, 63, 64, 21, 1023, 1024, 4097]) {
+            const naive = new MerkleTree(P, 10);
+            for (let i = 0; i < n; i++) naive.insert(C);
+            const fast = new MerkleTree(P, 10);
+            fast.fillConstant(n, C);
+            expect(fast.root(), `root at n ${n}`).to.equal(naive.root());
+            expect(fast.frontier(), `frontier at n ${n}`).to.deep.equal(naive.frontier());
+        }
+    });
+
+    it("fillConstant rejects a count outside 0..4^depth", () => {
+        const tree = new MerkleTree(P, 3);
+        expect(() => tree.fillConstant(-1, 1n)).to.throw(RangeError);
+        expect(() => tree.fillConstant(65, 1n)).to.throw(RangeError);
+        expect(() => tree.fillConstant(1.5, 1n)).to.throw(RangeError);
+    });
+
     it("cacheKeyStride grows past the depth-10 value", () => {
         // A stride fixed at 2^18 is exact at depth 10 and one short at depth 11,
         // where the largest level-1 index is 4^10 - 1.

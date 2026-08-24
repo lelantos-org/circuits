@@ -15,8 +15,11 @@
 // circuit, so a rejection here means `verifyProof` also rejects and a tampered
 // batch cannot corrupt the authoritative root.
 //
-// Slow: each fast-check trial builds two depth-10 batch witnesses. Run count
-// follows the shared `FUZZ` env (`light` / `medium` / `heavy`).
+// Each fast-check trial builds two depth-10 batch witnesses. The prefilled tree
+// behind them reaches ~4^10 leaves, so `buildHonest` relies on
+// `MerkleTree.fillConstant` to build it in O(depth) hashes; a distinct-leaf fill
+// costs ~40s per trial and blows the suite timeout. Run count follows the shared
+// `FUZZ` env (`light` / `medium` / `heavy`).
 
 import * as fc from "fast-check";
 
@@ -32,7 +35,7 @@ const CAPACITY = 4 ** DEPTH;
 const WRAPPER = srcPath("tree_update_batch.circom");
 
 // Run count comes from `fcParamsFor("FRONTIER")` at the call site below.
-// `FRONTIER` scales to 0.5x NUM_RUNS in arbitraries.ts; override with
+// `FRONTIER` scales to 0.25x NUM_RUNS in arbitraries.ts; override with
 // `FUZZ_RUNS_FRONTIER=N`.
 
 /// Compose a `start_index` whose quaternary digits at every level are
