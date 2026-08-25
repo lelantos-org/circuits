@@ -2,15 +2,16 @@
 
 Multi-Asset Shielded Pool circuits implemented in Circom 2.2.3 over the
 BN254 scalar field, with Baby-Jubjub used for the value-commitment
-subgroup. Three Groth16 entry points:
+subgroup. Four Groth16 entry points:
 
 | Circuit | Instantiation | Status | Purpose |
 |---|---|---|---|
 | [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` | not deployed | Second instantiation of the shared template, and the shape the Lean witnesses are built at. |
 | [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` | the transact shape; on-chain wiring incomplete | Transact at 3 shielded inputs × 3 shielded outputs. 42-slot PI layout (§2a). |
+| [`4x4.circom`](4x4.circom) | `Transact(10, 4, 4)` | published, not deployed | Transact at 4 shielded inputs × 4 shielded outputs. 53-slot PI layout, same construction as §2a, pinned by `lean/expected/layout-4x4.txt` and by `vectors/transact-4x4.json`. Needs a 2^17 ptau — it is 86,680 constraints — and a 53-slot `PubInputs.compress` overload before anything can verify it on-chain. |
 | [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 4)` | deployed | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 4 leaves, any count (odd included). See §14. |
 
-Both transact shapes instantiate one shared template,
+All three transact shapes instantiate one shared template,
 [`Transact(DEPTH, N_IN, N_OUT)`](lib/transact.circom), over a quaternary
 Merkle tree of depth 10 (`4^10 = 1,048,576` leaves). Each output carries
 an off-circuit FMD clue `(R, clue_bits)` supplied by the sender and
@@ -758,8 +759,9 @@ cheaper to verify, it caps how many deposits share one verification.
 |---|---|
 | [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` — deployed 2-in × 2-out transact circuit. |
 | [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` — 3-in × 3-out shape; built and vector-pinned, not on-chain. |
+| [`4x4.circom`](4x4.circom) | `Transact(10, 4, 4)` — 4-in × 4-out shape; built, vector-pinned and proved in Lean; not on-chain. |
 | [`tree_update_batch.circom`](tree_update_batch.circom) | Relayer batch tree-advance circuit (frontier-bound). See §14. |
-| [`lib/transact.circom`](lib/transact.circom) | `Transact(DEPTH, N_IN, N_OUT)` — the shared transact template both shapes instantiate. |
+| [`lib/transact.circom`](lib/transact.circom) | `Transact(DEPTH, N_IN, N_OUT)` — the shared transact template all three shapes instantiate. |
 | [`lib/tags.circom`](lib/tags.circom) | Domain-separation tag constants and `2^64`. |
 | [`lib/common.circom`](lib/common.circom) | `PathIndexSelectors`, `EmptySubtreeHashes` — shared between merkle / insert / frontier_root. |
 | [`lib/note.circom`](lib/note.circom) | Note commitment, key derivation, nullifier. |

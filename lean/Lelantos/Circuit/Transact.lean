@@ -185,7 +185,7 @@ structure TxBinding (w : TxWitness depth nIn nOut) : Prop where
 /-- **Soundness of `Transact`.** Any assignment satisfying the constraint system yields a
 well-formed transaction. -/
 theorem transact_sound {w : TxWitness depth nIn nOut}
-    (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3) (h : TransactSat w) : TxWellFormed w where
+    (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4) (h : TransactSat w) : TxWellFormed w where
   realSlots i hi hreal := spentNote_sound (h.spent_sat i hi) hreal
   dummySlots _i hi hdum := dummyZeroValue_zero h.dummy_zero hi hdum
   sharedRoot := h.spent_root
@@ -208,12 +208,12 @@ The assumption is placed in the statement rather than in an axiom so that it can
 into `transact_sound` or anything else; `Lelantos.Model.Poseidon`'s module note records why the
 alternatives — an axiom, or a `∨ PoseidonCollision` conclusion — are worse. -/
 theorem transact_binding {w : TxWitness depth nIn nOut} (hnc : ¬ PoseidonCollision)
-    (hnOut : nOut ≤ 3) (h : TransactSat w) : TxBinding w where
+    (hnOut : nOut ≤ 4) (h : TransactSat w) : TxBinding w where
   rhoDistinct := by
     intro j j' hj hj' hne heq
     rw [h.rho_derived j hj, h.rho_derived j' hj'] at heq
     have hsmall : ∀ m : ℕ, m < nOut → m < p := fun m hm =>
-      lt_trans (lt_of_lt_of_le hm hnOut) three_lt_p
+      lt_trans (lt_of_lt_of_le hm hnOut) four_lt_p
     exact hne (natCast_inj_of_lt (hsmall j hj) (hsmall j' hj') (deriveRho_inj hnc heq).2)
   membershipBinding := by
     intro i hi hreal leaf' pe' hmem
@@ -234,7 +234,7 @@ bucket's asset, then no output can carry it. Immediate from `conservation`, but 
 stating: it is the "you cannot mint a new asset out of nothing" property, and it holds
 over `ℕ` so no wrap-around escape exists. -/
 theorem no_asset_creation {w : TxWitness depth nIn nOut}
-    (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3) (h : TransactSat w) (a : F)
+    (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4) (h : TransactSat w) (a : F)
     (hnotIn : ∀ i, i < nIn → inAsset w i ≠ a) (hnotPub : w.publicAssetId ≠ a) :
     ∀ j, j < nOut → outAsset w j = a → outValue w j = 0 := by
   classical
@@ -300,9 +300,9 @@ theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
 
 /-! ## The deployed instances
 
-`transact_sound` is stated for `nIn ≤ 3`, `nOut ≤ 3` — the bound comes from
+`transact_sound` is stated for `nIn ≤ 4`, `nOut ≤ 4` — the bound comes from
 `perAssetValueBalance_nat`, where it is what keeps each side of the balance equation below
-`p`. The repository ships exactly two shapes, and both sit inside it. -/
+`p`. The repository instantiates exactly three shapes, and all three sit inside it. -/
 
 /-- `Transact(10, 2, 2)` — `src/2x2.circom:28`. Not the deployed shape; retained as a
 second instantiation of `Transact` and as the shape the satisfiability witnesses in
@@ -312,6 +312,12 @@ abbrev Transact2x2 := TxWitness 10 2 2
 /-- `Transact(10, 3, 3)` — `src/3x3.circom:44`. **The deployed shape**; see the circom
 header. -/
 abbrev Transact3x3 := TxWitness 10 3 3
+
+/-- `Transact(10, 4, 4)` — `src/4x4.circom:45`. Neither deployed nor published: it has no
+`PubInputs.sol` compress overload and no golden vectors, and at 86,680 constraints it is the
+one shape that does not fit the 2^16 FFT domain. It is modeled here because it is the shape
+that fixes the `≤ 4` slot bound `transact_sound` carries. -/
+abbrev Transact4x4 := TxWitness 10 4 4
 
 /-- **Soundness at the `2x2` instance.** -/
 theorem transact2x2_sound {w : Transact2x2} (h : TransactSat w) : TxWellFormed w :=
@@ -328,6 +334,15 @@ theorem transact2x2_binding {w : Transact2x2} (hnc : ¬ PoseidonCollision)
 
 /-- **The `3x3` binding layer.** -/
 theorem transact3x3_binding {w : Transact3x3} (hnc : ¬ PoseidonCollision)
+    (h : TransactSat w) : TxBinding w :=
+  transact_binding hnc (by norm_num) h
+
+/-- **Soundness at the `4x4` instance.** -/
+theorem transact4x4_sound {w : Transact4x4} (h : TransactSat w) : TxWellFormed w :=
+  transact_sound (by norm_num) (by norm_num) h
+
+/-- **The `4x4` binding layer.** -/
+theorem transact4x4_binding {w : Transact4x4} (hnc : ¬ PoseidonCollision)
     (h : TransactSat w) : TxBinding w :=
   transact_binding hnc (by norm_num) h
 

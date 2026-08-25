@@ -232,31 +232,31 @@ private theorem cast_side (n : ℕ) (v : ℕ → F) (P : ℕ → Prop) [∀ i, D
   rw [Nat.cast_add, cast_term, cast_sum_terms]
 
 /-- **Per-asset conservation over `ℕ`.** With every value 64-bit range-checked and at most
-three input and three output slots, the field equality is an exact integer equality: no
+four input and four output slots, the field equality is an exact integer equality: no
 wrap-around forgery is possible.
 
-`≤ 3` is not a property of the circuit — `PerAssetValueBalance` is written for arbitrary
+`≤ 4` is not a property of the circuit — `PerAssetValueBalance` is written for arbitrary
 `N_IN` / `N_OUT`. It is the largest slot count for which the sums provably stay below `p`
-using only `two_pow_66_lt_p`, and it covers every shape the repository ships:
-`Transact(10, 2, 2)` and `Transact(10, 3, 3)`. A wider shape needs a correspondingly wider
-bound in `Lelantos.Model.Field`, and nothing else. -/
+using only `two_pow_67_lt_p`, and it covers every shape the repository ships:
+`Transact(10, 2, 2)`, `Transact(10, 3, 3)` and `Transact(10, 4, 4)`. A wider shape needs a
+correspondingly wider bound in `Lelantos.Model.Field`, and nothing else. -/
 theorem perAssetValueBalance_nat
     (h : PerAssetValueBalanceSat nIn nOut inA inV outA outV pa pi po
       pubInv pubEq inInv inEq outInv outEq inTerm outTerm lhs rhs)
-    (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3)
+    (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4)
     (hInV : ∀ i, i < nIn → (inV i).val < 2 ^ 64)
     (hOutV : ∀ j, j < nOut → (outV j).val < 2 ^ 64)
     (hPi : pi.val < 2 ^ 64) (hPo : po.val < 2 ^ 64)
     (a : F) : ConservesAtNat nIn nOut inA inV outA outV pa pi po a := by
   classical
   have hfield := perAssetValueBalance_all_assets h a
-  -- `(n + 1) · 2^64 ≤ 4 · 2^64 = 2^66 < p` for `n ≤ 3`.
-  have hbound : ∀ n : ℕ, n ≤ 3 → (n + 1) * 2 ^ 64 < p := by
+  -- `(n + 1) · 2^64 ≤ 5 · 2^64 ≤ 2^67 < p` for `n ≤ 4`.
+  have hbound : ∀ n : ℕ, n ≤ 4 → (n + 1) * 2 ^ 64 < p := by
     intro n hn
-    have : (n + 1) * 2 ^ 64 ≤ 2 ^ 66 := by
-      calc (n + 1) * 2 ^ 64 ≤ 4 * 2 ^ 64 := Nat.mul_le_mul_right _ (by omega)
-        _ = 2 ^ 66 := by norm_num
-    exact lt_of_le_of_lt this two_pow_66_lt_p
+    have : (n + 1) * 2 ^ 64 ≤ 2 ^ 67 := by
+      calc (n + 1) * 2 ^ 64 ≤ 8 * 2 ^ 64 := Nat.mul_le_mul_right _ (by omega)
+        _ = 2 ^ 67 := by norm_num
+    exact lt_of_le_of_lt this two_pow_67_lt_p
   have hL := side_le nIn inV (fun i => inA i = a) pi (pa = a) hInV hPi
   have hR := side_le nOut outV (fun j => outA j = a) po (pa = a) hOutV hPo
   have hLp : pi.val * indN (pa = a) + ∑ i ∈ Finset.range nIn, (inV i).val * indN (inA i = a) < p :=

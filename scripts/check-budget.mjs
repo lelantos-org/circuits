@@ -19,14 +19,14 @@ import * as snarkjs from "snarkjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BUDGET_FILE = path.join(ROOT, "budget.json");
-const COMPILE_HINT = "just compile compile-3x3 compile-batch";
+const COMPILE_HINT = "just compile compile-3x3 compile-4x4 compile-batch";
 const NAME_WIDTH = 18;
 
 /**
  * Newest mtime among the .circom sources the production circuits are built
  * from; an artifact older than this is stale.
  *
- * `src/test/` is excluded: fixtures are not inputs to 2x2 / 3x3 /
+ * `src/test/` is excluded: fixtures are not inputs to 2x2 / 3x3 / 4x4 /
  * tree_update_batch, and counting them would fail the gate on every added test.
  */
 function newestSourceMtime(dir) {

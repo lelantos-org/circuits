@@ -37,7 +37,7 @@ const ROOT = resolve(HERE, "../../..");
 // Every shape that ships a published vector. `3x3` is the deployed one; `2x2`
 // is retained as a second instantiation of `Transact` and pins that the
 // ordering is a property of the template, not of one arity.
-const SHIPPED_SHAPES = ["2x2", "3x3"] as const;
+const SHIPPED_SHAPES = ["2x2", "3x3", "4x4"] as const;
 
 interface PublishedVector {
     // Parsed straight out of the published JSON, so it is typed as the circom

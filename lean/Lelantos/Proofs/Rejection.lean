@@ -78,7 +78,7 @@ theorem cross_asset_cancellation_rejected (h : TransactSat w)
 
 /-- **Minting is rejected.** An asset that appears on no input slot and is not the public
 bucket's asset cannot leave the transaction with a non-zero value. -/
-theorem mint_from_nothing_rejected (h : TransactSat w) (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3)
+theorem mint_from_nothing_rejected (h : TransactSat w) (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4)
     {a : F} (hnotIn : ∀ i, i < nIn → inAsset w i ≠ a) (hnotPub : w.publicAssetId ≠ a)
     {j : ℕ} (hj : j < nOut) (hja : outAsset w j = a) (hpos : outValue w j ≠ 0) : False :=
   hpos (no_asset_creation hnIn hnOut h a hnotIn hnotPub j hj hja)
@@ -102,7 +102,7 @@ theorem inflation_rejected (h : TransactSat w) (hnIn : nIn = 2) (hnOut : nOut = 
 
 /-- **A padding slot carrying value is rejected.** This is what makes a dummy input neutral
 for conservation, and hence what makes the bypassed Merkle check safe. -/
-theorem dummy_with_value_rejected (h : TransactSat w) (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3)
+theorem dummy_with_value_rejected (h : TransactSat w) (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4)
     {i : ℕ} (hi : i < nIn) (hdummy : (w.spent i).isDummy = 1)
     (hval : (w.spent i).value ≠ 0) : False :=
   hval ((transact_sound hnIn hnOut h).dummySlots i hi hdummy)
@@ -110,7 +110,7 @@ theorem dummy_with_value_rejected (h : TransactSat w) (hnIn : nIn ≤ 3) (hnOut 
 /-- **A zero asset id on an output is rejected**, unconditionally — the check is not gated
 on a dummy flag, unlike the input side. This is what keeps `packed_av ≥ 2^64` and so keeps
 the commitment preimage separated from the tag-prefixed hashes. -/
-theorem zero_asset_output_rejected (h : TransactSat w) (hnIn : nIn ≤ 3) (hnOut : nOut ≤ 3)
+theorem zero_asset_output_rejected (h : TransactSat w) (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4)
     {j : ℕ} (hj : j < nOut) (hzero : outAsset w j = 0) : False :=
   ((transact_sound hnIn hnOut h).outputs j hj).assetNonzero hzero
 
@@ -132,7 +132,7 @@ theorem foreign_root_rejected (h : TransactSat w) {i : ℕ} (hi : i < nIn)
 transaction from sharing a future nullifier. Needs collision resistance, so it is stated
 against `TxBinding` rather than `TxWellFormed`. -/
 theorem shared_rho_rejected (hnc : ¬ PoseidonCollision) (h : TransactSat w)
-    (hnOut : nOut ≤ 3)
+    (hnOut : nOut ≤ 4)
     {j j' : ℕ} (hj : j < nOut) (hj' : j' < nOut) (hne : j ≠ j')
     (hshared : (w.out j).rho = (w.out j').rho) : False :=
   (transact_binding hnc hnOut h).rhoDistinct j j' hj hj' hne hshared

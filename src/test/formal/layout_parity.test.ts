@@ -40,7 +40,7 @@ const LAYOUT_FILE = resolve(ROOT, "lean/expected/layout-2x2.txt");
 // Every shape that ships both a Lean layout dump and a published vector. The
 // sentinel table below is 2x2-only (it is hand-written, one entry per slot), but
 // the vector-carries-Lean check is shape-agnostic and covers all of them.
-const SHIPPED_SHAPES = ["2x2", "3x3"] as const;
+const SHIPPED_SHAPES = ["2x2", "3x3", "4x4"] as const;
 
 // Distinct sentinel per logical field, so any transposition shows up as a mismatch
 // rather than coincidentally agreeing.

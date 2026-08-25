@@ -87,6 +87,7 @@ and `TxBinding` is what keeps it that way.
 #print axioms Lelantos.transact_sound
 #print axioms Lelantos.transact2x2_sound
 #print axioms Lelantos.transact3x3_sound
+#print axioms Lelantos.transact4x4_sound
 #print axioms Lelantos.perAssetValueBalance_nat
 #print axioms Lelantos.perAssetValueBalance_all_assets
 #print axioms Lelantos.polyEval_binding
@@ -106,6 +107,7 @@ and `TxBinding` is what keeps it that way.
 #print axioms Lelantos.transact_pi_binding
 #print axioms Lelantos.transactSat_satisfiable
 #print axioms Lelantos.transact3x3Sat_satisfiable
+#print axioms Lelantos.transact4x4Sat_satisfiable
 #print axioms Lelantos.batchSat_satisfiable
 #print axioms Lelantos.transactSat_spend_satisfiable
 #print axioms Lelantos.transactSat_twoAsset_satisfiable

@@ -1,4 +1,4 @@
-// Transact vectors, for every shipped shape.
+// Transact vectors, for every shipped shape (2x2, 3x3, 4x4).
 //
 // One case produces one vector. The construction matches `TxBuilder` in
 // src/test/lib/transact.ts — same note derivation, forced output rho and aux
@@ -186,6 +186,75 @@ export const TRANSACT_SHAPES: TransactShape[] = [
                     { nsk: 21n, value: 80n },
                     { nsk: 22n, value: 40n },
                     { nsk: 23n, value: 50n },
+                ],
+                publicIn: 0n,
+                publicOut: 80n,
+                asset: 7n,
+            },
+        ],
+    },
+    {
+        id: "4x4",
+        nIn: 4,
+        nOut: 4,
+        source: "src/4x4.circom",
+        // Neither deployed nor wired on-chain: that requires a 53-slot
+        // `PubInputs.compress` overload, and a verifier built on a 2^17 ptau.
+        // These vectors pin the 53-slot layout the Lean development proves
+        // against, so the on-chain side has a byte-exact target.
+        cases: [
+            {
+                name: "internal-4in4out-balanced",
+                description: "Four real inputs, four real outputs, no public flow.",
+                inputs: [
+                    { nsk: 11n, value: 100n },
+                    { nsk: 12n, value: 50n },
+                    { nsk: 13n, value: 25n },
+                    { nsk: 14n, value: 25n },
+                ],
+                outputs: [
+                    { nsk: 21n, value: 90n },
+                    { nsk: 22n, value: 60n },
+                    { nsk: 23n, value: 25n },
+                    { nsk: 24n, value: 25n },
+                ],
+                publicIn: 0n,
+                publicOut: 0n,
+                asset: 7n,
+            },
+            {
+                name: "deposit-3in4out-public-in",
+                description: "One dummy input slot; value enters the pool via public_in.",
+                inputs: [
+                    { nsk: 11n, value: 100n },
+                    { nsk: 12n, value: 50n },
+                    { nsk: 13n, value: 25n },
+                    null,
+                ],
+                outputs: [
+                    { nsk: 21n, value: 90n },
+                    { nsk: 22n, value: 60n },
+                    { nsk: 23n, value: 30n },
+                    { nsk: 24n, value: 25n },
+                ],
+                publicIn: 30n,
+                publicOut: 0n,
+                asset: 7n,
+            },
+            {
+                name: "withdraw-4in4out-public-out",
+                description: "Value leaves the pool via public_out.",
+                inputs: [
+                    { nsk: 11n, value: 100n },
+                    { nsk: 12n, value: 100n },
+                    { nsk: 13n, value: 50n },
+                    { nsk: 14n, value: 30n },
+                ],
+                outputs: [
+                    { nsk: 21n, value: 80n },
+                    { nsk: 22n, value: 40n },
+                    { nsk: 23n, value: 50n },
+                    { nsk: 24n, value: 30n },
                 ],
                 publicIn: 0n,
                 publicOut: 80n,

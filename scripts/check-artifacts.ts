@@ -45,7 +45,8 @@ interface ArtifactCheck {
 ///
 /// zkey size follows the FFT domain and the wire count, not the ceremony
 /// randomness, so these are re-measured whenever the circuits change size.
-/// Measured at the counts in budget.json, all three on ptau-16.
+/// Measured at the counts in budget.json: 2x2 / 3x3 / tree_update_batch on
+/// ptau-16, 4x4 on ptau-17.
 const FILES: ArtifactCheck[] = [
     {
         // The band is a broken-build detector rather than a size budget, so the
@@ -99,6 +100,36 @@ const FILES: ArtifactCheck[] = [
     {
         name: "3x3_verification_key.json",
         path: resolve(BUILD, "3x3_verification_key.json"),
+        minBytes: 1_000,
+        maxBytes: 15_000,
+        json: isGroth16Vkey,
+    },
+    /// 4x4 = `Transact(10, 4, 4)`; see budget.json for its constraint count.
+    ///
+    /// The one shape built on ptau-17: at 86,680 constraints it does not fit the
+    /// 2^16 FFT domain, so its zkey carries a domain twice the size of 3x3's and
+    /// lands at ~42 MB against 3x3's ~30 MB even though it has only 1.3x the
+    /// constraints. Proving costs roughly twice a 3x3 proof.
+    ///
+    /// In the package `files` whitelist for the same reason as 3x3 — an SDK
+    /// consumer resolves it from npm rather than needing a token for GitHub
+    /// release assets — at a further ~37 MB gzipped on every install.
+    {
+        name: "4x4.wasm",
+        path: resolve(BUILD, "4x4.wasm"),
+        minBytes: 2_500_000,
+        maxBytes: 8_000_000,
+    },
+    {
+        name: "4x4_final.zkey",
+        path: resolve(BUILD, "4x4_final.zkey"),
+        // Measured 42.5 MB.
+        minBytes: 25_000_000,
+        maxBytes: 68_000_000,
+    },
+    {
+        name: "4x4_verification_key.json",
+        path: resolve(BUILD, "4x4_verification_key.json"),
         minBytes: 1_000,
         maxBytes: 15_000,
         json: isGroth16Vkey,

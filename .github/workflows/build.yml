@@ -24,12 +24,13 @@ jobs:
       - name: Setup toolchain
         uses: ./.github/actions/setup
 
-      # All three deployed shapes. 3x3 and tree_update_batch are otherwise
-      # compiled only indirectly, by `just vectors-check` and by circom_tester
-      # inside the mocha suite, neither of which runs the production
-      # `--r1cs --wasm --sym` path or reports constraint counts.
-      - name: Compile circuits (2x2, 3x3, tree_update_batch)
-        run: just compile compile-3x3 compile-batch
+      # Every shape in budget.json — the gate below reads one .r1cs per entry
+      # and fails on a missing or stale one. 3x3, 4x4 and tree_update_batch are
+      # otherwise compiled only indirectly, by `just vectors-check` and by
+      # circom_tester inside the mocha suite, neither of which runs the
+      # production `--r1cs --wasm --sym` path or reports constraint counts.
+      - name: Compile circuits (2x2, 3x3, 4x4, tree_update_batch)
+        run: just compile compile-3x3 compile-4x4 compile-batch
 
       # Compiling asserts nothing about size, and `groth16 setup` — where an
       # overflow would surface — does not run here. Transact(10,3,3) clears its

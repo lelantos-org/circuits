@@ -608,8 +608,9 @@ commitments, every balance candidate and the whole Horner evaluation.
 
 Written once for an arbitrary arity. Nothing about it is shape-specific: every slot vector
 is index-generic, and the balance sums are zero whichever candidate is selected. That is
-what lets the same construction serve `Transact(10, 2, 2)` and the deployed
-`Transact(10, 3, 3)`, whose soundness results each need a witness of their own type.
+what lets the same construction serve `Transact(10, 2, 2)`, the deployed
+`Transact(10, 3, 3)` and `Transact(10, 4, 4)`, whose soundness results each need a witness
+of their own type.
 -/
 
 noncomputable def padParts (nIn nOut : ℕ) : Parts nIn nOut where
@@ -818,6 +819,16 @@ theorem transact3x3Sat_satisfiable : ∃ w : Transact3x3, TransactSat w :=
 /-- …and the conclusion is derivable at the deployed shape too. -/
 theorem transact3x3_wellFormed_witness : TxWellFormed (Witness.padTx 3 3) :=
   transact3x3_sound (Witness.padTx_sat 3 3)
+
+/-- **`transact4x4_sound` is not vacuous.** The same at `Transact(10, 4, 4)`, the widest
+shape the repository instantiates and the one that fixes the `≤ 4` slot bound in
+`transact_sound`. `Transact4x4` is again a distinct type, so it needs its own witness. -/
+theorem transact4x4Sat_satisfiable : ∃ w : Transact4x4, TransactSat w :=
+  ⟨Witness.padTx 4 4, Witness.padTx_sat 4 4⟩
+
+/-- …and the conclusion is derivable at the widest shape too. -/
+theorem transact4x4_wellFormed_witness : TxWellFormed (Witness.padTx 4 4) :=
+  transact4x4_sound (Witness.padTx_sat 4 4)
 
 /-- **`SpentReal` is inhabited.** `spentNote_sound` concludes `SpentReal` from
 `is_dummy = 0`, and every slot in the padding witness is a dummy — so on its own that

@@ -12,6 +12,11 @@
       "coeffCount": 42,
       "layoutDigest": "0x144fffddb22d2b0f48e184dae825ae2332130385e95c812072b305e2c5e03e78"
     },
+    "transact-4x4.json": {
+      "sha256": "2420b4293e60fb8a9b288a449826645362bc08341d4ebc1388b355c4b8c2f276",
+      "coeffCount": 53,
+      "layoutDigest": "0xc05073a914b7733e2187f5e7b7481af4f1f120ee66e7d99d93a113357a3efaa2"
+    },
     "tree-update-batch-4.json": {
       "sha256": "97c441353d720893f6d02d5bdbfe299103bae4a69230bd1baa854091416b79e0",
       "coeffCount": 28,

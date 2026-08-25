@@ -33,6 +33,10 @@ theorem two_lt_p : 2 < p := by unfold p; norm_num
 argument separate output slots. -/
 theorem three_lt_p : 3 < p := by unfold p; norm_num
 
+/-- `4 < p`: the same for the widest shape the repository instantiates, `N_OUT = 4` in
+`src/4x4.circom:45`. `transact_binding` needs every output index below `p`. -/
+theorem four_lt_p : 4 < p := by unfold p; norm_num
+
 /-- `2 ^ 64 < p`: this is what makes `RangeCheck64` a genuine range check rather than a
 statement modulo `p`. See `src/lib/balance.circom:11`. -/
 theorem two_pow_64_lt_p : 2 ^ 64 < p := by unfold p; norm_num
@@ -42,6 +46,12 @@ per side. The largest deployed shape is `Transact(10, 3, 3)` (`src/3x3.circom`),
 terms and a bound of `4 · 2^64 = 2^66`, so neither side can wrap. See
 `src/lib/balance.circom:75-80`. -/
 theorem two_pow_66_lt_p : 2 ^ 66 < p := by unfold p; norm_num
+
+/-- `2 ^ 67 < p`: the same sum at the widest shape the repository instantiates,
+`Transact(10, 4, 4)` (`src/4x4.circom:45`) — five terms and a bound of `5 · 2^64 < 2^67`.
+This is the only thing `perAssetValueBalance_nat`'s slot bound rests on, so widening the
+shapes further is a matter of adding the next power here. -/
+theorem two_pow_67_lt_p : 2 ^ 67 < p := by unfold p; norm_num
 
 /-- `2 ^ 128 < p`: `NoteCommitment` packs `asset_id · 2^64 + value` into one field
 element, so with both fields 64-bit range-checked the packing is injective.

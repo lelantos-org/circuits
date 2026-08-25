@@ -2,10 +2,12 @@
 
 A machine-checked development for `Transact(DEPTH, N_IN, N_OUT)`, the multi-asset transact
 circuit, and for `TreeUpdateBatch(DEPTH, MAX_L)`, the relayer batch tree-advance circuit.
-The transact half covers both shapes the repository instantiates — `src/2x2.circom` and
-`src/3x3.circom`. `3x3` is the deployed shape: it is what `PubInputs.sol` compresses and
-what `contracts/src/verifiers/Verifier.sol` verifies. `2x2` is retained so the shape-generic
-results are exercised at more than one slot count.
+The transact half covers all three shapes the repository instantiates — `src/2x2.circom`,
+`src/3x3.circom` and `src/4x4.circom`. `3x3` is the deployed shape: it is what
+`PubInputs.sol` compresses and what `contracts/src/verifiers/Verifier.sol` verifies. `2x2`
+and `4x4` are retained so the shape-generic results are exercised at more than one slot
+count; `4x4` is also what fixes the `≤ 4` slot bound below. All three ship prover artifacts
+and a golden vector; only `3x3` is deployed.
 The top-level theorem holds for **any** assignment satisfying the modeled constraint system,
 not only those an honest prover produces.
 
@@ -48,7 +50,7 @@ Individually:
 |---|---|
 | `lake build` | elaborates and kernel-checks every proof; runs the axiom guard over every declaration |
 | `./scripts/check-axioms.sh` | trusted base still matches `expected/axioms.txt` |
-| `./scripts/dump-layout.sh` | public-input layouts still match `expected/layout-{2x2,3x3}.txt` |
+| `./scripts/dump-layout.sh` | public-input layouts still match `expected/layout-{2x2,3x3,4x4}.txt` |
 | `python3 scripts/check-prime.py` | discharges the two arithmetic axioms externally |
 
 CI runs the same set ([.github/workflows/lean.yml](../.github/workflows/lean.yml)).
@@ -63,14 +65,16 @@ assumptions recorded in a statement, not results — see
 
 | Theorem | Where | Statement |
 |---|---|---|
-| `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w`, for `N_IN ≤ 3` and `N_OUT ≤ 3` |
-| `transact2x2_sound` / `transact3x3_sound` | `Circuit/Transact.lean` | the same for each instantiated shape: `Transact(10,3,3)` (deployed) and `Transact(10,2,2)` |
+| `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w`, for `N_IN ≤ 4` and `N_OUT ≤ 4` |
+| `transact2x2_sound` / `transact3x3_sound` / `transact4x4_sound` | `Circuit/Transact.lean` | the same for each instantiated shape: `Transact(10,3,3)` (deployed), `Transact(10,2,2)` and `Transact(10,4,4)` |
 | `transact_binding` † | `Circuit/Transact.lean` | `TransactSat w → TxBinding w` |
 
-The `≤ 3` bound is not a property of the circuit — `PerAssetValueBalance` is written for
+The `≤ 4` bound is not a property of the circuit — `PerAssetValueBalance` is written for
 arbitrary `N_IN` / `N_OUT`. It is the largest slot count for which the balance sums provably
-stay below `p` using `two_pow_66_lt_p` (`(3+1) · 2^64 = 2^66`), and it covers every shape the
-repository ships. A wider shape needs a wider bound in `Model/Field.lean` and nothing else.
+stay below `p` using `two_pow_67_lt_p` (`(4+1) · 2^64 < 2^67`), and it covers every shape the
+repository ships. A wider shape needs a wider bound in `Model/Field.lean` and nothing else —
+widening it from `≤ 3` to `≤ 4` for `src/4x4.circom` was exactly that one-line change plus
+the new power of two.
 
 ### Value conservation
 
@@ -169,12 +173,14 @@ patching it, and the Lean statement shows the difference: it mentions one leaf.
 | `transactSat_twoAsset_satisfiable` | `Proofs/Completeness.lean` | …and by one moving **two distinct assets** with a non-zero public input |
 | `spentReal_witness` | `Proofs/Completeness.lean` | `SpentReal` is inhabited, so `spentNote_sound`'s `is_dummy = 0` case is reachable |
 | `transact3x3Sat_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable at `Transact(10,3,3)`, **the deployed shape** |
+| `transact4x4Sat_satisfiable` | `Proofs/Completeness.lean` | …and at `Transact(10,4,4)`, the widest instantiated shape |
 | `batchSat_satisfiable` | `Proofs/BatchCompleteness.lean` | `BatchSat` is satisfiable at `TreeUpdateBatch(10,4)`, so the batch results are not vacuous either |
 | `batchSat_partial_batch` | `Proofs/BatchCompleteness.lean` | …by a batch committing **three** leaves into four slots, so the padding constraints and both muxes are exercised rather than satisfied trivially |
 
-The first four assignments are built at the `2x2` shape; `transact3x3Sat_satisfiable` repeats
-the padding construction at the deployed one, so `transact3x3_sound` is non-vacuous too. The
-batch witness lives in `Proofs/BatchCompleteness.lean`.
+The first four assignments are built at the `2x2` shape; `transact3x3Sat_satisfiable` and
+`transact4x4Sat_satisfiable` repeat the padding construction at the deployed shape and at
+`4x4`, so `transact3x3_sound` and `transact4x4_sound` are non-vacuous too. The batch witness
+lives in `Proofs/BatchCompleteness.lean`.
 
 ### Assignments with no satisfying witness
 
@@ -199,8 +205,9 @@ constructs the degenerate-but-legal padding transaction; `transactSat_spend_sati
 that actually spends, with a non-dummy input, a real Merkle path, a non-zero scalar
 multiplication and a balance whose sums are not all zero; `transactSat_twoAsset_satisfiable`
 one whose five balance candidates are not all the same asset.
-`transact3x3Sat_satisfiable` repeats the first at the deployed `3x3` shape, and
-`batchSat_satisfiable` covers `TreeUpdateBatch(10, 4)` with a partially-filled batch.
+`transact3x3Sat_satisfiable` and `transact4x4Sat_satisfiable` repeat the first at the
+deployed `3x3` shape and at `4x4`, and `batchSat_satisfiable` covers `TreeUpdateBatch(10, 4)`
+with a partially-filled batch.
 
 This matters because `A → B` is trivially true when `A` is unsatisfiable, so a modelling slip
 that over-constrains the system would fail silently. The spending witness additionally makes
@@ -252,10 +259,12 @@ development may derive conservation from the point equation.
   chain for any coefficient vector, but the batch layout (`4 + 6·MAX_L`) is pinned against
   `PubInputs.sol` by `src/test/tree_update_batch.test.ts`, not in Lean. `dump-layout.sh`
   covers the transact layouts only.
-* **Full layout parity against the SDK for `3x3`.** `dump-layout.sh` pins both layouts
-  against Lean, and `src/test/formal/layout_parity.test.ts` pins each published vector to its
-  Lean dump for both shapes. The hand-written sentinel-per-field table in that test, which is
-  what catches a transposition between two same-typed slots, exists for `2x2` only.
+* **Full layout parity against the SDK for `3x3` and `4x4`.** `dump-layout.sh` pins all
+  three layouts against Lean, and `src/test/formal/layout_parity.test.ts` pins each published
+  vector to its Lean dump — all three shapes ship one. The hand-written sentinel-per-field
+  table in that test, which is what catches a transposition between two same-typed slots,
+  exists for `2x2` only. Neither `3x3` nor `4x4` has a `PubInputs.sol` overload yet, so for
+  those two the chain ends at the published vector rather than at the contract.
 * **Under-constrainedness of the compiled R1CS**, beyond what Picus establishes — see
   [Under-constrainedness](#under-constrainedness-of-the-compiled-r1cs) below.
 * **Contract obligations.** Nullifier freshness, `z` being a genuine Fiat-Shamir challenge,
@@ -401,6 +410,7 @@ lean/
     axioms.txt             expected output of Meta/Assumptions
     layout-2x2.txt         expected output of Circuit/Witness :: layoutNames, one per shape
     layout-3x3.txt
+    layout-4x4.txt
   scripts/                 check-all, check-axioms, dump-layout, check-prime
 ```
 

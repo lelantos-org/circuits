@@ -5,9 +5,10 @@
     "same commit as any circuit change, so the change lands as a reviewable diff.",
     "`domain` is the Groth16 FFT domain the circuit must fit; exceeding it means",
     "a larger ptau and roughly double the proving time.",
-    "All three shapes fit 2^16. Transact(10,3,3) clears it by 13 constraints, so",
-    "a change worth 3 constraints in one of its 6 per-slot gadgets costs the",
-    "domain."
+    "2x2, 3x3 and tree_update_batch fit 2^16. Transact(10,3,3) clears it by 13",
+    "constraints, so a change worth 3 constraints in one of its 6 per-slot",
+    "gadgets costs the domain. Transact(10,4,4) does not fit 2^16 at all and is",
+    "budgeted against 2^17, with its own ptau."
   ],
   "circuits": {
     "2x2": {
@@ -17,6 +18,10 @@
     "3x3": {
       "constraints": 65523,
       "domain": 65536
+    },
+    "4x4": {
+      "constraints": 86680,
+      "domain": 131072
     },
     "tree_update_batch": {
       "constraints": 57106,

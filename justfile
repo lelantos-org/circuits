@@ -5,10 +5,14 @@ ROOT := justfile_directory()
 BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
 PTAU_URL_BASE := "https://storage.googleapis.com/zkevm/ptau"
-# All three shapes size to `cirPower = 16`, so one ptau serves the whole repo.
-# snarkjs picks the domain from `nConstraints + nPubInputs + nOutputs`, which
-# caps a 2^16 ceremony at 65,533 constraints — see `budget` below.
+# 2x2, 3x3 and tree_update_batch size to `cirPower = 16`, so one ptau serves
+# those three. snarkjs picks the domain from `nConstraints + nPubInputs +
+# nOutputs`, which caps a 2^16 ceremony at 65,533 constraints — see `budget`
+# below.
 PTAU16 := "powersOfTau28_hez_final_16.ptau"
+# 4x4 does not fit: Transact(10,4,4) is 86,680 constraints, so it needs its own
+# 2^17 ceremony (~2x the download and roughly 2x the proving time).
+PTAU17 := "powersOfTau28_hez_final_17.ptau"
 
 # Sync targets in sibling contracts/ checkout. Updated for new src/ layout
 # (verifiers grouped under src/verifiers/).
@@ -85,6 +89,38 @@ setup-3x3:
 # Build all 3x3 artifacts WITHOUT the contracts/ sync.
 build-artifacts-3x3: compile-3x3 setup-3x3
 
+# === 4x4 circuit ===
+#
+# `Transact(10, 4, 4)`: 4 shielded inputs x 4 shielded outputs. Not deployed and
+# not published: no PubInputs.sol compress overload, no golden vectors, no Lean
+# layout dump. See src/4x4.circom.
+#
+# Never synced into contracts/ — that path holds the 3x3 verifier, and
+# overwriting it would swap the deployed circuit under an unchanged filename.
+
+# Compile 4x4.circom -> r1cs + wasm + sym, print constraint count.
+compile-4x4: (_compile "4x4")
+
+# Phase-2 trusted setup for 4x4 (single-contributor; INSECURE — prototype only).
+setup-4x4:
+    just _fetch-ptau "{{PTAU17}}"
+    echo "==> Phase-2 setup (4x4, 2^17 ptau)"
+    npx snarkjs groth16 setup "{{BUILD}}/4x4.r1cs" "{{PTAU_DIR}}/{{PTAU17}}" "{{BUILD}}/4x4_0.zkey"
+    echo "==> Single contribution (PROTOTYPE ONLY)"
+    npx snarkjs zkey contribute "{{BUILD}}/4x4_0.zkey" "{{BUILD}}/4x4_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
+    echo "==> Export verification key"
+    npx snarkjs zkey export verificationkey "{{BUILD}}/4x4_final.zkey" "{{BUILD}}/4x4_verification_key.json"
+    echo "==> Export Solidity verifier"
+    npx snarkjs zkey export solidityverifier "{{BUILD}}/4x4_final.zkey" "{{BUILD}}/Verifier4x4.sol"
+    echo "==> Done. Verifier at {{BUILD}}/Verifier4x4.sol — not synced into contracts/"
+
+# Compile + trusted setup for 4x4. Never synced into contracts/.
+build-artifacts-4x4: compile-4x4 setup-4x4
+
+# Full rebuild of the 4x4 shape after circuit edits.
+rebuild-4x4: build-artifacts-4x4
+    @just _rebuild-report "4x4" "{{BUILD}}/4x4.r1cs" "{{BUILD}}/4x4_js/4x4.wasm" "{{BUILD}}/4x4_final.zkey" "{{BUILD}}/4x4_verification_key.json" "(not synced — 4x4 is not deployed)"
+
 # === tree_update_batch circuit ===
 
 # Compile tree_update_batch.circom -> r1cs + wasm + sym, print constraint count.
@@ -98,7 +134,8 @@ compile-batch: (_compile "tree_update_batch")
 # 2x2 (44,406) and 3x3 (65,523) size to the same domain and share this ptau.
 # 3x3 clears it by 10 constraints, so a ceremony is also the second line of
 # defence: at 65,534 `groth16 setup` fails outright rather than silently
-# building a 2^17 zkey.
+# building a 2^17 zkey. 4x4 (86,680) is past that line by construction and takes
+# the 2^17 ptau instead — see `setup-4x4`.
 
 # Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
 setup-batch:
@@ -348,7 +385,7 @@ picus-all STRONG="":
     #!/usr/bin/env bash
     set -euo pipefail
     failed=()
-    for circuit in 2x2 3x3 tree_update_batch; do
+    for circuit in 2x2 3x3 4x4 tree_update_batch; do
         echo "==> picus: $circuit"
         just picus "$circuit" "{{STRONG}}" || failed+=("$circuit")
     done
@@ -360,27 +397,29 @@ picus-all STRONG="":
 
 # === package ===
 
-# Full rebuild + verify for npm publish. RE-RUNS BOTH CEREMONIES (2x2, 3x3)
-# and so invalidates existing proofs — see `package-check` for the gate alone.
-# Copies the witness wasm out of `build/2x2_js/` to a flat `build/2x2.wasm`
-# so the package `files` whitelist (and `exports` subpath map) resolves
-# without shipping the redundant `2x2_js/` glue. Then runs
-# `scripts/check-artifacts.ts` to assert sizes + SHA-256 match
-# `release-manifest.json`.
+# Full rebuild + verify for npm publish. RE-RUNS ALL THREE TRANSACT CEREMONIES
+# (2x2, 3x3, 4x4) and so invalidates existing proofs — see `package-check` for
+# the gate alone. Copies the witness wasm out of `build/2x2_js/` to a flat
+# `build/2x2.wasm` so the package `files` whitelist (and `exports` subpath map)
+# resolves without shipping the redundant `2x2_js/` glue. Then runs
+# `scripts/check-artifacts.ts` to assert every artifact is present and sized in
+# range.
+#
+# 4x4 pulls the 2^17 ptau, which `setup-4x4` fetches on demand.
 #
 # Depends on the `build-artifacts*` recipes (NOT `rebuild-3x3`) so the publish
 # workflow does not require a sibling contracts/ checkout for the Verifier.sol
 # sync step.
 
-# Full rebuild + publish gate. RE-RUNS BOTH CEREMONIES, invalidating existing proofs.
-package: build-artifacts build-artifacts-3x3
+# Full rebuild + publish gate. RE-RUNS ALL THREE CEREMONIES, invalidating existing proofs.
+package: build-artifacts build-artifacts-3x3 build-artifacts-4x4
     @just package-check
 
 # Stage the flat wasms and run the publish gate against whatever is ALREADY in
 # build/ — no compile, no ceremony.
 #
-# Split out of `package` because that recipe runs two trusted-setup ceremonies as
-# a side effect (2x2 and 3x3). Each mints a fresh zkey from fresh entropy, which
+# Split out of `package` because that recipe runs three trusted-setup ceremonies
+# as a side effect (2x2, 3x3 and 4x4). Each mints a fresh zkey from fresh entropy, which
 # invalidates every proof built against the previous one — including the
 # committed fixtures in ../contracts (proof_transfer.json,
 # proof_deposit_batch_n1.json). Reaching for `just package` to re-check the gate
@@ -391,9 +430,10 @@ package: build-artifacts build-artifacts-3x3
 
 # Run the publish gate against whatever is already in build/. No compile, no ceremony.
 package-check:
-    @echo "==> Staging build/2x2.wasm + build/3x3.wasm (no rebuild)"
+    @echo "==> Staging build/2x2.wasm + build/3x3.wasm + build/4x4.wasm (no rebuild)"
     @[ -f "{{BUILD}}/2x2_js/2x2.wasm" ] && cp "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2.wasm" || echo "    skip: build/2x2_js/2x2.wasm absent"
     @[ -f "{{BUILD}}/3x3_js/3x3.wasm" ] && cp "{{BUILD}}/3x3_js/3x3.wasm" "{{BUILD}}/3x3.wasm" || echo "    skip: build/3x3_js/3x3.wasm absent"
+    @[ -f "{{BUILD}}/4x4_js/4x4.wasm" ] && cp "{{BUILD}}/4x4_js/4x4.wasm" "{{BUILD}}/4x4.wasm" || echo "    skip: build/4x4_js/4x4.wasm absent"
     @echo "==> Verifying artifacts"
     NODE_OPTIONS="--import tsx/esm" node scripts/check-artifacts.ts
 
