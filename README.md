@@ -98,7 +98,7 @@ Everything is driven by [`just`](justfile); `just --list` is the full menu.
 |---|---|
 | `just test-unit` | 196 witness-level tests (mocha + `circom_tester`), excluding fuzz. |
 | `just test-fuzz` | Property-based suites. Tier via `FUZZ=light\|medium\|heavy`. |
-| `just compile compile-3x3 compile-batch` | Build the `.r1cs` / `.wasm` / `.sym` for all three shapes. |
+| `just compile compile-3x3 compile-4x4 compile-batch` | Build the `.r1cs` / `.wasm` / `.sym` for all four shapes. |
 | `just budget` | Gate the constraint counts against [budget.json](budget.json). Needs the `.r1cs`. |
 | `just vectors` / `just vectors-check` | Regenerate the golden vectors, or diff a regeneration against the committed ones. |
 | `just lint` | circomspect over `src/lib` and the entry points. |
