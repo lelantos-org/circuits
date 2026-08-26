@@ -33,9 +33,9 @@ template PathIndexSelectors() {
 // computing the chain in-circuit costs DEPTH × Poseidon(5) constraints per
 // instantiation, and `tree_update_batch` instantiates EmptySubtreeHashes
 // MAX_L + 1 times (one per QuaternaryInsert, plus FrontierRoot) for the same
-// fixed table. Tabulating removes that cost.
+// fixed table.
 //
-// The table is pinned two ways, so a typo cannot pass silently:
+// The table is pinned two ways:
 //   - `src/test/merkle.test.ts` recomputes the chain with circomlibjs and asserts
 //     every entry, including that EMPTY_SUBTREE(10) is the genesis root.
 //   - EMPTY_SUBTREE(10) equals CommitmentTree.EMPTY_ROOT in the contracts repo

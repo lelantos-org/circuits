@@ -28,7 +28,6 @@ import {
     rootFromPath,
     cacheKeyStride,
     legendreSymbol,
-    modSqrt,
     fmdGenDetectionKey,
     fmdTest,
     encodeClue,
@@ -38,7 +37,6 @@ import {
     fiatShamirZ,
     hornerEval,
     BN254_FR,
-    FMD_LEGENDRE_QNR,
     FMD_DEFAULT_GAMMA,
 } from "./helpers";
 
@@ -162,33 +160,21 @@ describe("reference / merkle path recomputation", function () {
 });
 
 describe("reference / quadratic residues", () => {
-    it("FMD_LEGENDRE_QNR is a non-residue in BN254 Fr", () => {
-        // The FMD bit gadget needs a public non-residue; if this were a square
-        // the bit derivation would not be balanced.
-        expect(legendreSymbol(FMD_LEGENDRE_QNR, BN254_FR)).to.equal(-1);
-    });
+    // 5 is a non-residue in BN254 Fr, so multiplying a square by it produces a
+    // known non-residue to test the negative case against.
+    const QNR = 5n;
 
     it("legendreSymbol classifies squares and non-squares", () => {
+        expect(legendreSymbol(QNR, BN254_FR), "5 is a non-residue").to.equal(-1);
         for (const x of [1n, 2n, 3n, 7n, 123456789n, 1n << 200n]) {
             const sq = (x * x) % BN254_FR;
             expect(legendreSymbol(sq, BN254_FR), `square of ${x}`).to.equal(1);
             expect(
-                legendreSymbol((sq * FMD_LEGENDRE_QNR) % BN254_FR, BN254_FR),
-                `QNR times square of ${x}`,
+                legendreSymbol((sq * QNR) % BN254_FR, BN254_FR),
+                `non-residue times square of ${x}`,
             ).to.equal(-1);
         }
         expect(legendreSymbol(0n, BN254_FR)).to.equal(0);
-    });
-
-    it("modSqrt inverts squaring", () => {
-        for (const x of [1n, 2n, 3n, 7n, 123456789n, 1n << 200n]) {
-            const sq = (x * x) % BN254_FR;
-            const root = modSqrt(sq, BN254_FR);
-            expect(root, `no root for the square of ${x}`).to.not.equal(null);
-            expect((root! * root!) % BN254_FR).to.equal(sq);
-        }
-        expect(modSqrt(0n, BN254_FR)).to.equal(0n);
-        expect(modSqrt(FMD_LEGENDRE_QNR, BN254_FR), "a non-residue has no root").to.equal(null);
     });
 });
 

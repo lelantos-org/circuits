@@ -6,13 +6,8 @@
 //   detection key  dk = (x_1..x_gamma)
 //   flag key       fk = (X_1..X_gamma), X_i = B·x_i
 //
-// Both are expanded from one scalar. Only the public half is published:
-//
-//   root secret  dk_root                 never leaves the owner
-//   clue key     ck = B·dk_root          published in the address
-//   h_i = Poseidon([TAG_FMD_EXPAND, ck.x, ck.y, i]) mod q
-//   x_i = dk_root + h_i (mod q)          recipient
-//   X_i = ck + B·h_i                     sender, from ck alone
+// Both halves are expanded from one root scalar by the SDK (`sdk/src/fmd`);
+// this module covers only the flagging and testing the circuit vectors need.
 //
 // Sender flags for fk:
 //   r <- Z_q*, R = B·r, S_i = r·X_i
@@ -29,10 +24,9 @@ import { packBits, unpackBits } from "./bytes.js";
 import type { Jubjub } from "./jubjub.js";
 import type { Poseidon } from "./poseidon.js";
 import { legendreSymbol } from "./sqrt.js";
-import { TAG_FMD_BIT, TAG_FMD_EXPAND } from "./tags.js";
+import { TAG_FMD_BIT } from "./tags.js";
 
 export const FMD_DEFAULT_GAMMA = 5;
-export const FMD_DOMAIN = "lelantos.fmd.v4";
 
 export interface FmdDetectionKey {
     x: Field[];
@@ -61,50 +55,6 @@ export function fmdGenDetectionKey(
 
 export function fmdFlagKeyFromDetection(J: Jubjub, dk: FmdDetectionKey): FmdFlagKey {
     return { X: dk.x.map((xi) => J.mulPointEscalar(J.base8, xi)) };
-}
-
-export function fmdClueKeyFromRoot(J: Jubjub, dkRoot: Field): Point {
-    return J.mulPointEscalar(J.base8, dkRoot % BABYJUB_SUBGROUP_ORDER);
-}
-
-function expandScalar(P: Poseidon, ck: Point, i: number): Field {
-    return P.hash([TAG_FMD_EXPAND, ck[0], ck[1], BigInt(i)]) % BABYJUB_SUBGROUP_ORDER;
-}
-
-/** Sender side: `X_i = ck + B·h_i`, from the published clue key alone. */
-export function fmdExpandFlagKey(
-    J: Jubjub,
-    P: Poseidon,
-    ck: Point,
-    gamma = FMD_DEFAULT_GAMMA,
-): FmdFlagKey {
-    return {
-        X: Array.from({ length: gamma }, (_, i) =>
-            J.addPoint(ck, J.mulPointEscalar(J.base8, expandScalar(P, ck, i))),
-        ),
-    };
-}
-
-/**
- * Receiver side: `x_i = dk_root + h_i (mod q)`.
- *
- * Deliberately not routed through `fmdGenDetectionKey` — its zero-scalar fixup
- * applies to one half only and would desynchronise the two.
- */
-export function fmdExpandDetectionKey(
-    J: Jubjub,
-    P: Poseidon,
-    dkRoot: Field,
-    gamma = FMD_DEFAULT_GAMMA,
-): FmdDetectionKey {
-    const root = dkRoot % BABYJUB_SUBGROUP_ORDER;
-    const ck = fmdClueKeyFromRoot(J, root);
-    return {
-        x: Array.from(
-            { length: gamma },
-            (_, i) => (root + expandScalar(P, ck, i)) % BABYJUB_SUBGROUP_ORDER,
-        ),
-    };
 }
 
 export function fmdFlag(J: Jubjub, P: Poseidon, fk: FmdFlagKey, r: Field): FmdClue {

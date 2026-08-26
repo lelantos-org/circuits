@@ -1,4 +1,5 @@
-// Faerie-gold defences, covering two audit findings on note identity.
+// Note-identity defences against faerie-gold notes, tracked as audit findings
+// F1 and F3.
 //
 // F1 — output rho uniqueness. Output rho is forced to
 //      rho = Poseidon(TAG_RHO, nullifier[0], out_index), so two outputs of one

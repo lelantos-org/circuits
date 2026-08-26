@@ -105,7 +105,7 @@ describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
                 for (let i = 0; i < k; i++) {
                     leaves.push(seededLeaf(P, J, i, depositFlags[i]));
                 }
-                const honest = buildHonest(P, J, startIndex, leaves);
+                const honest = buildHonest(P, startIndex, leaves);
 
                 // Sanity: honest witness must verify. Without this, a
                 // tamper-rejection assertion below would be vacuous.

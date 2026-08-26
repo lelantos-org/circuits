@@ -4,10 +4,10 @@
 // path indices) so positive properties do not trip a range check.
 //
 // Env vars:
-//   FUZZ=light|medium|heavy            global run-count (5 / 20 / 100)
-//   FUZZ_RUNS_<SUITE>=N                per-suite override, overrides FUZZ
-//     SUITE keys: CLUE, FIXEDBASE, FRONTIER, HASHTOBIT, MERKLE, POLYEVAL,
-//                 TRANSACT, TRANSACT_VARIANTS
+//   FUZZ=light|medium|heavy            global run count (5 / 20 / 100)
+//   FUZZ_RUNS_<SUITE>=N                per-suite override, takes precedence
+//     SUITE keys: FIXEDBASE, FRONTIER, MERKLE, POLYEVAL, TRANSACT,
+//                 TRANSACT_OVERFLOW, TRANSACT_VARIANTS
 
 import * as fc from "fast-check";
 import { BN254_FR } from "../helpers";
@@ -27,21 +27,13 @@ export const MAX_VALUE = (1n << 64n) - 1n;
 // BN254 scalar field modulus — used by every gadget that constrains a Field.
 export const R = BN254_FR;
 
-// Canonical-positive modulo. Re-exported rather than redefined: the reference
-// implementation owns it, and a second copy is a second thing to keep in step.
+// Canonical-positive modulo, re-exported rather than redefined: the reference
+// implementation owns it.
 export { mod } from "../helpers";
 
 // Random bigint in [0, max] from a fast-check uint sequence (deterministic seed).
 export const arbField = (max: bigint = MAX_VALUE): fc.Arbitrary<bigint> =>
     fc.bigInt(0n, max);
-
-// Boundary-biased field arbitrary — interleaves {0, 1, max-1, max} with uniform draws.
-// Use in `examples` arrays or when shrinking must visit edges quickly.
-export const arbBoundaryField = (max: bigint): fc.Arbitrary<bigint> =>
-    fc.oneof(
-        { arbitrary: fc.bigInt(0n, max), weight: 7 },
-        { arbitrary: fc.constantFrom(0n, 1n, max - 1n, max), weight: 3 },
-    );
 
 // Blinding scalars as `MulH` admits them: `Num2Bits(RCV_BITS = 252)`. Boundary
 // biased, because the interesting failures live at the window edges — the top
@@ -70,15 +62,6 @@ export const arbBlinder = (): fc.Arbitrary<bigint> =>
 export const arbNsk = (): fc.Arbitrary<bigint> =>
     fc.bigInt(1n, (1n << 200n));
 
-// Distinct rho/rcm/rcv suitable for note construction.
-export const arbNote64 = (): fc.Arbitrary<{ value: bigint; rho: bigint; rcm: bigint; rcv: bigint }> =>
-    fc.record({
-        value: fc.bigInt(0n, MAX_VALUE),
-        rho: fc.bigInt(1n, (1n << 200n)),
-        rcm: fc.bigInt(1n, (1n << 200n)),
-        rcv: fc.bigInt(1n, (1n << 200n)),
-    });
-
 // Pair of values (v1, v2) and split point s such that v1+v2 fits in 64 bits.
 // Returns (v1, v2, o1, o2) with o1+o2 == v1+v2 and each < 2^64.
 export const arbBalancedSplit = (): fc.Arbitrary<{ v1: bigint; v2: bigint; o1: bigint; o2: bigint }> =>
@@ -91,12 +74,6 @@ export const arbBalancedSplit = (): fc.Arbitrary<{ v1: bigint; v2: bigint; o1: b
         const o1 = total === 0n ? 0n : splitSeed % (total + 1n);
         return { v1, v2, o1, o2: total - o1 };
     });
-
-// Path index per quaternary level: 0..3.
-export const arbPathIndex = (): fc.Arbitrary<number> => fc.integer({ min: 0, max: 3 });
-
-export const arbPathIndices = (depth: number): fc.Arbitrary<number[]> =>
-    fc.array(arbPathIndex(), { minLength: depth, maxLength: depth });
 
 // Distinct-pair arbitraries via chain (no .filter shrink penalty).
 // If the second draw collides with the first, bump by +1 (wrapping at max).
@@ -118,7 +95,7 @@ export const arbDistinctInt = (min: number, max: number): fc.Arbitrary<[number, 
         }),
     );
 
-// Per-suite scaling for slow suites; env override always wins.
+// Per-suite scaling for slow suites; an env override takes precedence.
 const SUITE_SCALE: Record<string, number> = {
     FRONTIER: 0.25,
     TRANSACT_VARIANTS: 0.5,
@@ -126,7 +103,7 @@ const SUITE_SCALE: Record<string, number> = {
     TRANSACT_OVERFLOW: 0.25,
 };
 
-export function runsFor(suite: string): number {
+function runsFor(suite: string): number {
     const env = process.env[`FUZZ_RUNS_${suite}`];
     if (env) {
         const n = parseInt(env, 10);

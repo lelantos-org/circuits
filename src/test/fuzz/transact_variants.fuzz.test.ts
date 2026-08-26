@@ -17,11 +17,11 @@
 
 import * as fc from "fast-check";
 
-import { MerkleTree, Field, Note, SpentNote } from "../helpers";
+import { Field, Note, SpentNote } from "../helpers";
 import { loadCircuit, srcPath } from "../lib/circuit";
 import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { expectWitnessFails } from "../lib/expect";
-import { arbBalancedSplit, arbNsk, arbField, MAX_VALUE, fcParamsFor } from "./arbitraries";
+import { arbBalancedSplit, arbNsk, MAX_VALUE, fcParamsFor } from "./arbitraries";
 import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 
 const CIRCUIT = srcPath("2x2.circom");

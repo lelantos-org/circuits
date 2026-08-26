@@ -17,7 +17,7 @@
 //   merkle    quaternary tree; node = Poseidon(TAG_MERKLE, c0..c3)
 //   path      independent root recomputation, cross-checks merkle
 //   note      commitment, nullifier, rho, key derivation
-//   sqrt      Legendre symbol and Tonelli-Shanks, for the FMD bit
+//   sqrt      Legendre symbol, for the FMD clue bit
 //   fmd       FMD2 clue construction
 //   compress  the PolyEval layouts, Horner eval, Fiat-Shamir
 //   witness   the circom input objects

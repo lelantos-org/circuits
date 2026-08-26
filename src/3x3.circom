@@ -28,11 +28,11 @@ include "lib/transact.circom";
 //
 // Build with `just rebuild-3x3`, which exports the verifier to
 // contracts/src/verifiers/Verifier.sol. The layout is pinned by
-// scripts/gen-vectors.ts (refuses to publish unless the circuit's y equals the
-// reference PolyEval over the 42 coefficients) and by layout_parity.test.ts
-// against lean/expected/layout-3x3.txt.
+// scripts/gen-vectors.ts, which refuses to publish unless the circuit's y
+// equals the reference PolyEval over the 42 coefficients, and by
+// layout_parity.test.ts against lean/expected/layout-3x3.txt.
 //
-// Not yet established for this shape:
+// Not established for this shape:
 //   - a multi-party phase-2 ceremony; setup-3x3 is single-contributor.
 //   - Lean non-vacuity: transact3x3_sound has no exhibited witness.
 //

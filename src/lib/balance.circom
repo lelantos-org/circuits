@@ -50,8 +50,8 @@ template DummyZeroValue(N) {
     }
 }
 
-// Explicit per-asset value conservation — the binding balance check.
-// PerAssetPointBalance below is defense in depth and is not a substitute.
+// Explicit per-asset value conservation: the binding balance check.
+// PerAssetPointBalance below is defence in depth, not a substitute.
 //
 // The point equality alone does not imply conservation. HashToAssetGen is
 // circomlib Pedersen over a 72-bit message, which fits in a single segment and
@@ -72,12 +72,12 @@ template DummyZeroValue(N) {
 // every asset present. Dummy inputs carry value 0 (DummyZeroValue) and are
 // neutral regardless of the asset_id they declare.
 //
-// PRECONDITION (soundness-critical): every value passed in must already be
+// Precondition (soundness-critical): every value passed in must already be
 // 64-bit range-checked by the caller. SpentNote / OutputNote apply RangeCheck64
 // to in_value / out_value, and the transact circuit applies it to public_in /
 // public_out. With at most N_IN+1 terms below 2^64 per side the sums stay under
-// 2^66, far below the modulus, so these are exact integer equalities that cannot
-// be satisfied by wrapping. Removing a range check breaks this.
+// 2^66, far below the modulus, so these are exact integer equalities that
+// cannot be satisfied by wrapping. Dropping a range check invalidates it.
 template PerAssetValueBalance(N_IN, N_OUT) {
     signal input in_asset[N_IN];
     signal input in_value[N_IN];
@@ -137,7 +137,7 @@ template PerAssetValueBalance(N_IN, N_OUT) {
 //   Σ in_cv + pub_in·V^pub + Σ out_rH  ==  Σ out_cv + pub_out·V^pub + Σ in_rH
 // Summing the rH points avoids a Σrcv_in − Σrcv_out field wrap.
 //
-// Defense in depth only: see PerAssetValueBalance above for why this equation
+// Defence in depth only: see PerAssetValueBalance above for why this equation
 // does not by itself imply per-asset conservation. It holds for every honest
 // transaction and keeps cv a meaningful on-chain value commitment.
 template PerAssetPointBalance(N_IN, N_OUT) {

@@ -44,9 +44,9 @@ and one on the deposit side:
 
 * `batch_deposit_opens` — an active deposit leaf's `cv_dep` opens to exactly
   `leaf_public_in` units of `leaf_asset`. Because the binding is *per leaf*, there is no
-  aggregate whose split is free: the old pair form fixed only `Σvalue` modulo the subgroup
-  order `ell`, which is what the pad leaf existed to patch. Here the value of each leaf is
-  pinned on its own, so the statement is about that leaf and needs no companion.
+  aggregate whose split is free: an aggregate would fix only `Σvalue` modulo the subgroup
+  order `ell`. Each leaf's value is pinned on its own, so the statement is about that leaf
+  and needs no companion.
 
 ## Not covered
 

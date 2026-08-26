@@ -116,7 +116,6 @@ const PREFILL_LEAF: Field = 0xdeadn;
  */
 export function buildHonest(
     P: Poseidon,
-    J: Jubjub,
     prefilled: number,
     leaves: LeafWitness[],
 ): BatchWitness {

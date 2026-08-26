@@ -3,7 +3,7 @@
 
 import { POW_2_64, type Field, type Point } from "./field.js";
 import type { Poseidon } from "./poseidon.js";
-import { TAG_DK, TAG_IVK, TAG_LEAF, TAG_NF, TAG_NK, TAG_PK, TAG_RHO } from "./tags.js";
+import { TAG_IVK, TAG_LEAF, TAG_NF, TAG_NK, TAG_PK, TAG_RHO } from "./tags.js";
 
 export interface Note {
     asset: Field;
@@ -98,11 +98,6 @@ export function derivePkFromIvk(P: Poseidon, ivk: Field): Field {
 
 export function derivePk(P: Poseidon, nsk: Field): Field {
     return derivePkFromIvk(P, deriveIvk(P, nsk));
-}
-
-/** Off-circuit FMD detection key. */
-export function deriveDk(P: Poseidon, ivk: Field): Field {
-    return P.hash([TAG_DK, ivk]);
 }
 
 /**

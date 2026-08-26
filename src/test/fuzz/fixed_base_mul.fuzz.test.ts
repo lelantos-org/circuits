@@ -19,7 +19,7 @@ import { fcParamsFor, arbBlinder, MAX_BLINDER } from "./arbitraries";
 import { RCV_BITS as WIDTH, TIMEOUT_HEAVY } from "../lib/constants";
 
 const WRAPPER = fixturePath("test_fixed_base_mul.circom");
-const LEGACY = fixturePath("test_fixed_base_mul_legacy.circom");
+const REFERENCE = fixturePath("test_fixed_base_mul_reference.circom");
 const RAW_BITS = fixturePath("test_fixed_base_mul_bits.circom");
 const fcParams = fcParamsFor("FIXEDBASE");
 
@@ -27,14 +27,14 @@ describe("fuzz: FixedBaseMul", function () {
     this.timeout(TIMEOUT_HEAVY);
 
     let current: any;
-    let legacy: any;
+    let reference: any;
     let raw: any;
     let J: Jubjub;
 
     before(async () => {
-        [current, legacy, raw, J] = await Promise.all([
+        [current, reference, raw, J] = await Promise.all([
             loadCircuit(WRAPPER),
-            loadCircuit(LEGACY),
+            loadCircuit(REFERENCE),
             loadCircuit(RAW_BITS),
             Jubjub.build(),
         ]);
@@ -54,12 +54,11 @@ describe("fuzz: FixedBaseMul", function () {
         );
     });
 
-    // The migration argument, at scale.
     it("matches circomlib EscalarMulFix", async () => {
         await fc.assert(
             fc.asyncProperty(arbBlinder(), async (s) => {
-                const w = await legacy.calculateWitness({ scalar: s.toString() }, true);
-                // legacy[2] then current[2], in declaration order
+                const w = await reference.calculateWitness({ scalar: s.toString() }, true);
+                // circomlib[2] then windowed[2], in declaration order
                 expect([w[1], w[2]], `divergence at ${s}`).to.deep.equal([w[3], w[4]]);
             }),
             fcParams,

@@ -1,4 +1,5 @@
-// Wrap circom_tester so each test file picks the wasm + include path the same way.
+// Wraps circom_tester so every test file resolves the wasm and include paths
+// the same way.
 
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -12,7 +13,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = path.join(__dirname, "..", "..");
 const NODE_MODULES = path.join(SRC_DIR, "..", "node_modules");
 
-export const SRC = SRC_DIR;
 export const FIXTURES = path.join(SRC_DIR, "test", "fixtures");
 
 /**

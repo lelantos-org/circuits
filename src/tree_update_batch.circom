@@ -261,11 +261,11 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 // DEPTH = 10 must match the transact circuits and the on-chain CommitmentTree.
 //
 // MAX_L = 4: 57,106 constraints, inside the 2^16 FFT domain and ptau_16, with
-// 8,430 constraints of headroom. A leaf slot costs roughly 12k constraints, and
+// 8,430 constraints of headroom. A leaf slot costs roughly 12k constraints;
 // `just budget` fails CI if the domain is crossed.
 //
-// MAX_L is at its floor. COUNT_BITS above requires a power of two, and a spend
-// emits TRANSACT_OUT = 3 leaves that must fit one batch — MASP.sol pins
+// MAX_L is at its floor: COUNT_BITS requires a power of two, and a spend emits
+// TRANSACT_OUT = 3 leaves that must fit one batch, with MASP.sol pinning
 // `actualCount` to exactly that on the transfer path. Only flushBatch
 // (deposits, one leaf each) uses more than 3 slots.
 //

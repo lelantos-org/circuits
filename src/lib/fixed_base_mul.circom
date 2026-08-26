@@ -5,38 +5,35 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 
 // Windowed fixed-base scalar multiplication on Baby-Jubjub.
 //
-// Window tables are `var` arithmetic, evaluated by the compiler at no
-// constraint cost, and entry 0 is the identity so no offset compensation is
-// required. Each window costs 4 selector products plus one constraint per
-// coordinate: 748 constraints for a 252-bit scalar.
+// Window tables are `var` arithmetic, folded by the compiler at no constraint
+// cost, and entry 0 is the identity, so no offset compensation is required.
+// Each window costs 4 selector products plus one constraint per coordinate:
+// 748 constraints for a 252-bit scalar.
 //
 // Arithmetic stays in twisted Edwards. BabyAdd's addition law is complete on
 // Baby-Jubjub — `a = 168700` is a quadratic residue and `d = 168696` is not, so
 // `1 ± d·τ` never vanishes for on-curve operands — leaving no exceptional case.
 //
-// Window size 4 is optimal: a k-bit window costs 2^(k-1) - k + 8 constraints
-// over ceil(N/k) windows, so at N = 252, k=2 costs 1008, k=3 and k=4 tie at
-// 756, and k=5 costs 969.
+// Window size 4 minimises cost: a k-bit window costs 2^(k-1) - k + 8
+// constraints over ceil(N/k) windows, so at N = 252, k=2 costs 1008, k=3 and
+// k=4 tie at 756, and k=5 costs 969.
 //
-// PERFORMANCE CONTRACT — the table must reach the gadget as a template
-// parameter, never as a `var` computed in a template body.
+// The coefficient table must reach the gadget as a template parameter, never as
+// a `var` computed in a template body. circom emits a template body into the
+// witness generator as well as into the constraint system, and does not prove
+// that a `var` chain is input-independent: a `windowTable` call in a body is
+// compiled to wasm and re-executed on every proof, per component instance. Each
+// `bjAdd` costs two modular inversions, and a 252-bit scalar needs 18 per
+// window over 63 windows, so the 12 `MulH` instances of `Transact(10, 3, 3)`
+// would cost ~27,000 inversions (~345 ms) per witness — more than the Groth16
+// phase they save.
 //
-// "No constraint cost" is not "no cost". circom emits a template body into the
-// witness generator as well as into the constraint system, and it does not
-// prove that a `var` chain is input-independent: a `windowTable` call in the
-// body is compiled to wasm and re-executed on every proof, per component
-// instance. Each `bjAdd` is two field divisions — modular inversions — and a
-// 252-bit scalar costs 18 of them per window over 63 windows, so the 12 `MulH`
-// instances of `Transact(10, 3, 3)` paid ~27,000 inversions per witness. That
-// was ~345 ms, more than the entire Groth16 phase it saves.
-//
-// Template *arguments*, by contrast, must be compile-time known, so circom
-// evaluates them during instantiation and folds the results into the emitted
-// coefficients. `fixedBaseCoefs` below is therefore called only from an
-// argument position, and `FixedBaseMulBits` takes coefficients rather than a
-// base point. Moving that call into the body would restore the old cost
-// silently — the constraint count, the `vectors/`, and every test would still
-// pass, and only witness-generation time would regress.
+// Template arguments must be compile-time known, so circom evaluates them
+// during instantiation and folds the results into the emitted coefficients.
+// `fixedBaseCoefs` is therefore called only from an argument position, and
+// `FixedBaseMulBits` takes coefficients rather than a base point. Moving that
+// call into a body regresses witness-generation time only: the constraint
+// count, the vectors and every test still pass.
 
 // Baby-Jubjub twisted Edwards addition, evaluated at compile time. Same formula
 // as circomlib's BabyAdd; complete, so it doubles and handles the identity
@@ -83,9 +80,9 @@ function windowTable(bx, by) {
 //     W[j] = sum over m of coef[m] * prod(s_b : b in m)      for j on {0,1}^3
 //     coef[m] = sum over j subset of m of (-1)^(|m|-|j|) * W[j]
 //
-// Derived rather than transcribed. The explicit form is 16 sixteen-term
-// alternating sums per coordinate, where one sign error yields a gadget that is
-// wrong only for the scalars selecting that entry.
+// Computed rather than transcribed: the explicit form is 16 sixteen-term
+// alternating sums per coordinate, where a single sign error breaks only the
+// scalars that select the affected entry.
 function mobius8(W, half, coord) {
     var coef[8];
     for (var m = 0; m < 8; m++) {
@@ -116,15 +113,14 @@ function FIXED_BASE_WINDOWS() { return 63; }
 //   row 0  loX      row 1  hiX - loX
 //   row 2  loY      row 3  hiY - loY
 //
-// The hi-minus-lo differences are taken here rather than in the template so the
-// body holds no compile-time arithmetic at all.
+// The hi-minus-lo differences are taken here so the template body holds no
+// compile-time arithmetic.
 //
 // Window i is built over base 16^i * BASE, advanced by four doublings per step.
 // The sequence does not depend on the scalar width, so a narrower instance
 // reads a prefix of the same table and one table serves every width.
 //
-// CALL ONLY FROM A TEMPLATE ARGUMENT POSITION — see the performance contract
-// above. This is the expensive function; in an argument position it runs once
+// Call only from a template argument position (see header): there it runs once
 // per instantiation in the compiler and never reaches the witness generator.
 function fixedBaseCoefs(BASE) {
     var C[63][4][8];
@@ -161,16 +157,17 @@ function fixedBaseCoefs(BASE) {
 // out = e * BASE, with `e` given as N_BITS LSB-first bits and BASE supplied
 // through `COEFS = fixedBaseCoefs(BASE)`.
 //
-// DANGER: the caller MUST constrain every e[i] to {0,1}. The window lookup is a
-// multilinear extension of the table and agrees with it only on the boolean
-// cube; off it a prover steers the output to an arbitrary field pair. That pair
-// need not be on the curve, and BabyAdd's `(1 + d*tau) * xout === beta + gamma`
-// leaves `xout` unconstrained when `1 + d*tau` vanishes, so a missing
-// booleanity constraint can make the circuit under-constrained.
+// Precondition: the caller must constrain every e[i] to {0,1}. The window
+// lookup is a multilinear extension of the table and agrees with it only on the
+// boolean cube; off it a prover steers the output to an arbitrary field pair.
+// That pair need not be on the curve, and BabyAdd's
+// `(1 + d*tau) * xout === beta + gamma` leaves `xout` unconstrained when
+// `1 + d*tau` vanishes, so a missing booleanity constraint leaves the circuit
+// under-constrained.
 //
-// Use `FixedBaseMul` below unless the caller already holds a constrained bit
+// Prefer `FixedBaseMul` below unless the caller already holds a constrained bit
 // array to share; it derives COEFS itself and cannot be handed a table that
-// disagrees with the base it meant.
+// disagrees with the intended base.
 //
 // Bits above the top window are zero-padded, so N_BITS need not be a multiple
 // of 4. The scalar is reduced modulo the subgroup order by the group itself; no

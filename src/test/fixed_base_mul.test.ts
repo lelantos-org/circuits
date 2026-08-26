@@ -8,7 +8,7 @@ import { RCV_BITS as WIDTH, TIMEOUT_CIRCUIT } from "./lib/constants";
 
 const WRAPPER = fixturePath("test_fixed_base_mul.circom");
 const WIDTHS = fixturePath("test_fixed_base_mul_widths.circom");
-const LEGACY = fixturePath("test_fixed_base_mul_legacy.circom");
+const REFERENCE = fixturePath("test_fixed_base_mul_reference.circom");
 const RAW_BITS = fixturePath("test_fixed_base_mul_bits.circom");
 // Coverage for the FixedBaseMul gadget MulH uses: the compile-time window
 // tables, the 4-bit mux factorisation, and the accumulator chain across window
@@ -135,20 +135,19 @@ describe("FixedBaseMul (fixed-base scalar mul on Baby-Jubjub)", function () {
     });
 });
 
-// The property the whole change rests on. `vectors/` pins it for the specific
-// witnesses it carries; this pins it for arbitrary scalars. If these ever
-// diverge, every cv, cv_dep, leaf and root moves with them.
-describe("FixedBaseMul vs the EscalarMulFix it replaced", function () {
+// `vectors/` pins agreement for the specific witnesses it carries; this pins it
+// for arbitrary scalars. A divergence moves every cv, cv_dep, leaf and root.
+describe("FixedBaseMul vs circomlib EscalarMulFix", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
     let circuit: CircuitTester;
     before(async () => {
-        circuit = await loadCircuit(LEGACY);
+        circuit = await loadCircuit(REFERENCE);
     });
 
     async function bothAgree(scalar: Field): Promise<void> {
         const w = await circuit.calculateWitness({ scalar: scalar.toString() }, true);
-        // outputs in declaration order: legacy[2] then current[2]
+        // outputs in declaration order: circomlib[2] then windowed[2]
         expect(w[1], `x mismatch at ${scalar}`).to.equal(w[3]);
         expect(w[2], `y mismatch at ${scalar}`).to.equal(w[4]);
     }

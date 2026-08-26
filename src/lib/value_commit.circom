@@ -23,9 +23,9 @@ function H_BASE_Y() {
 //
 // 252 rather than the 251 the subgroup order admits: `ceil(252/4) ==
 // ceil(251/4)`, so both cost 63 windows and 252 is one constraint dearer.
-// Narrowing to 251 would additionally require regenerating every committed
-// vector, since `deterministicDummyBlinders` (`BLINDER_MASK` in
-// src/test/ref/witness.ts) masks to 252.
+// Narrowing to 251 also requires regenerating every committed vector, since
+// `deterministicDummyBlinders` (`BLINDER_MASK` in src/test/ref/witness.ts)
+// masks to 252.
 //
 // Must satisfy 2^RCV_BITS < p for the Num2Bits decomposition to be alias-free
 // (`lean/Lelantos/Model/Field.lean :: two_pow_252_lt_p`).
@@ -49,11 +49,9 @@ template ValueScalarMul() {
     out[1] <== mul.out[1];
 }
 
-// Fixed-base scalar multiplication rcv·H.
-//
-// FixedBaseMul replaces circomlib's EscalarMulFix, which cost 3,864 constraints
-// here against 748 for the same group element — see fixed_base_mul.circom for
-// why. It owns its Num2Bits, so the window selectors cannot lose booleanity.
+// Fixed-base scalar multiplication rcv·H, 748 constraints; see
+// fixed_base_mul.circom. FixedBaseMul owns its Num2Bits, so the window
+// selectors cannot lose booleanity.
 template MulH() {
     signal input scalar;
     signal output out[2];
@@ -74,14 +72,14 @@ template MulH() {
 //   cv     = value·gen + rcv·H
 //   cv_dep = value·gen + rcv_dep·H
 //
-// Every note needs exactly this pair: `cv` is the per-spend re-randomisation
-// published in the transaction, `cv_dep` is the note's permanent blinding that
-// reproduces its committed leaf. The two blinders MUST stay independent — if
-// rcv == rcv_dep then in_cv at spend time equals the leaf's cv_dep and an
-// observer learns which leaf was spent.
+// Every note needs both: `cv` is the per-spend re-randomisation published in
+// the transaction, `cv_dep` is the note's permanent blinding that reproduces
+// its committed leaf. The blinders must stay independent — if rcv == rcv_dep
+// then in_cv at spend time equals the leaf's cv_dep and an observer learns
+// which leaf was spent.
 //
-// The value·gen term is identical across the two, so it is computed once and
-// each blinder added to it, saving one EscalarMulAny(64) per note slot.
+// The value·gen term is shared, so it is computed once and each blinder added
+// to it, saving one EscalarMulAny(64) per note slot.
 //
 // rH / rH_dep are exposed for PerAssetPointBalance.
 template ValueCommitPair() {

@@ -34,11 +34,11 @@ template PolyEval(N) {
 // out_aux_digest binds the encrypted-note payload the relayer carries in
 // calldata: keccak256(abi.encode(aux)) mod r over the full AuxValidation.Output
 // array. Without it only the three clue fields per output are bound, so a
-// relayer could keep the FMD clue intact — proof still verifies, recipient still
-// flags the note — while corrupting ephPub/ciphertext, leaving the recipient
-// unable to decrypt the opening of a note whose inputs are already spent.
-// Appended after the clue block so slots 0..(8+3·N_IN+8·N_OUT-1) keep their
-// indices.
+// relayer could keep the FMD clue intact — proof still verifies, recipient
+// still flags the note — while corrupting ephPub/ciphertext, leaving the
+// recipient unable to decrypt the opening of a note whose inputs are already
+// spent. It is appended after the clue block so slots
+// 0..(8+3·N_IN+8·N_OUT-1) keep their indices.
 template TransactCompressN(N_IN, N_OUT) {
     var PI_PER_OUT = 3;
     var N = 9 + 3 * N_IN + 5 * N_OUT + PI_PER_OUT * N_OUT;

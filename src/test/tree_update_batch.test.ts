@@ -11,9 +11,7 @@
 //
 // The witness builders live in `lib/batch.ts`, shared with the fuzz suite.
 
-import { expect } from "chai";
-
-import { Jubjub, Poseidon, type Field } from "./helpers";
+import { Jubjub, Poseidon } from "./helpers";
 import { loadCircuit, srcPath, type CircuitTester } from "./lib/circuit";
 import { treeUpdateBatchInputJson } from "./lib/inputs";
 import { expectWitnessFails, expectWitnessY } from "./lib/expect";
@@ -54,7 +52,7 @@ describe("tree_update_batch", function () {
             rcvDep: 5n,
             isDeposit: 1,
         });
-        const w = buildHonest(P, J, 0, [leaf]);
+        const w = buildHonest(P, 0, [leaf]);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
@@ -63,7 +61,7 @@ describe("tree_update_batch", function () {
             buildLeafWitness({ J, P, asset: 7n, val: 100n, pk: 0xdadn, rho: 11n, rcm: 33n, rcvDep: 55n, isDeposit: 0 }),
             buildLeafWitness({ J, P, asset: 7n, val: 50n, pk: 0xdadn, rho: 22n, rcm: 44n, rcvDep: 66n, isDeposit: 0 }),
         ];
-        const w = buildHonest(P, J, 0, leaves);
+        const w = buildHonest(P, 0, leaves);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
@@ -77,7 +75,7 @@ describe("tree_update_batch", function () {
             ...honest,
             cvDep: J.valueCommit(1_000_000n, fakeAssetGen, honest.rcv),
         };
-        const w = buildHonest(P, J, 0, [tampered]);
+        const w = buildHonest(P, 0, [tampered]);
         await expectWitnessFails(
             circuit,
             treeUpdateBatchInputJson(w),
@@ -94,21 +92,21 @@ describe("tree_update_batch", function () {
     it("frontier binding: honest non-zero start_index passes", async () => {
         // start_index = 5 ⇒ digits [1,1,0,...]. Exercises pre/eq branches
         // at low levels.
-        const w = buildHonest(P, J, 5, [simpleLeaf({ J, P, val: 42n, isDeposit: 1 })]);
+        const w = buildHonest(P, 5, [simpleLeaf({ J, P, val: 42n, isDeposit: 1 })]);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
     it("frontier binding: large prefill (start_index=21) honest passes", async () => {
         // 21 = 0b010101 ⇒ digits [1,1,1,0,...]. Non-trivial frontier at
         // the three lowest levels.
-        const w = buildHonest(P, J, 21, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
+        const w = buildHonest(P, 21, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
     it("frontier binding: corrupted frontier entry rejected", async () => {
         // Honest oldRoot + cms but tampered frontier ⇒ FrontierRoot rebuild
         // diverges from old_root ⇒ `old_root === frontier_root.root` fails.
-        const w = buildHonest(P, J, 8, [simpleLeaf({ J, P, val: 1000n, isDeposit: 1 })]);
+        const w = buildHonest(P, 8, [simpleLeaf({ J, P, val: 1000n, isDeposit: 1 })]);
         w.frontier[1][1] = w.frontier[1][1] + 1n;
         await expectWitnessFails(
             circuit,
@@ -121,7 +119,7 @@ describe("tree_update_batch", function () {
         // Frontier honest (all-zeros for empty tree) but oldRoot lied about.
         // FrontierRoot rebuilds the genuine empty-tree root; equality check
         // catches the mismatch.
-        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.oldRoot = w.oldRoot + 1n;
         rebindFiatShamir(w);
         await expectWitnessFails(
@@ -141,7 +139,7 @@ describe("tree_update_batch", function () {
             simpleLeaf({ J, P, val: 33n, isDeposit: 1, asset: 7n, pk: 0xaa1n }),
             simpleLeaf({ J, P, val: 77n, isDeposit: 1, asset: 7n, pk: 0xaa2n }),
         ];
-        const w = buildHonest(P, J, 0, leaves);
+        const w = buildHonest(P, 0, leaves);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
@@ -153,7 +151,7 @@ describe("tree_update_batch", function () {
             simpleLeaf({ J, P, val: 22n, isDeposit: 0, pk: 0xb02n }),
             simpleLeaf({ J, P, val: 33n, isDeposit: 0, pk: 0xb03n }),
         ];
-        const w = buildHonest(P, J, 0, leaves);
+        const w = buildHonest(P, 0, leaves);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
@@ -162,7 +160,7 @@ describe("tree_update_batch", function () {
         for (let i = 0; i < MAX_L - 1; i++) {
             leaves.push(simpleLeaf({ J, P, val: BigInt(300 + i), isDeposit: 1, pk: BigInt(0xbe00 + i) }));
         }
-        const w = buildHonest(P, J, 0, leaves);
+        const w = buildHonest(P, 0, leaves);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
@@ -171,7 +169,7 @@ describe("tree_update_batch", function () {
         for (let i = 0; i < MAX_L; i++) {
             leaves.push(simpleLeaf({ J, P, val: BigInt(300 + 2 * i), isDeposit: 1, pk: BigInt(0xbf00 + i) }));
         }
-        const w = buildHonest(P, J, 0, leaves);
+        const w = buildHonest(P, 0, leaves);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
@@ -181,7 +179,7 @@ describe("tree_update_batch", function () {
             simpleLeaf({ J, P, val: 7n, isDeposit: 0, pk: 0xc02n }),
             simpleLeaf({ J, P, val: 100n, isDeposit: 1, pk: 0xc03n }),
         ];
-        const w = buildHonest(P, J, 0, leaves);
+        const w = buildHonest(P, 0, leaves);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
@@ -194,7 +192,7 @@ describe("tree_update_batch", function () {
             simpleLeaf({ J, P, val: 7n, isDeposit: 1, pk: 0xd02n }),
             simpleLeaf({ J, P, val: 9n, isDeposit: 1, pk: 0xd03n }),
         ];
-        const w = buildHonest(P, J, 13, leaves);
+        const w = buildHonest(P, 13, leaves);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
@@ -229,7 +227,7 @@ describe("tree_update_batch", function () {
 
     for (const { field, poison, polyEvalBound = true } of PADDING_CASES) {
         it(`padding: non-zero ${field} in inactive slot is rejected`, async () => {
-            const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
+            const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
             poison(w);
             if (polyEvalBound) rebindFiatShamir(w);
             await expectWitnessFails(
@@ -246,7 +244,7 @@ describe("tree_update_batch", function () {
         // Circuit decomposes (actual_count - 1) in COUNT_BITS bits ⇒
         // actual_count=0 yields -1, a 254-bit field element that Num2Bits
         // cannot fit.
-        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.actualCount = 0;
         // Zero out the would-be-active slot fields so only the count check fires.
         w.cms[0] = 0n;
@@ -266,7 +264,7 @@ describe("tree_update_batch", function () {
         // actual_count ≤ MAX_L. At MAX_L + 1 the decomposition needs
         // COUNT_BITS + 1 bits and Num2Bits(COUNT_BITS) rejects it. Derived from
         // MAX_L rather than written as a literal so it tracks the width.
-        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.actualCount = MAX_L + 1;
         rebindFiatShamir(w);
         await expectWitnessFails(
@@ -277,7 +275,7 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS when is_deposit is non-boolean (=2)", async () => {
-        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.isDeposit[0] = 2;
         rebindFiatShamir(w);
         await expectWitnessFails(
@@ -290,7 +288,7 @@ describe("tree_update_batch", function () {
     it("FAILS when leaf_public_in exceeds 2^64 (RangeCheck64)", async () => {
         // Build an honest witness then override leaf_public_in past 2^64;
         // the deposit-side RangeCheck64 fails.
-        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.leafPublicIn[0] = TWO_64;
         rebindFiatShamir(w);
         await expectWitnessFails(
@@ -303,7 +301,7 @@ describe("tree_update_batch", function () {
     it("FAILS on C-1' value inflation: same asset, wrong claimed value", async () => {
         // Honest path: cv_dep = leaf_public_in · V^asset + rcv · H.
         // Tamper: inflate the claim while keeping cv_dep real ⇒ equality fails.
-        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 150n, isDeposit: 1 })]);
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 150n, isDeposit: 1 })]);
         w.leafPublicIn[0] = 200n;
         rebindFiatShamir(w);
         await expectWitnessFails(
@@ -325,7 +323,7 @@ describe("tree_update_batch", function () {
             ...honest,
             cvDep: J.valueCommit(1n << 63n, assetGen, honest.rcv),
         };
-        const w = buildHonest(P, J, 0, [tampered]);
+        const w = buildHonest(P, 0, [tampered]);
         await expectWitnessFails(
             circuit,
             treeUpdateBatchInputJson(w),
@@ -337,7 +335,7 @@ describe("tree_update_batch", function () {
         // Honest: cv_dep = leaf_public_in·V + rcv·H. Tamper rcv ⇒ rhs shifts
         // by Δ·H ≠ 0 ⇒ point equality fails. rcv is NOT in PolyEval so
         // Fiat-Shamir is unchanged.
-        const w = buildHonest(P, J, 0, [simpleLeaf({ J, P, val: 150n, isDeposit: 1 })]);
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 150n, isDeposit: 1 })]);
         w.rcv[0] = w.rcv[0] + 1n;
         await expectWitnessFails(
             circuit,
@@ -351,7 +349,7 @@ describe("tree_update_batch", function () {
         // leaf declares its own public_in and must open to exactly that.
         const honest = simpleLeaf({ J, P, val: 100n, isDeposit: 1 });
         const tampered: LeafWitness = { ...honest, leafPublicIn: 50n };
-        const w = buildHonest(P, J, 0, [tampered]);
+        const w = buildHonest(P, 0, [tampered]);
         await expectWitnessFails(
             circuit,
             treeUpdateBatchInputJson(w),

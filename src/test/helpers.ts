@@ -3,8 +3,8 @@
 // Primitives and witness builders live in `./ref`, transcribed from the circom
 // under `src/lib/`. This package does not depend on `@lelantos-org/sdk`;
 // agreement with the SDK is established through the vectors under `vectors/`,
-// which are generated from `./ref`. New primitives belong in `./ref` for that
-// reason, not in individual test files.
+// which are generated from `./ref`. New primitives therefore belong in `./ref`
+// rather than in individual test files.
 
 export * from "./ref/index.js";
 
