@@ -13,7 +13,7 @@
 import { expect } from "chai";
 
 import { flatten, hornerEval, type CircomTransactInput } from "../helpers";
-import { TIMEOUT_CIRCUIT } from "../lib/constants";
+import { N_IN, N_OUT, TIMEOUT_CIRCUIT } from "../lib/constants";
 import { useTransactCircuit } from "./setup";
 
 /** Fields with no in-circuit constraint, so PolyEval is the only thing binding them. */
@@ -32,10 +32,11 @@ const BOUND_SCALARS = [
     "relayer_address",
 ] as const;
 
-/** Slot count of the 2x2 coefficient vector — out_aux_digest is the last one. */
-const COEFF_COUNT = 31;
+/** Slot count of the 4x6 coefficient vector — out_aux_digest is the last one.
+ * `9 + 3·N_IN + 8·N_OUT` = `9 + 12 + 48`. */
+const COEFF_COUNT = 9 + 3 * N_IN + 8 * N_OUT;
 
-describe("transact_2x2 / PolyEval binding", function () {
+describe("transact_4x6 / PolyEval binding", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
     const ctx = useTransactCircuit();

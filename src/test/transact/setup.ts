@@ -7,7 +7,7 @@ import { loadCircuit, srcPath, type CircuitTester } from "../lib/circuit";
 import { buildTxBuilder, TxBuilder } from "../lib/transact";
 import { DEPTH } from "../lib/constants";
 
-export const CIRCUIT = srcPath("2x2.circom");
+export const CIRCUIT = srcPath("4x6.circom");
 
 /** A second asset, for the per-asset conservation tests. */
 export const ASSET_B = 99n;

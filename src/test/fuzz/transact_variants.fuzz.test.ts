@@ -1,4 +1,4 @@
-// Heavy variant coverage for `2x2.circom`.
+// Heavy variant coverage for `4x6.circom`.
 //
 // [src/test/fuzz/transact.fuzz.test.ts](./transact.fuzz.test.ts) covers
 // balanced random witnesses, unbalanced mutations, ghost-note asset, wrong-nsk
@@ -24,7 +24,7 @@ import { expectWitnessFails } from "../lib/expect";
 import { arbBalancedSplit, arbNsk, MAX_VALUE, fcParamsFor } from "./arbitraries";
 import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 
-const CIRCUIT = srcPath("2x2.circom");
+const CIRCUIT = srcPath("4x6.circom");
 // `TRANSACT_VARIANTS` is slow (≥1 depth-10 witness per trial); SUITE_SCALE
 // halves vs NUM_RUNS by default. Override: FUZZ_RUNS_TRANSACT_VARIANTS=N.
 const fcParams = fcParamsFor("TRANSACT_VARIANTS");
@@ -52,7 +52,7 @@ async function buildBalanced(
     return { input, inputs: [inA, inB], outputs: [outA, outB], root };
 }
 
-describe("transact_2x2 variants [fuzz]", function () {
+describe("transact_4x6 variants [fuzz]", function () {
     this.timeout(TIMEOUT_HEAVY);
 
     let circuit: any;

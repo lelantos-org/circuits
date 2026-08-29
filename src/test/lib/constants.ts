@@ -7,8 +7,30 @@ import type { Field } from "../helpers";
 
 // ===== circuit dimensions =====
 
-/** Quaternary tree depth in 2x2 / 3x3 / tree_update_batch. 4^10 = 1,048,576 leaves. */
-export const DEPTH = 10;
+/**
+ * Quaternary tree depth. `Transact(11, 4, 6)` and `TreeUpdateBatch(11, 8)` share
+ * it — they must, since a spend's output leaves are inserted by the batch
+ * circuit. 4^11 = 4,194,304 leaves.
+ */
+export const DEPTH = 11;
+
+/**
+ * Alias kept so the batch suites read against their own circuit's first
+ * argument rather than a constant named for the transact side.
+ */
+export const BATCH_DEPTH = DEPTH;
+
+/**
+ * Shielded input slots — `N_IN` in `Transact(11, 4, 6)`, `src/4x6.circom`.
+ *
+ * The circuit takes exactly this many; a witness short of it fails witness
+ * calculation with "Not enough values for input signal". `TxBuilder.build`
+ * pads with dummies rather than making every suite spell out the padding.
+ */
+export const N_IN = 4;
+
+/** Shielded output slots — `N_OUT` in `Transact(11, 4, 6)`. */
+export const N_OUT = 6;
 
 /** Children per node — `src/lib/merkle.circom`. */
 export const ARITY = 4;
@@ -18,15 +40,17 @@ export const ARITY = 4;
  * of `src/tree_update_batch.circom`.
  *
  * At its floor: COUNT_BITS below requires a power of two, and a spend emits
- * TRANSACT_OUT = 3 leaves that must fit one batch.
+ * TRANSACT_OUT = 6 leaves that must fit one batch. Six is not a power of two,
+ * so the floor is 8.
  */
-export const MAX_L = 4;
+export const MAX_L = 8;
 
 /**
  * Bits `actual_count - 1` decomposes into — `COUNT_BITS` in the same file. The
- * circuit asserts `1 << COUNT_BITS == MAX_L`.
+ * circuit asserts `1 << COUNT_BITS == MAX_L`. Derived there from MAX_L; mirrored
+ * here because the tests build witnesses against it directly.
  */
-export const COUNT_BITS = 2;
+export const COUNT_BITS = 3;
 
 /** Blinder width — `RCV_BITS()` in `src/lib/value_commit.circom`. */
 export const RCV_BITS = 252n;

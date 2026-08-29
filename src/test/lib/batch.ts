@@ -12,7 +12,7 @@ import {
     type Point,
 } from "../helpers";
 import { treeUpdateBatchCoeffs, padToSlots, type TreeUpdateBatchArgs } from "./inputs";
-import { DEPTH, MAX_L } from "./constants";
+import { BATCH_DEPTH, MAX_L } from "./constants";
 
 /** One leaf's contribution to a batch: the commitment plus its deposit anchor. */
 export interface LeafWitness {
@@ -119,7 +119,7 @@ export function buildHonest(
     prefilled: number,
     leaves: LeafWitness[],
 ): BatchWitness {
-    const tree = new MerkleTree(P, DEPTH);
+    const tree = new MerkleTree(P, BATCH_DEPTH);
     tree.fillConstant(prefilled, PREFILL_LEAF);
     const oldRoot = tree.root();
     const frontier = tree.frontier();

@@ -1,0 +1,69 @@
+merkleRoot
+nullifier 0
+nullifier 1
+nullifier 2
+nullifier 3
+outCm 0
+outCm 1
+outCm 2
+outCm 3
+outCm 4
+outCm 5
+publicAssetId
+publicIn
+publicOut
+inCvX 0
+inCvY 0
+inCvX 1
+inCvY 1
+inCvX 2
+inCvY 2
+inCvX 3
+inCvY 3
+outCvX 0
+outCvY 0
+outCvX 1
+outCvY 1
+outCvX 2
+outCvY 2
+outCvX 3
+outCvY 3
+outCvX 4
+outCvY 4
+outCvX 5
+outCvY 5
+recipient
+chainId
+payer
+relayer
+outCvDepX 0
+outCvDepY 0
+outCvDepX 1
+outCvDepY 1
+outCvDepX 2
+outCvDepY 2
+outCvDepX 3
+outCvDepY 3
+outCvDepX 4
+outCvDepY 4
+outCvDepX 5
+outCvDepY 5
+clueRx 0
+clueRy 0
+clueBits 0
+clueRx 1
+clueRy 1
+clueBits 1
+clueRx 2
+clueRy 2
+clueBits 2
+clueRx 3
+clueRy 3
+clueBits 3
+clueRx 4
+clueRy 4
+clueBits 4
+clueRx 5
+clueRy 5
+clueBits 5
+auxDigest

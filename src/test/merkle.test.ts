@@ -152,10 +152,20 @@ describe("quaternary merkle tree", function () {
 describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
     this.timeout(TIMEOUT_FAST);
 
-    // Genesis root asserted by CommitmentTree.EMPTY_ROOT in the contracts repo.
+    // Genesis root for DEPTH = 11, which CommitmentTree.EMPTY_ROOT must become.
+    //
+    // PENDING: the contract still carries the depth-10 root
+    // (0x1308eb79d37ed29a9a2d34861692ea8c3e4fed3f555f53a8776c1256738e40a7) and
+    // MAX_LEAVES = 4^10. Updating it in isolation would leave the pool with a
+    // depth-11 tree behind a depth-10 verifier and a 4-output ABI, so it lands
+    // with the rest of the contract work — the compress overload at 69 slots,
+    // Output[6], MAX_L_BATCH = 8 and the regenerated verifiers.
+    //
+    // This constant is the value it must take. It is asserted against the
+    // circuit's own table below, so the two cannot drift while they wait.
     const CONTRACT_EMPTY_ROOT =
-        0x1308eb79d37ed29a9a2d34861692ea8c3e4fed3f555f53a8776c1256738e40a7n;
-    const TABLE_DEPTH = 10;
+        0x1cf92e62b512433b35f0064d537576b0184cad5fa7ab64201cd8084ee2dc171fn;
+    const TABLE_DEPTH = 11;
 
     let table: Field[];
     let P2: Poseidon;
@@ -189,7 +199,11 @@ describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
         }
     });
 
-    it("EMPTY_SUBTREE(10) equals CommitmentTree.EMPTY_ROOT", () => {
+    it("EMPTY_SUBTREE(TABLE_DEPTH) equals CommitmentTree.EMPTY_ROOT", () => {
+        // The cross-repo pin: the circuit's empty-subtree chain and the
+        // contract's genesis root are the same value reached two ways, so a
+        // depth change touching only one side fails here rather than at a root
+        // mismatch on the first insert.
         expect(table[TABLE_DEPTH]).to.equal(CONTRACT_EMPTY_ROOT);
     });
 });

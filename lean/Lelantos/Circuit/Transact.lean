@@ -185,7 +185,7 @@ structure TxBinding (w : TxWitness depth nIn nOut) : Prop where
 /-- **Soundness of `Transact`.** Any assignment satisfying the constraint system yields a
 well-formed transaction. -/
 theorem transact_sound {w : TxWitness depth nIn nOut}
-    (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4) (h : TransactSat w) : TxWellFormed w where
+    (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7) (h : TransactSat w) : TxWellFormed w where
   realSlots i hi hreal := spentNote_sound (h.spent_sat i hi) hreal
   dummySlots _i hi hdum := dummyZeroValue_zero h.dummy_zero hi hdum
   sharedRoot := h.spent_root
@@ -208,12 +208,12 @@ The assumption is placed in the statement rather than in an axiom so that it can
 into `transact_sound` or anything else; `Lelantos.Model.Poseidon`'s module note records why the
 alternatives — an axiom, or a `∨ PoseidonCollision` conclusion — are worse. -/
 theorem transact_binding {w : TxWitness depth nIn nOut} (hnc : ¬ PoseidonCollision)
-    (hnOut : nOut ≤ 4) (h : TransactSat w) : TxBinding w where
+    (hnOut : nOut ≤ 7) (h : TransactSat w) : TxBinding w where
   rhoDistinct := by
     intro j j' hj hj' hne heq
     rw [h.rho_derived j hj, h.rho_derived j' hj'] at heq
     have hsmall : ∀ m : ℕ, m < nOut → m < p := fun m hm =>
-      lt_trans (lt_of_lt_of_le hm hnOut) four_lt_p
+      lt_trans (lt_of_lt_of_le hm hnOut) seven_lt_p
     exact hne (natCast_inj_of_lt (hsmall j hj) (hsmall j' hj') (deriveRho_inj hnc heq).2)
   membershipBinding := by
     intro i hi hreal leaf' pe' hmem
@@ -234,7 +234,7 @@ bucket's asset, then no output can carry it. Immediate from `conservation`, but 
 stating: it is the "you cannot mint a new asset out of nothing" property, and it holds
 over `ℕ` so no wrap-around escape exists. -/
 theorem no_asset_creation {w : TxWitness depth nIn nOut}
-    (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4) (h : TransactSat w) (a : F)
+    (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7) (h : TransactSat w) (a : F)
     (hnotIn : ∀ i, i < nIn → inAsset w i ≠ a) (hnotPub : w.publicAssetId ≠ a) :
     ∀ j, j < nOut → outAsset w j = a → outValue w j = 0 := by
   classical
@@ -298,26 +298,40 @@ theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
     ⟨slotIndex nIn nOut s, slotIndex_lt hs, by
       rw [txCoeffs_slotIndex w hs, txCoeffs_slotIndex w' hs]; exact hne⟩
 
-/-! ## The deployed instances
+/-! ## The instantiated shapes
 
-`transact_sound` is stated for `nIn ≤ 4`, `nOut ≤ 4` — the bound comes from
+`transact_sound` is stated for `nIn ≤ 7`, `nOut ≤ 7` — the bound comes from
 `perAssetValueBalance_nat`, where it is what keeps each side of the balance equation below
-`p`. The repository instantiates exactly three shapes, and all three sit inside it. -/
+`p`. Seven is where that argument's rounding to `8 · 2^64` runs out, not where any shape
+sits; every shape below is comfortably inside it.
 
-/-- `Transact(10, 2, 2)` — `src/2x2.circom:28`. Not the deployed shape; retained as a
-second instantiation of `Transact` and as the shape the satisfiability witnesses in
-`Proofs/Completeness.lean` are built at. -/
+Note the depths differ. `Transact(11, 4, 6)` is paired with `TreeUpdateBatch(11, 8)`, while
+2x2 / 3x3 / 4x4 remain at depth 10 and cannot share a tree with it. They are modeled here
+as further instantiations of the same generic result, not as usable shapes. -/
+
+/-- `Transact(10, 2, 2)` — `src/2x2.circom:28`. The shape the satisfiability witnesses in
+`Proofs/Completeness.lean` are built at, and the one `src/test/formal/layout_parity.test.ts`
+cross-checks against `src/test/ref/compress.ts`. Depth 10. -/
 abbrev Transact2x2 := TxWitness 10 2 2
 
-/-- `Transact(10, 3, 3)` — `src/3x3.circom:44`. **The deployed shape**; see the circom
-header. -/
+/-- `Transact(10, 3, 3)` — `src/3x3.circom:44`. Depth 10. -/
 abbrev Transact3x3 := TxWitness 10 3 3
 
-/-- `Transact(10, 4, 4)` — `src/4x4.circom:45`. Neither deployed nor published: it has no
-`PubInputs.sol` compress overload and no golden vectors, and at 86,680 constraints it is the
-one shape that does not fit the 2^16 FFT domain. It is modeled here because it is the shape
-that fixes the `≤ 4` slot bound `transact_sound` carries. -/
+/-- `Transact(10, 4, 4)` — `src/4x4.circom:45`. Depth 10. The shape deployed before the
+move to 4x6; 86,680 constraints, the first that does not fit the 2^16 FFT domain. -/
 abbrev Transact4x4 := TxWitness 10 4 4
+
+/-- `Transact(11, 4, 6)` — `src/4x6.circom`. **The target shape.**
+
+Six outputs so a withdrawal's change lands on the denomination ladder in one spend rather
+than leaving an off-ladder remainder for a follow-up transfer; four inputs because an input
+slot costs roughly 3.4x an output slot, carrying a Merkle path the output side does not.
+Depth 11 because an unused output slot is a real value-0 leaf, so six outputs would
+otherwise cut the tree's lifetime by a third.
+
+100,320 constraints, inside 2^17. It is the shape that fixes the `≤ 6` end of the slot
+bound `transact_sound` carries — the bound itself is stated at 7, where the proof reaches. -/
+abbrev Transact4x6 := TxWitness 11 4 6
 
 /-- **Soundness at the `2x2` instance.** -/
 theorem transact2x2_sound {w : Transact2x2} (h : TransactSat w) : TxWellFormed w :=
@@ -343,6 +357,15 @@ theorem transact4x4_sound {w : Transact4x4} (h : TransactSat w) : TxWellFormed w
 
 /-- **The `4x4` binding layer.** -/
 theorem transact4x4_binding {w : Transact4x4} (hnc : ¬ PoseidonCollision)
+    (h : TransactSat w) : TxBinding w :=
+  transact_binding hnc (by norm_num) h
+
+/-- **Soundness of the `4x6` instance.** -/
+theorem transact4x6_sound {w : Transact4x6} (h : TransactSat w) : TxWellFormed w :=
+  transact_sound (by norm_num) (by norm_num) h
+
+/-- **The `4x6` binding layer.** -/
+theorem transact4x6_binding {w : Transact4x6} (hnc : ¬ PoseidonCollision)
     (h : TransactSat w) : TxBinding w :=
   transact_binding hnc (by norm_num) h
 

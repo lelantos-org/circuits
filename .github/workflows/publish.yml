@@ -98,6 +98,10 @@ jobs:
           just compile-batch setup-batch
           # Stage the flat wasm next to its r1cs for release upload.
           cp build/tree_update_batch_js/tree_update_batch.wasm build/tree_update_batch.wasm
+          # The witness-calculation graph the relayer proves against. Built
+          # after setup-batch so it diffs its r1cs against the same compile the
+          # ceremony consumed.
+          just build-graph
 
       # `setup` writes the 2x2 verifier to build/Verifier.sol and `setup-3x3`
       # writes the deployed one to build/Verifier3x3.sol. Uploading the former
@@ -125,6 +129,7 @@ jobs:
           cp build/Verifier4x4.sol                   release/Verifier4x4.sol
           cp build/tree_update_batch.r1cs            release/tree_update_batch.r1cs
           cp build/tree_update_batch.wasm            release/tree_update_batch.wasm
+          cp build/tree_update_batch.wcd             release/tree_update_batch.wcd
           cp build/tree_update_batch_final.zkey      release/tree_update_batch_final.zkey
           cp build/tree_update_batch_verification_key.json \
                                                      release/tree_update_batch_verification_key.json

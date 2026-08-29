@@ -11,7 +11,7 @@ import { ALICE_NSK, BOB_NSK, TIMEOUT_CIRCUIT } from "../lib/constants";
 import { DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { ASSET_B, useTransactCircuit } from "./setup";
 
-describe("transact_2x2 / multi-asset", function () {
+describe("transact_4x6 / multi-asset", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
     const ctx = useTransactCircuit();

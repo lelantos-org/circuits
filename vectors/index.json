@@ -3,24 +3,29 @@
   "generator": "@lelantos-org/circuits@0.11.2",
   "files": {
     "transact-2x2.json": {
-      "sha256": "4d01da1158949fa7ce6703f34bd8a804f90f6f2c233ce86753434d7ba7f66a86",
+      "sha256": "7450c7221db0300ca9139834dc2cd0ca445e10446f83e51e353eac320b97a4d6",
       "coeffCount": 31,
       "layoutDigest": "0x05904e71214479c3abc5463830f4863da0ad20066c19105629e94178c394000a"
     },
     "transact-3x3.json": {
-      "sha256": "f116ab43431482413d157370b174af77f09f9f4ec456bdc25dc4df06de858999",
+      "sha256": "fbf84a9ab9c9e00cb92273907b60987d51ba9495512d7b83f67dfb1496e6eeed",
       "coeffCount": 42,
       "layoutDigest": "0x144fffddb22d2b0f48e184dae825ae2332130385e95c812072b305e2c5e03e78"
     },
     "transact-4x4.json": {
-      "sha256": "2420b4293e60fb8a9b288a449826645362bc08341d4ebc1388b355c4b8c2f276",
+      "sha256": "614475701aca111fd568d7974d14b1e135d2cddc2a5dd19f2ce8c40ed7281470",
       "coeffCount": 53,
       "layoutDigest": "0xc05073a914b7733e2187f5e7b7481af4f1f120ee66e7d99d93a113357a3efaa2"
     },
-    "tree-update-batch-4.json": {
-      "sha256": "97c441353d720893f6d02d5bdbfe299103bae4a69230bd1baa854091416b79e0",
-      "coeffCount": 28,
-      "layoutDigest": "0xb983937166e9d29ee55de612fbb85f6b4add21935e51153d83462515e84ffaf1"
+    "transact-4x6.json": {
+      "sha256": "6093eeeb4bf98e7d56c440a8c01d301592d0645bd36c95d9ffa972a458204027",
+      "coeffCount": 69,
+      "layoutDigest": "0x329072443e2d08e5127e9ae8d9ac85ecd82e8feca95bef8ec35cac87861ee723"
+    },
+    "tree-update-batch-8.json": {
+      "sha256": "4ff38bdbbd179138ca685e15dfdfbd7c3235b2f6e20604ec8f4161590de81e9f",
+      "coeffCount": 52,
+      "layoutDigest": "0x25918d3250dcbe961be9a3958a3e0db9f8a7771992eddc26bbbd1e6a60f7a2df"
     }
   }
 }

@@ -21,7 +21,7 @@ irrelevant. `Lelantos.transactSat_satisfiable` (`Completeness.lean`) rules that 
 constructing a satisfying assignment for `Transact(10, 2, 2)` that exercises the full
 10-level Merkle chain, both value commitments, all five balance candidates and the
 30-coefficient Horner evaluation. `Lelantos.transact3x3Sat_satisfiable` does the same at
-`Transact(10, 3, 3)`, so the deployed shape is covered too, and
+`Transact(10, 3, 3)` and `Transact(11, 4, 6)`, so the target shape is covered too, and
 `Lelantos.batchSat_satisfiable` (`BatchCompleteness.lean`) covers `TreeUpdateBatch(10, 4)`.
 
 Known deliberate omissions, all in the safe direction:
@@ -60,7 +60,7 @@ collapsed rather than transcribed:
    "the empty subtree" — but it is a gap, not a transcription.
 
 See "What is not proved" in [README.md](README.md). The two transact top-level files
-instantiate `Transact(10, 2, 2)` and `Transact(10, 3, 3)`; `src/3x3.circom` is the deployed
+instantiate `Transact(10, 2, 2)` and `Transact(10, 3, 3)`; `src/4x6.circom` is the target
 one. Their shared wiring lives in `src/lib/transact.circom`, which the tables cite as
 `transact:`.
 

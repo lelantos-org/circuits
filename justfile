@@ -14,6 +14,25 @@ PTAU16 := "powersOfTau28_hez_final_16.ptau"
 # 2^17 ceremony (~2x the download and roughly 2x the proving time).
 PTAU17 := "powersOfTau28_hez_final_17.ptau"
 
+# Pinned revision of iden3/circom-witnesscalc, which supplies the relayer's
+# native witness calculator. `build-circuit` is deliberately not on crates.io —
+# it lives in that repo's `extensions/` and pulls the circom compiler from git —
+# so it is installed from a fixed commit rather than a version range.
+#
+# The relayer's `circom-witnesscalc` dependency must be pinned to this SAME
+# revision: the graph format is versioned, and a mismatched reader rejects the
+# file with "Invalid magic".
+#
+# `--locked` below is load-bearing, not hygiene: build-circuit depends on the
+# circom compiler crates by *branch* (`master`), so without the committed
+# lockfile the install resolves whatever circom is today. It currently fails
+# outright that way — circom master has since added a `StatusInput` variant the
+# pinned build-circuit does not match on.
+CWC_REV := "d48eb7c97857d46b8a75c94ab96f769207263245"
+CWC_REPO := "https://github.com/iden3/circom-witnesscalc"
+TOOLS := ROOT / ".tools"
+BUILD_CIRCUIT := TOOLS / "build-circuit" / "bin" / "build-circuit"
+
 # Sync targets in sibling contracts/ checkout. Updated for new src/ layout
 # (verifiers grouped under src/verifiers/).
 CONTRACTS_VERIFIER := ROOT / ".." / "contracts" / "src" / "verifiers" / "Verifier.sol"
@@ -121,10 +140,82 @@ build-artifacts-4x4: compile-4x4 setup-4x4
 rebuild-4x4: build-artifacts-4x4
     @just _rebuild-report "4x4" "{{BUILD}}/4x4.r1cs" "{{BUILD}}/4x4_js/4x4.wasm" "{{BUILD}}/4x4_final.zkey" "{{BUILD}}/4x4_verification_key.json" "(not synced — 4x4 is not deployed)"
 
+# === 4x6 circuit ===
+#
+# `Transact(11, 4, 6)`: 4 shielded inputs x 6 shielded outputs, at depth 11.
+# Six outputs so change lands on the withdrawal denomination ladder in one
+# spend; depth 11 to pay back the tree capacity those extra slots consume. See
+# src/4x6.circom.
+#
+# Not yet synced into contracts/: it needs a PubInputs.sol compress overload at
+# 69 slots, golden vectors and a Lean layout dump first.
+
+# Compile 4x6.circom -> r1cs + wasm + sym, print constraint count.
+compile-4x6: (_compile "4x6")
+
+# Phase-2 trusted setup for 4x6 (single-contributor; INSECURE — prototype only).
+setup-4x6:
+    just _fetch-ptau "{{PTAU17}}"
+    echo "==> Phase-2 setup (4x6, 2^17 ptau)"
+    npx snarkjs groth16 setup "{{BUILD}}/4x6.r1cs" "{{PTAU_DIR}}/{{PTAU17}}" "{{BUILD}}/4x6_0.zkey"
+    echo "==> Single contribution (PROTOTYPE ONLY)"
+    npx snarkjs zkey contribute "{{BUILD}}/4x6_0.zkey" "{{BUILD}}/4x6_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
+    echo "==> Export verification key"
+    npx snarkjs zkey export verificationkey "{{BUILD}}/4x6_final.zkey" "{{BUILD}}/4x6_verification_key.json"
+    echo "==> Export Solidity verifier"
+    npx snarkjs zkey export solidityverifier "{{BUILD}}/4x6_final.zkey" "{{BUILD}}/Verifier4x6.sol"
+    echo "==> Done. Verifier at {{BUILD}}/Verifier4x6.sol — not synced into contracts/"
+
+# Compile + trusted setup for 4x6. Not synced into contracts/.
+build-artifacts-4x6: compile-4x6 setup-4x6
+
+# Full rebuild of the 4x6 shape after circuit edits.
+rebuild-4x6: build-artifacts-4x6
+    @just _rebuild-report "4x6" "{{BUILD}}/4x6.r1cs" "{{BUILD}}/4x6_js/4x6.wasm" "{{BUILD}}/4x6_final.zkey" "{{BUILD}}/4x6_verification_key.json" "(not synced — no compress overload yet)"
+
 # === tree_update_batch circuit ===
 
 # Compile tree_update_batch.circom -> r1cs + wasm + sym, print constraint count.
 compile-batch: (_compile "tree_update_batch")
+
+# Build the native witness-calculation graph the relayer proves against.
+#
+# Replaces the circom-emitted wasm witness generator: the relayer evaluates this
+# graph in-process instead of running wasm under wasmer.
+#
+# Two invariants, both enforced below rather than trusted:
+#
+#   --O1   `_compile` uses circom's default optimisation, but build-circuit
+#          defaults to --O2. At --O2 the same source yields 25,426 constraints
+#          instead of 57,106, so the graph would index signals the zkey does not
+#          have.
+#
+#   cmp    build-circuit re-runs the circom front end, so its constraint system
+#          is only *believed* to match the one the zkey was set up against.
+#          Emitting its R1CS and diffing it against `_compile`'s output turns
+#          that belief into a build failure. A graph that disagrees with the
+#          zkey produces witnesses that fail verification at prove time.
+#
+# Depends on compile-batch for the R1CS to diff against.
+build-graph: compile-batch _ensure-build-circuit
+    echo "==> Building witness graph (build-circuit @ {{CWC_REV}})"
+    "{{BUILD_CIRCUIT}}" "{{ROOT}}/src/tree_update_batch.circom" "{{BUILD}}/tree_update_batch.wcd" \
+        -l "{{ROOT}}/node_modules" --O1 --r1cs "{{BUILD}}/tree_update_batch.graph.r1cs"
+    echo "==> Checking the graph's constraint system matches the compiled one"
+    cmp "{{BUILD}}/tree_update_batch.graph.r1cs" "{{BUILD}}/tree_update_batch.r1cs"
+    # The r1cs was emitted only for that diff, and build-circuit drops two
+    # signal-map debug files into the working directory.
+    rm -f "{{BUILD}}/tree_update_batch.graph.r1cs" \
+          "{{ROOT}}/log_input_signals.txt" "{{ROOT}}/log_input_signals_new.txt"
+    echo "==> Graph at {{BUILD}}/tree_update_batch.wcd"
+
+# Install the pinned build-circuit into .tools/ unless it is already there.
+_ensure-build-circuit:
+    @if [ ! -x "{{BUILD_CIRCUIT}}" ]; then \
+        echo "==> Installing build-circuit @ {{CWC_REV}} (compiles the circom front end; slow)"; \
+        cargo install --git "{{CWC_REPO}}" --rev "{{CWC_REV}}" --locked build-circuit \
+            --root "{{TOOLS}}/build-circuit"; \
+    fi
 
 # tree_update_batch at MAX_L=4 has 57,106 constraints and so uses the 2^16 FFT
 # domain, with 8,427 constraints of headroom. A leaf slot costs roughly 12k

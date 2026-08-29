@@ -12,7 +12,7 @@ import { ALICE_NSK, BOB_NSK, MALLORY_NSK, TIMEOUT_CIRCUIT } from "../lib/constan
 import { DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { useTransactCircuit } from "./setup";
 
-describe("transact_2x2 / value balance", function () {
+describe("transact_4x6 / value balance", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
     const ctx = useTransactCircuit();

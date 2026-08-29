@@ -7,14 +7,14 @@ import Mathlib.Tactic.Ring
 Contains the load-bearing soundness result of the circuit: per-asset value conservation,
 `PerAssetValueBalance` (`src/lib/balance.circom:81`).
 
-The circuit checks conservation for only the `N_IN + N_OUT + 1 = 5` asset ids that appear
-in the transaction. `perAssetValueBalance_all_assets` upgrades that to a statement about
+The circuit checks conservation for only the `N_IN + N_OUT + 1` asset ids that appear in
+the transaction — eleven at the deployed `Transact(11, 4, 6)`. `perAssetValueBalance_all_assets` upgrades that to a statement about
 every asset id in the field, which is what conservation has to mean.
 
 `perAssetValueBalance_nat` then lifts the field equality to `ℕ`. That step is where the
-64-bit range checks are consumed: with at most three summands below `2^64` per side, both
-sides stay under `2^66 < p`, so the field equality is an exact integer equality and cannot
-be forged by wrapping. This is the precondition stated at `src/lib/balance.circom:75-80`;
+64-bit range checks are consumed: with at most `n + 1` summands below `2^64` per side and
+`n ≤ 7`, both sides stay under `8 · 2^64 = 2^67 < p`, so the field equality is an exact
+integer equality and cannot be forged by wrapping. This is the precondition stated at `src/lib/balance.circom:75-80`;
 removing a `RangeCheck64` upstream removes the hypothesis of this theorem.
 
 `PerAssetPointBalance` is deliberately not treated as a conservation check — see
@@ -243,15 +243,16 @@ correspondingly wider bound in `Lelantos.Model.Field`, and nothing else. -/
 theorem perAssetValueBalance_nat
     (h : PerAssetValueBalanceSat nIn nOut inA inV outA outV pa pi po
       pubInv pubEq inInv inEq outInv outEq inTerm outTerm lhs rhs)
-    (hnIn : nIn ≤ 4) (hnOut : nOut ≤ 4)
+    (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7)
     (hInV : ∀ i, i < nIn → (inV i).val < 2 ^ 64)
     (hOutV : ∀ j, j < nOut → (outV j).val < 2 ^ 64)
     (hPi : pi.val < 2 ^ 64) (hPo : po.val < 2 ^ 64)
     (a : F) : ConservesAtNat nIn nOut inA inV outA outV pa pi po a := by
   classical
   have hfield := perAssetValueBalance_all_assets h a
-  -- `(n + 1) · 2^64 ≤ 5 · 2^64 ≤ 2^67 < p` for `n ≤ 4`.
-  have hbound : ∀ n : ℕ, n ≤ 4 → (n + 1) * 2 ^ 64 < p := by
+  -- `(n + 1) · 2^64 ≤ 8 · 2^64 = 2^67 < p` for `n ≤ 7`. Seven is where the rounding to
+  -- `8 · 2^64` runs out, not where any shape sits: the widest instantiated is `nOut = 6`.
+  have hbound : ∀ n : ℕ, n ≤ 7 → (n + 1) * 2 ^ 64 < p := by
     intro n hn
     have : (n + 1) * 2 ^ 64 ≤ 2 ^ 67 := by
       calc (n + 1) * 2 ^ 64 ≤ 8 * 2 ^ 64 := Nat.mul_le_mul_right _ (by omega)

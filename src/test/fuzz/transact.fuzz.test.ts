@@ -10,7 +10,7 @@ import {
 } from "./arbitraries";
 import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 
-const CIRCUIT = srcPath("2x2.circom");
+const CIRCUIT = srcPath("4x6.circom");
 const fcParams = fcParamsFor("TRANSACT");
 
 // Pin balanced-split edge cases worth seeding into every fc.assert.
@@ -22,7 +22,7 @@ const BALANCED_EXAMPLES = [
     { v1: MAX_VALUE / 2n, v2: MAX_VALUE / 2n, o1: 0n, o2: MAX_VALUE - 1n },
 ];
 
-describe("transact_2x2 [fuzz]", function () {
+describe("transact_4x6 [fuzz]", function () {
     this.timeout(TIMEOUT_HEAVY);
 
     let circuit: any;

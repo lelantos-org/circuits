@@ -134,6 +134,31 @@ const FILES: ArtifactCheck[] = [
         maxBytes: 15_000,
         json: isGroth16Vkey,
     },
+    /// 4x6 = `Transact(11, 4, 6)`, the target shape; see budget.json.
+    ///
+    /// Also on ptau-17, at 100,320 constraints — 76.5% of the 2^17 domain
+    /// against 4x4's 66.1%. Same domain as 4x4, so the zkey is the same order of
+    /// magnitude despite the wider output side and the extra tree level; the
+    /// bands below are 4x4's, widened at the top rather than re-measured.
+    {
+        name: "4x6.wasm",
+        path: resolve(BUILD, "4x6.wasm"),
+        minBytes: 2_500_000,
+        maxBytes: 9_000_000,
+    },
+    {
+        name: "4x6_final.zkey",
+        path: resolve(BUILD, "4x6_final.zkey"),
+        minBytes: 25_000_000,
+        maxBytes: 80_000_000,
+    },
+    {
+        name: "4x6_verification_key.json",
+        path: resolve(BUILD, "4x6_verification_key.json"),
+        minBytes: 1_000,
+        maxBytes: 15_000,
+        json: isGroth16Vkey,
+    },
 ];
 
 /** Shared vkey shape assertion for every published verification key. */

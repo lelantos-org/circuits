@@ -14,11 +14,15 @@
     "build/4x4.wasm",
     "build/4x4_final.zkey",
     "build/4x4_verification_key.json",
+    "build/4x6.wasm",
+    "build/4x6_final.zkey",
+    "build/4x6_verification_key.json",
     "vectors/index.json",
     "vectors/transact-2x2.json",
     "vectors/transact-3x3.json",
     "vectors/transact-4x4.json",
-    "vectors/tree-update-batch-4.json",
+    "vectors/transact-4x6.json",
+    "vectors/tree-update-batch-8.json",
     "README.md"
   ],
   "exports": {
@@ -31,11 +35,15 @@
     "./4x4/4x4.wasm": "./build/4x4.wasm",
     "./4x4/4x4_final.zkey": "./build/4x4_final.zkey",
     "./4x4/verification_key.json": "./build/4x4_verification_key.json",
+    "./4x6/4x6.wasm": "./build/4x6.wasm",
+    "./4x6/4x6_final.zkey": "./build/4x6_final.zkey",
+    "./4x6/verification_key.json": "./build/4x6_verification_key.json",
     "./vectors": "./vectors/index.json",
     "./vectors/transact-2x2.json": "./vectors/transact-2x2.json",
     "./vectors/transact-3x3.json": "./vectors/transact-3x3.json",
     "./vectors/transact-4x4.json": "./vectors/transact-4x4.json",
-    "./vectors/tree-update-batch-4.json": "./vectors/tree-update-batch-4.json"
+    "./vectors/transact-4x6.json": "./vectors/transact-4x6.json",
+    "./vectors/tree-update-batch-8.json": "./vectors/tree-update-batch-8.json"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",

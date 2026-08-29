@@ -32,6 +32,15 @@ jobs:
       - name: Compile circuits (2x2, 3x3, 4x4, tree_update_batch)
         run: just compile compile-3x3 compile-4x4 compile-batch
 
+      # The witness-graph builder cannot compile `signal <== someFunction()`, so
+      # the circuits hoist those through a `var` (see src/lib/note.circom). This
+      # step is what stops someone inlining one back: the release would
+      # otherwise fail at publish time instead. It builds the pinned
+      # build-circuit from git, which compiles the circom front end and is slow
+      # on a cold cache.
+      - name: Witness graph builds
+        run: just build-graph
+
       # Compiling asserts nothing about size, and `groth16 setup` — where an
       # overflow would surface — does not run here. Transact(10,3,3) clears its
       # 2^16 FFT domain by 13 constraints, so the count needs its own gate.

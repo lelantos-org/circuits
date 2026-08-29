@@ -96,7 +96,7 @@ export interface BuildOpts {
  * Build the circom input object for Transact(DEPTH, N_IN, N_OUT).
  *
  * Arity is taken from the argument lengths rather than hardcoded, so this
- * serves 2x2 and 3x3 alike.
+ * serves every instantiated shape alike, including 4x6's `nIn ≠ nOut`.
  */
 export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): CircomTransactInput {
     const { inputs, outputs, publicAssetId, publicIn, publicOut, merkleRoot } = opts;

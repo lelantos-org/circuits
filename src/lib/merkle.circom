@@ -64,7 +64,13 @@ template MerkleLevel4() {
     c3 <== c3_cur + c3_sib;
 
     component h = Poseidon(5);
-    h.inputs[0] <== TAG_MERKLE();
+    // The tag is hoisted through a `var` rather than assigned straight from the
+    // call: the witness-graph builder (`build-circuit`, used to produce the
+    // relayer's native witness calculator) cannot store a function result into a
+    // signal. Inlining these back breaks `just build-graph`. The R1CS is
+    // unaffected either way — the call folds to a constant.
+    var tag = TAG_MERKLE();
+    h.inputs[0] <== tag;
     h.inputs[1] <== c0;
     h.inputs[2] <== c1;
     h.inputs[3] <== c2;

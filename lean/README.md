@@ -2,12 +2,15 @@
 
 A machine-checked development for `Transact(DEPTH, N_IN, N_OUT)`, the multi-asset transact
 circuit, and for `TreeUpdateBatch(DEPTH, MAX_L)`, the relayer batch tree-advance circuit.
-The transact half covers all three shapes the repository instantiates — `src/2x2.circom`,
-`src/3x3.circom` and `src/4x4.circom`. `3x3` is the deployed shape: it is what
-`PubInputs.sol` compresses and what `contracts/src/verifiers/Verifier.sol` verifies. `2x2`
-and `4x4` are retained so the shape-generic results are exercised at more than one slot
-count; `4x4` is also what fixes the `≤ 4` slot bound below. All three ship prover artifacts
-and a golden vector; only `3x3` is deployed.
+The transact half covers all four shapes the repository instantiates — `src/2x2.circom`,
+`src/3x3.circom`, `src/4x4.circom` and `src/4x6.circom`. **`4x6` is the target shape**:
+`Transact(11, 4, 6)`, paired with `TreeUpdateBatch(11, 8)`. The other three remain at depth
+10 and cannot share a tree with it; they are retained so the shape-generic results are
+exercised at more than one slot count, not because they are usable alongside `4x6`.
+
+Note the deployed contract currently verifies `4x4`, not `3x3` — several documents under
+`circuits/` still say otherwise. Nothing here depends on which is deployed: every result is
+proved for the generic `Transact(depth, nIn, nOut)` and then instantiated.
 The top-level theorem holds for **any** assignment satisfying the modeled constraint system,
 not only those an honest prover produces.
 
@@ -65,16 +68,20 @@ assumptions recorded in a statement, not results — see
 
 | Theorem | Where | Statement |
 |---|---|---|
-| `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w`, for `N_IN ≤ 4` and `N_OUT ≤ 4` |
-| `transact2x2_sound` / `transact3x3_sound` / `transact4x4_sound` | `Circuit/Transact.lean` | the same for each instantiated shape: `Transact(10,3,3)` (deployed), `Transact(10,2,2)` and `Transact(10,4,4)` |
+| `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w`, for `N_IN ≤ 7` and `N_OUT ≤ 7` |
+| `transact2x2_sound` / `transact3x3_sound` / `transact4x4_sound` / `transact4x6_sound` | `Circuit/Transact.lean` | the same for each instantiated shape: `Transact(11,4,6)` (the target), plus `(10,2,2)`, `(10,3,3)` and `(10,4,4)` |
 | `transact_binding` † | `Circuit/Transact.lean` | `TransactSat w → TxBinding w` |
 
-The `≤ 4` bound is not a property of the circuit — `PerAssetValueBalance` is written for
+The `≤ 7` bound is not a property of the circuit — `PerAssetValueBalance` is written for
 arbitrary `N_IN` / `N_OUT`. It is the largest slot count for which the balance sums provably
-stay below `p` using `two_pow_67_lt_p` (`(4+1) · 2^64 < 2^67`), and it covers every shape the
-repository ships. A wider shape needs a wider bound in `Model/Field.lean` and nothing else —
-widening it from `≤ 3` to `≤ 4` for `src/4x4.circom` was exactly that one-line change plus
-the new power of two.
+stay below `p` using `two_pow_67_lt_p`, whose proof rounds `(n+1) · 2^64` up to `8 · 2^64`.
+Seven is therefore where that argument runs out, not where any shape sits: the widest
+instantiated is `nOut = 6`.
+
+Stating it at the argument's ceiling rather than at the current shape is deliberate. Moving
+from `≤ 3` to `≤ 4` for `src/4x4.circom` required a new power of two in `Model/Field.lean`
+*and* touching every theorem that cites the bound; `4x6` needed neither, because `2^67`
+already covered it. Going past seven does need the next power.
 
 ### Value conservation
 
@@ -125,7 +132,7 @@ chain result below depends on `p_prime` alone.
 | `batch_step_inserts` | `Circuit/TreeUpdateBatch.lean` | an active step is a genuine `InsertsTo` of that leaf over the running frontier |
 | `batch_step_stalls` | `Circuit/TreeUpdateBatch.lean` | an inactive step carries the running state through unchanged |
 | `batch_advances_by_count` | `Circuit/TreeUpdateBatch.lean` | **both halves at once: every step below `actual_count` is a real insert, and `new_root` is the running root at `actual_count`** — the formal content of "odd counts work" |
-| `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(10, 4)`, `COUNT_BITS = 2` |
+| `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(11, 8)`, `COUNT_BITS = 3` |
 | `batch_bounds_deployed` | `Circuit/TreeUpdateBatch.lean` | the two side conditions are simultaneously satisfiable at the deployed shape, so the results above are not conditional on an impossible hypothesis |
 | `batch_deposit_opens` | `Circuit/TreeUpdateBatch.lean` | an active deposit leaf's `cv_dep` opens to exactly `leaf_public_in` units of `leaf_asset` |
 | `quaternaryInsertLevel_sound` | `Gadgets/Insert.lean` | the level arithmetic is the fill table: `cur` at the digit, frontier left, empty-subtree hash right — and the frontier update is a *different* mux, also proved |
@@ -172,15 +179,17 @@ patching it, and the Lean statement shows the difference: it mentions one leaf.
 | `transactSat_spend_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable by a transaction that actually **moves value** through a non-dummy slot |
 | `transactSat_twoAsset_satisfiable` | `Proofs/Completeness.lean` | …and by one moving **two distinct assets** with a non-zero public input |
 | `spentReal_witness` | `Proofs/Completeness.lean` | `SpentReal` is inhabited, so `spentNote_sound`'s `is_dummy = 0` case is reachable |
-| `transact3x3Sat_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable at `Transact(10,3,3)`, **the deployed shape** |
-| `transact4x4Sat_satisfiable` | `Proofs/Completeness.lean` | …and at `Transact(10,4,4)`, the widest instantiated shape |
-| `batchSat_satisfiable` | `Proofs/BatchCompleteness.lean` | `BatchSat` is satisfiable at `TreeUpdateBatch(10,4)`, so the batch results are not vacuous either |
-| `batchSat_partial_batch` | `Proofs/BatchCompleteness.lean` | …by a batch committing **three** leaves into four slots, so the padding constraints and both muxes are exercised rather than satisfied trivially |
+| `transact3x3Sat_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable at `Transact(10,3,3)` |
+| `transact4x4Sat_satisfiable` | `Proofs/Completeness.lean` | …and at `Transact(10,4,4)` |
+| `transact4x6Sat_satisfiable` | `Proofs/Completeness.lean` | …and at `Transact(11,4,6)`, **the target shape** — the only witness at a depth other than 10, and the only one with `nIn ≠ nOut` |
+| `batchSat_satisfiable` | `Proofs/BatchCompleteness.lean` | `BatchSat` is satisfiable at `TreeUpdateBatch(11,8)`, so the batch results are not vacuous either |
+| `batchSat_partial_batch` | `Proofs/BatchCompleteness.lean` | …by a batch committing **three** leaves into eight slots, so the padding constraints and both muxes are exercised rather than satisfied trivially |
 
-The first four assignments are built at the `2x2` shape; `transact3x3Sat_satisfiable` and
-`transact4x4Sat_satisfiable` repeat the padding construction at the deployed shape and at
-`4x4`, so `transact3x3_sound` and `transact4x4_sound` are non-vacuous too. The batch witness
-lives in `Proofs/BatchCompleteness.lean`.
+The first four assignments are built at the `2x2` shape; `transact3x3Sat_satisfiable`,
+`transact4x4Sat_satisfiable` and `transact4x6Sat_satisfiable` repeat the padding
+construction at the other three, so each `transact*_sound` is non-vacuous too. `padTx` is
+indexed by depth for the last of these — it is the only witness not at depth 10. The batch
+witness lives in `Proofs/BatchCompleteness.lean`.
 
 ### Assignments with no satisfying witness
 
@@ -205,9 +214,9 @@ constructs the degenerate-but-legal padding transaction; `transactSat_spend_sati
 that actually spends, with a non-dummy input, a real Merkle path, a non-zero scalar
 multiplication and a balance whose sums are not all zero; `transactSat_twoAsset_satisfiable`
 one whose five balance candidates are not all the same asset.
-`transact3x3Sat_satisfiable` and `transact4x4Sat_satisfiable` repeat the first at the
-deployed `3x3` shape and at `4x4`, and `batchSat_satisfiable` covers `TreeUpdateBatch(10, 4)`
-with a partially-filled batch.
+`transact3x3Sat_satisfiable`, `transact4x4Sat_satisfiable` and `transact4x6Sat_satisfiable`
+repeat the first at the other three shapes, and `batchSat_satisfiable` covers
+`TreeUpdateBatch(11, 8)` with a partially-filled batch.
 
 This matters because `A → B` is trivially true when `A` is unsatisfiable, so a modelling slip
 that over-constrains the system would fail silently. The spending witness additionally makes

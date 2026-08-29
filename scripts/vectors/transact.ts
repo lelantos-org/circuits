@@ -59,6 +59,14 @@ interface TransactShape {
     id: string;
     nIn: number;
     nOut: number;
+    /**
+     * Quaternary tree depth this shape's circuit was instantiated at.
+     *
+     * Per shape, not global: `4x6` is `Transact(11, 4, 6)` while the older three
+     * remain at depth 10, and the Merkle path length in the witness has to match
+     * the circuit or witness calculation rejects it outright.
+     */
+    depth: number;
     source: string;
     cases: TransactCase[];
 }
@@ -88,6 +96,7 @@ export const TRANSACT_SHAPES: TransactShape[] = [
         id: "2x2",
         nIn: 2,
         nOut: 2,
+        depth: 10,
         source: "src/2x2.circom",
         cases: [
             {
@@ -138,6 +147,7 @@ export const TRANSACT_SHAPES: TransactShape[] = [
         id: "3x3",
         nIn: 3,
         nOut: 3,
+        depth: 10,
         source: "src/3x3.circom",
         // Built and published, but not yet wired on-chain: that requires a
         // 42-slot `PubInputs.compress` overload. These vectors pin the 42-slot
@@ -197,6 +207,7 @@ export const TRANSACT_SHAPES: TransactShape[] = [
         id: "4x4",
         nIn: 4,
         nOut: 4,
+        depth: 10,
         source: "src/4x4.circom",
         // Neither deployed nor wired on-chain: that requires a 53-slot
         // `PubInputs.compress` overload, and a verifier built on a 2^17 ptau.
@@ -258,6 +269,88 @@ export const TRANSACT_SHAPES: TransactShape[] = [
                 ],
                 publicIn: 0n,
                 publicOut: 80n,
+                asset: 7n,
+            },
+        ],
+    },
+    {
+        id: "4x6",
+        nIn: 4,
+        nOut: 6,
+        depth: 11,
+        source: "src/4x6.circom",
+        // The target shape, `Transact(11, 4, 6)`. Six outputs so a withdrawal's
+        // change lands on the denomination ladder in one spend; four inputs
+        // because an input slot costs roughly 3.4x an output slot.
+        //
+        // These vectors pin the 69-slot layout the Lean development proves
+        // against, so the `PubInputs.compress` overload has a byte-exact target.
+        // Note its calldata prefix is 50 words rather than 4x4's 40, which moves
+        // every word `compress` re-masks in assembly.
+        cases: [
+            {
+                name: "internal-4in6out-balanced",
+                description: "Four real inputs, six real outputs, no public flow.",
+                inputs: [
+                    { nsk: 11n, value: 100n },
+                    { nsk: 12n, value: 50n },
+                    { nsk: 13n, value: 25n },
+                    { nsk: 14n, value: 25n },
+                ],
+                outputs: [
+                    { nsk: 21n, value: 60n },
+                    { nsk: 22n, value: 50n },
+                    { nsk: 23n, value: 40n },
+                    { nsk: 24n, value: 30n },
+                    { nsk: 25n, value: 15n },
+                    { nsk: 26n, value: 5n },
+                ],
+                publicIn: 0n,
+                publicOut: 0n,
+                asset: 7n,
+            },
+            {
+                name: "deposit-3in6out-public-in",
+                description: "One dummy input slot; value enters the pool via public_in.",
+                inputs: [
+                    { nsk: 11n, value: 100n },
+                    { nsk: 12n, value: 50n },
+                    { nsk: 13n, value: 25n },
+                    null,
+                ],
+                outputs: [
+                    { nsk: 21n, value: 60n },
+                    { nsk: 22n, value: 50n },
+                    { nsk: 23n, value: 40n },
+                    { nsk: 24n, value: 30n },
+                    { nsk: 25n, value: 15n },
+                    { nsk: 26n, value: 10n },
+                ],
+                publicIn: 30n,
+                publicOut: 0n,
+                asset: 7n,
+            },
+            {
+                name: "withdraw-4in6out-public-out",
+                description:
+                    "Value leaves via public_out, with change split across six slots — "
+                    + "the decomposition the six-output shape exists for.",
+                inputs: [
+                    { nsk: 11n, value: 100n },
+                    { nsk: 12n, value: 100n },
+                    { nsk: 13n, value: 50n },
+                    { nsk: 14n, value: 30n },
+                ],
+                outputs: [
+                    { nsk: 21n, value: 40n },
+                    { nsk: 22n, value: 30n },
+                    { nsk: 23n, value: 25n },
+                    { nsk: 24n, value: 15n },
+                    { nsk: 25n, value: 10n },
+                    { nsk: 26n, value: 10n },
+                ],
+                publicIn: 0n,
+                publicOut: 150n,
                 asset: 7n,
             },
         ],
@@ -326,7 +419,7 @@ function insertRealInputs(P: Poseidon, J: Jubjub, tree: MerkleTree, c: TransactC
 }
 
 /** Reassemble the input array in slot order, filling dummies where asked. */
-function fillSlots(P: Poseidon, c: TransactCase, finalizedReal: SpentNote[]) {
+function fillSlots(P: Poseidon, depth: number, c: TransactCase, finalizedReal: SpentNote[]) {
     let realCursor = 0;
     const dummyMeta: DummyMeta[] = [];
 
@@ -335,7 +428,7 @@ function fillSlots(P: Poseidon, c: TransactCase, finalizedReal: SpentNote[]) {
         const rho = BigInt(90000 + i);
         // Blinders come from a deterministic derivation over rho; read them back
         // off the result rather than recomputing the derivation here.
-        const dummy = dummyInputAt(P, DEPTH, rho);
+        const dummy = dummyInputAt(P, depth, rho);
         dummyMeta.push({ slot: i, rho, rcv: dummy.rcv, rcvDep: dummy.rcvDep });
         return dummy;
     });
@@ -394,12 +487,12 @@ export async function buildTransactVectors(shape: TransactShape) {
         validateCase(shape, c);
 
         const clues = deterministicClueGen(P, J);
-        const tree = new MerkleTree(P, DEPTH);
+        const tree = new MerkleTree(P, shape.depth);
 
         const { spent, realMeta } = insertRealInputs(P, J, tree, c);
         const merkleRoot = tree.root();
         const finalizedReal = spent.map((sn) => ({ ...sn, ...tree.proof(sn.leafIndex) }));
-        const { inputs, dummyMeta } = fillSlots(P, c, finalizedReal);
+        const { inputs, dummyMeta } = fillSlots(P, shape.depth, c, finalizedReal);
 
         // Output rho is forced to the derivation the circuit enforces. Only
         // `rho` is replaced: rcm/rcv/rcvDep are rho + k, and a derived rho is a
@@ -512,9 +605,9 @@ export async function buildTransactVectors(shape: TransactShape) {
         schema: SCHEMA,
         circuit: {
             id: "transact",
-            template: `Transact(${DEPTH}, ${shape.nIn}, ${shape.nOut})`,
+            template: `Transact(${shape.depth}, ${shape.nIn}, ${shape.nOut})`,
             source: shape.source,
-            shape: { depth: DEPTH, nIn: shape.nIn, nOut: shape.nOut },
+            shape: { depth: shape.depth, nIn: shape.nIn, nOut: shape.nOut },
             coeffCount: 9 + 3 * shape.nIn + 8 * shape.nOut,
             layout,
             layoutDigest: layoutDigest(layout),

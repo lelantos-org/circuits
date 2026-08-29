@@ -19,7 +19,7 @@ import {
     type Note,
     type SpentNote,
 } from "../helpers";
-import { ALICE_NSK } from "./constants";
+import { ALICE_NSK, N_IN, N_OUT } from "./constants";
 
 // Default asset id, for tests that do not depend on which asset is in use.
 export const DEFAULT_ASSET: Field = 7n;
@@ -91,12 +91,24 @@ export class TxBuilder {
     // the caller supplied. Matches the SDK bundle builders.
     build(args: TxBuildArgs): CircomTransactInput {
         const nf0 = args.inputs[0].nf;
-        const outputs = args.outputs.map((o, j) => ({ ...o, rho: buildRho(this.P, nf0, j) }));
-        const outputClues =
-            args.outputClues ?? outputs.map(() => this.clues.next());
+        // Pad to the circuit's arity here rather than in every suite. `Transact`
+        // takes exactly N_IN inputs and N_OUT outputs; a short witness fails
+        // witness calculation outright, and spelling the padding out at each
+        // call site would bury what each scenario is actually testing.
+        //
+        // The padding is what the circuit itself expects of unused slots: dummy
+        // inputs (`is_dummy = 1`, bypassing pk / Merkle / asset checks) and
+        // value-0 output notes, which are real leaves and hash as such.
+        const inputs = padInputs(this.P, this.depth, args.inputs);
+        const padded = padOutputs(args.outputs);
+        const outputs = padded.map((o, j) => ({ ...o, rho: buildRho(this.P, nf0, j) }));
+        const outputClues = args.outputClues
+            ? padClues(args.outputClues, outputs.length, this.clues)
+            : outputs.map(() => this.clues.next());
         const outputAuxDigest = args.outputAuxDigest ?? TEST_AUX_DIGEST;
         return toCircomInput(this.P, this.J, {
             ...args,
+            inputs,
             publicAssetId: args.publicAssetId ?? DEFAULT_ASSET,
             publicIn: args.publicIn ?? 0n,
             publicOut: args.publicOut ?? 0n,
@@ -162,6 +174,42 @@ export class TxBuilder {
             merkleRoot: root,
         });
     }
+}
+
+/**
+ * Top up `inputs` to `N_IN` with dummies, distinct by `rho` so their nullifiers
+ * differ — the circuit requires pairwise-distinct nullifiers across all slots,
+ * including dummy ones.
+ */
+function padInputs(P: Poseidon, depth: number, inputs: SpentNote[]): SpentNote[] {
+    if (inputs.length > N_IN) {
+        throw new Error(`padInputs: ${inputs.length} inputs exceeds N_IN = ${N_IN}`);
+    }
+    const out = [...inputs];
+    // Offset well clear of the rho values the scenario factories hand out.
+    for (let k = out.length; k < N_IN; k++) out.push(dummyInputAt(P, depth, 1000n + BigInt(k)));
+    return out;
+}
+
+/** Top up `outputs` to `N_OUT` with value-0 notes. */
+function padOutputs(outputs: Note[]): Note[] {
+    if (outputs.length > N_OUT) {
+        throw new Error(`padOutputs: ${outputs.length} outputs exceeds N_OUT = ${N_OUT}`);
+    }
+    const out = [...outputs];
+    while (out.length < N_OUT) out.push(dummyOutput());
+    return out;
+}
+
+/** Top up a caller-supplied clue list to match the padded output count. */
+function padClues(
+    clues: ClueInputs[],
+    count: number,
+    gen: ReturnType<typeof deterministicClueGen>,
+): ClueInputs[] {
+    const out = [...clues];
+    while (out.length < count) out.push(gen.next());
+    return out;
 }
 
 /** A frozen tree plus the finalized inputs spent from it. */

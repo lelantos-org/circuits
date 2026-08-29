@@ -38,14 +38,15 @@ template PathIndexSelectors() {
 // The table is pinned two ways:
 //   - `src/test/merkle.test.ts` recomputes the chain with circomlibjs and asserts
 //     every entry, including that EMPTY_SUBTREE(10) is the genesis root.
-//   - EMPTY_SUBTREE(10) equals CommitmentTree.EMPTY_ROOT in the contracts repo
-//     (0x1308eb79d37ed29a9a2d34861692ea8c3e4fed3f555f53a8776c1256738e40a7).
+//   - EMPTY_SUBTREE(DEPTH) equals CommitmentTree.EMPTY_ROOT in the contracts
+//     repo. Read it from the table below and convert; a second copy written out
+//     here is a constant that can silently drift from the one that matters.
 //
-// Extending the tree beyond DEPTH = 10 requires appending entries here.
+// Extending the tree beyond DEPTH = 11 requires appending entries here.
 function EMPTY_SUBTREE(d) {
     assert(d >= 0);
-    assert(d <= 10);
-    var z[11];
+    assert(d <= 11);
+    var z[12];
     z[0]  = 0;
     z[1]  = 9688446225132779566270323192018004944760743136261961935684920214842198706882;
     z[2]  = 7372477669598451827916824388459948538481024917085258427336598380045876808937;
@@ -57,13 +58,20 @@ function EMPTY_SUBTREE(d) {
     z[8]  = 7697891372117443905574123126877256384618067426963460859230406409031270788574;
     z[9]  = 9730897556345557679365537455943876163307163461955882385767465684822645783047;
     z[10] = 8609704094418396324511832574933371601208234217740666943293213721288143421607;
+    z[11] = 13105024820937039918253549408468725512672689423801512358804472101234041165599;
     return z[d];
 }
 
 template EmptySubtreeHashes(DEPTH) {
     signal output zeros[DEPTH + 1];
 
+    // The value is hoisted through a `var` rather than assigned straight from the
+    // call: the witness-graph builder (`build-circuit`, used to produce the
+    // relayer's native witness calculator) cannot store a function result into a
+    // signal. Inlining these back breaks `just build-graph`. The R1CS is
+    // unaffected either way — the call folds to a constant.
     for (var i = 0; i <= DEPTH; i++) {
-        zeros[i] <== EMPTY_SUBTREE(i);
+        var zero = EMPTY_SUBTREE(i);
+        zeros[i] <== zero;
     }
 }

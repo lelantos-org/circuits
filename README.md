@@ -100,14 +100,34 @@ Everything is driven by [`just`](justfile); `just --list` is the full menu.
 | `just test-fuzz` | Property-based suites. Tier via `FUZZ=light\|medium\|heavy`. |
 | `just compile compile-3x3 compile-4x4 compile-batch` | Build the `.r1cs` / `.wasm` / `.sym` for all four shapes. |
 | `just budget` | Gate the constraint counts against [budget.json](budget.json). Needs the `.r1cs`. |
+| `just build-graph` | Build `tree_update_batch.wcd`, the witness-calculation graph the relayer proves against. |
 | `just vectors` / `just vectors-check` | Regenerate the golden vectors, or diff a regeneration against the committed ones. |
 | `just lint` | circomspect over `src/lib` and the entry points. |
 | `just lean-check` | The whole Lean development: build, axiom guard, layout dumps, citations. |
 | `just picus-all` | Under-constrainedness check on the compiled R1CS (needs Docker). |
 
-CI runs `test-unit`, `vectors-check`, the compile + budget gate, and circomspect on
-every pull request; the Lean checks run when `lean/**` or `src/**` changes. Picus
-and the heavy fuzz tier run nightly.
+CI runs `test-unit`, `vectors-check`, the compile + budget gate, `build-graph`, and
+circomspect on every pull request; the Lean checks run when `lean/**` or `src/**`
+changes. Picus and the heavy fuzz tier run nightly.
+
+### The witness graph
+
+The relayer does not run the circom `.wasm` witness generator. It evaluates
+`tree_update_batch.wcd`, built by `just build-graph` from
+[iden3/circom-witnesscalc](https://github.com/iden3/circom-witnesscalc) and shipped
+as a release asset. Witness generation is roughly 12x faster that way (90 ms → 12 ms
+for `TreeUpdateBatch(10, 4)`), and the relayer no longer embeds a wasm runtime.
+
+The builder cannot store a function result directly into a signal, so the circuits
+write `var tag = TAG_LEAF(); h.inputs[0] <== tag;` rather than assigning the call
+straight across. The call folds to a constant either way and the `.r1cs` is
+byte-identical, so this costs nothing — but inlining one back breaks `build-graph`,
+which is why CI runs it.
+
+`build-graph` re-runs the circom front end through a different code path, so it also
+emits its own `.r1cs` and diffs it against `compile-batch`'s. A graph built from a
+different constraint system than the zkey would produce witnesses that fail
+verification, and that diff turns it into a build failure instead.
 
 Tests are witness-level: `circom_tester` generates a witness and checks the
 constraints. It cannot detect an under-constrained signal — that class is covered

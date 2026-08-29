@@ -143,7 +143,7 @@ describe("tree_update_batch", function () {
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
-    it("honest odd batch: 3 leaves (3x3 transact output shape) passes", async () => {
+    it("honest odd batch: 3 leaves, fewer than a spend's 6 outputs, passes", async () => {
         // A 3-output transact bundle emits three commitments, so the batch must
         // accept an odd leaf count.
         const leaves = [

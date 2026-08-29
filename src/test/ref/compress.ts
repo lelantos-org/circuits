@@ -35,7 +35,7 @@ export interface FlattenInput {
 }
 
 /**
- * TransactCompressN layout. Total = 9 + 3·N_IN + 8·N_OUT (31 at 2x2, 42 at 3x3).
+ * TransactCompressN layout. Total = 9 + 3·N_IN + 8·N_OUT (31 at 2x2, 53 at 4x4, 69 at 4x6).
  *
  * Arity is taken from the input array lengths, matching the circom template's
  * genericity over (N_IN, N_OUT).

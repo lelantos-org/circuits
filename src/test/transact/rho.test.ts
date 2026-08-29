@@ -18,7 +18,7 @@ import { expectAccepts, expectWitnessFails } from "../lib/expect";
 import { ALICE_NSK, TIMEOUT_CIRCUIT } from "../lib/constants";
 import { useTransactCircuit } from "./setup";
 
-describe("transact_2x2 / rho and nullifier binding", function () {
+describe("transact_4x6 / rho and nullifier binding", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
     const ctx = useTransactCircuit();

@@ -106,7 +106,7 @@ const TAMPER_CASES: TamperCase[] = [
     { path: "merkle_root", reason: "the recomputed root must equal the declared one" },
 ];
 
-describe("transact_2x2 / single-field tamper", function () {
+describe("transact_4x6 / single-field tamper", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
     const ctx = useTransactCircuit();

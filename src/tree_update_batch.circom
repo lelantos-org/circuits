@@ -72,7 +72,18 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 
     // 1. Range-check actual_count ∈ [1, MAX_L] via Num2Bits(actual_count - 1).
     //    That bounds it by 2^COUNT_BITS, so the bound must be tight to MAX_L.
-    var COUNT_BITS = 2;
+    //
+    //    Derived from MAX_L rather than written down: a hand-set constant has to
+    //    be edited in lockstep with the template argument, and the assert below
+    //    only catches the mismatch after someone has already made it. The assert
+    //    stays as the power-of-two guard, which is a real constraint on MAX_L
+    //    and not something the derivation can enforce.
+    var COUNT_BITS = 0;
+    var count_span = MAX_L;
+    while (count_span > 1) {
+        count_span = count_span \ 2;
+        COUNT_BITS++;
+    }
     assert((1 << COUNT_BITS) == MAX_L);
     component cnt_bits = Num2Bits(COUNT_BITS);
     cnt_bits.in <== actual_count - 1;
@@ -113,7 +124,13 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     signal leaves[MAX_L];
     for (var k = 0; k < MAX_L; k++) {
         leaf_h[k] = Poseidon(4);
-        leaf_h[k].inputs[0] <== TAG_LEAF();
+        // The tag is hoisted through a `var` rather than assigned straight from the
+        // call: the witness-graph builder (`build-circuit`, used to produce the
+        // relayer's native witness calculator) cannot store a function result into a
+        // signal. Inlining these back breaks `just build-graph`. The R1CS is
+        // unaffected either way — the call folds to a constant.
+        var tag = TAG_LEAF();
+        leaf_h[k].inputs[0] <== tag;
         leaf_h[k].inputs[1] <== cms[k];
         leaf_h[k].inputs[2] <== cv_dep[k][0];
         leaf_h[k].inputs[3] <== cv_dep[k][1];
@@ -258,19 +275,23 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     y <== pe.y;
 }
 
-// DEPTH = 10 must match the transact circuits and the on-chain CommitmentTree.
+// DEPTH = 11 must match the transact circuits and the on-chain CommitmentTree
+// (4^11 = 4,194,304 leaves; MAX_LEAVES and EMPTY_ROOT in CommitmentTree.sol).
 //
-// MAX_L = 4: 57,106 constraints, inside the 2^16 FFT domain and ptau_16, with
-// 8,430 constraints of headroom. A leaf slot costs roughly 12k constraints;
-// `just budget` fails CI if the domain is crossed.
+// MAX_L is at its floor for the 4x6 transact shape: COUNT_BITS requires a power
+// of two, and a spend emits TRANSACT_OUT = 6 leaves that must fit one batch,
+// with MASP.sol pinning `actualCount` to exactly that on the spend path. Six is
+// not a power of two, so the floor is 8. Only flushBatch (deposits, two leaves
+// each) uses the slack, and at MAX_L = 8 it carries four deposits per batch
+// rather than two.
 //
-// MAX_L is at its floor: COUNT_BITS requires a power of two, and a spend emits
-// TRANSACT_OUT = 3 leaves that must fit one batch, with MASP.sol pinning
-// `actualCount` to exactly that on the transfer path. Only flushBatch
-// (deposits, one leaf each) uses more than 3 slots.
+// Budget: this circuit grows on both axes at once — four more leaf slots at
+// roughly 12k constraints each, plus a depth level across all eight — so it,
+// not the transact circuit, is the one that decides whether 2^17 holds. Run
+// `just budget` and read the real count rather than trusting that estimate.
 //
 // Changing either parameter requires a new ceremony and a contract change,
 // since the public-input layout is 4 + 6·MAX_L.
 component main {
     public [ z ]
-} = TreeUpdateBatch(10, 4);
+} = TreeUpdateBatch(11, 8);

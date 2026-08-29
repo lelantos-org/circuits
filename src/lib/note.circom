@@ -15,7 +15,13 @@ template DeriveIvk() {
     signal output ivk;
 
     component h = Poseidon(2);
-    h.inputs[0] <== TAG_IVK();
+    // The tag is hoisted through a `var` rather than assigned straight from the
+    // call: the witness-graph builder (`build-circuit`, used to produce the
+    // relayer's native witness calculator) cannot store a function result into a
+    // signal. Inlining these back breaks `just build-graph`. The R1CS is
+    // unaffected either way — the call folds to a constant.
+    var tag = TAG_IVK();
+    h.inputs[0] <== tag;
     h.inputs[1] <== nsk;
     ivk <== h.out;
 }
@@ -25,7 +31,8 @@ template DeriveNk() {
     signal output nk;
 
     component h = Poseidon(2);
-    h.inputs[0] <== TAG_NK();
+    var tag = TAG_NK();
+    h.inputs[0] <== tag;
     h.inputs[1] <== nsk;
     nk <== h.out;
 }
@@ -35,7 +42,8 @@ template DerivePk() {
     signal output pk;
 
     component h = Poseidon(2);
-    h.inputs[0] <== TAG_PK();
+    var tag = TAG_PK();
+    h.inputs[0] <== tag;
     h.inputs[1] <== ivk;
     pk <== h.out;
 }
@@ -75,7 +83,8 @@ template DeriveRho() {
     signal output rho;
 
     component h = Poseidon(3);
-    h.inputs[0] <== TAG_RHO();
+    var tag = TAG_RHO();
+    h.inputs[0] <== tag;
     h.inputs[1] <== nf0;
     h.inputs[2] <== index;
     rho <== h.out;
@@ -97,7 +106,8 @@ template Nullifier() {
     signal output nf;
 
     component h = Poseidon(4);
-    h.inputs[0] <== TAG_NF();
+    var tag = TAG_NF();
+    h.inputs[0] <== tag;
     h.inputs[1] <== nk;
     h.inputs[2] <== rho;
     h.inputs[3] <== cm;

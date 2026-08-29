@@ -80,7 +80,13 @@ template SpentNote(DEPTH) {
     // 5. leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y). Recomputing the same
     //    leaf that tree_update_batch inserted pins (asset, value) to the note.
     component leaf_h = Poseidon(4);
-    leaf_h.inputs[0] <== TAG_LEAF();
+    // The tag is hoisted through a `var` rather than assigned straight from the
+    // call: the witness-graph builder (`build-circuit`, used to produce the
+    // relayer's native witness calculator) cannot store a function result into a
+    // signal. Inlining these back breaks `just build-graph`. The R1CS is
+    // unaffected either way — the call folds to a constant.
+    var tag = TAG_LEAF();
+    leaf_h.inputs[0] <== tag;
     leaf_h.inputs[1] <== cm.cm;
     leaf_h.inputs[2] <== vc.cv_dep[0];
     leaf_h.inputs[3] <== vc.cv_dep[1];
