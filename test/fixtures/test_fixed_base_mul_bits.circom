@@ -5,8 +5,8 @@ pragma circom 2.2.3;
 // which owns its Num2Bits. The template is public, so this pins the behaviour
 // when a caller ignores that contract.
 
-include "../../lib/fixed_base_mul.circom";
-include "../../lib/value_commit.circom";
+include "../../src/lib/fixed_base_mul.circom";
+include "../../src/lib/value_commit.circom";
 
 template TestFixedBaseMulBits() {
     signal input e[252];

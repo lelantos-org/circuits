@@ -32,7 +32,7 @@ size bound (`2^64`, `2^66`, `2^128`, `2^252 < p`) that the proofs consume.
 | `escalarMul` / `escalarMul_spec` | `EscalarMulAny` / `FixedBaseMul` compute `k • P` | gadget semantics; one uninterpreted symbol covers both, so replacing the fixed-base gadget is invisible here |
 | `H`, `BASE0` | the two Pedersen bases | Constants |
 | `assetMul` | `HashToAssetGen` is a known multiple of `BASE0` | **Deliberately models a weakness, not a strength** — see `pointBalance_not_sound` |
-| `assetMul_arith` | `assetMul 1 + assetMul 3 = 2 · assetMul 2` | Follows from circomlib's signed 4-bit window encoding mapping asset ids 1,2,3 to multipliers 2,3,4; checked at runtime by `src/test/transact/multi_asset.test.ts` |
+| `assetMul_arith` | `assetMul 1 + assetMul 3 = 2 · assetMul 2` | Follows from circomlib's signed 4-bit window encoding mapping asset ids 1,2,3 to multipliers 2,3,4; checked at runtime by `test/transact/multi_asset.test.ts` |
 
 `propext`, `Classical.choice` and `Quot.sound` are Lean's own; they are not assumptions
 about the circuit.
@@ -85,9 +85,7 @@ and `TxBinding` is what keeps it that way.
 -/
 
 #print axioms Lelantos.transact_sound
-#print axioms Lelantos.transact2x2_sound
-#print axioms Lelantos.transact3x3_sound
-#print axioms Lelantos.transact4x4_sound
+#print axioms Lelantos.transact4x6_sound
 #print axioms Lelantos.perAssetValueBalance_nat
 #print axioms Lelantos.perAssetValueBalance_all_assets
 #print axioms Lelantos.polyEval_binding
@@ -106,8 +104,7 @@ and `TxBinding` is what keeps it that way.
 #print axioms Lelantos.no_asset_creation
 #print axioms Lelantos.transact_pi_binding
 #print axioms Lelantos.transactSat_satisfiable
-#print axioms Lelantos.transact3x3Sat_satisfiable
-#print axioms Lelantos.transact4x4Sat_satisfiable
+#print axioms Lelantos.transact4x6Sat_satisfiable
 #print axioms Lelantos.batchSat_satisfiable
 #print axioms Lelantos.transactSat_spend_satisfiable
 #print axioms Lelantos.transactSat_twoAsset_satisfiable

@@ -10,7 +10,7 @@ import { TIMEOUT_CIRCUIT } from "./lib/constants";
 import * as snarkjs from "snarkjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CIRCUITS = path.join(__dirname, "..", "..");
+const CIRCUITS = path.join(__dirname, "..");
 const SCRIPT = path.join(CIRCUITS, "scripts", "check-budget.mjs");
 
 // Coverage for the constraint-budget gate, which is what keeps a per-slot

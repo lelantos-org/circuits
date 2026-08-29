@@ -5,3 +5,5 @@ build
 bench/results.json
 bench/public/input.json
 .tools
+# CI staging dir for release assets; populated by .github/workflows/publish.yml.
+release

@@ -19,8 +19,8 @@ import {
     TAGS,
     type Field,
     type Point,
-} from "../../src/test/ref/index.js";
-import { DEPTH } from "../../src/test/lib/constants.js";
+} from "../../test/ref/index.js";
+import { DEPTH } from "../../test/lib/constants.js";
 
 export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LEAN_EXPECTED = path.join(ROOT, "lean", "expected");

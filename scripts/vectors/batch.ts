@@ -17,10 +17,10 @@ import {
     hornerEval,
     type Field,
     type Point,
-} from "../../src/test/ref/index.js";
-import { loadCircuit, readOutput, srcPath } from "../../src/test/lib/circuit.js";
-import { padToSlots, treeUpdateBatchInputJson } from "../../src/test/lib/inputs.js";
-import { DEPTH, MAX_L } from "../../src/test/lib/constants.js";
+} from "../../test/ref/index.js";
+import { loadCircuit, readOutput, srcPath } from "../../test/lib/circuit.js";
+import { padToSlots, treeUpdateBatchInputJson } from "../../test/lib/inputs.js";
+import { DEPTH, MAX_L } from "../../test/lib/constants.js";
 import {
     SCHEMA,
     hex,
@@ -161,7 +161,7 @@ export async function buildBatchVectors() {
         if (circuitY !== y) {
             throw new Error(
                 `${c.name}: circuit y (${circuitY}) != reference PolyEval y (${y}). ` +
-                    `The layout in src/test/ref/compress.ts disagrees with BatchCompress.`,
+                    `The layout in test/ref/compress.ts disagrees with BatchCompress.`,
             );
         }
 

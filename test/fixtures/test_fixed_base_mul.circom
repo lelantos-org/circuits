@@ -2,8 +2,8 @@ pragma circom 2.2.3;
 
 // Test wrapper: FixedBaseMul at the width and base MulH uses (RCV_BITS, H).
 
-include "../../lib/fixed_base_mul.circom";
-include "../../lib/value_commit.circom";
+include "../../src/lib/fixed_base_mul.circom";
+include "../../src/lib/value_commit.circom";
 
 template TestFixedBaseMulH() {
     signal input scalar;

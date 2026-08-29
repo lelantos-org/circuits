@@ -5,13 +5,14 @@ ROOT := justfile_directory()
 BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
 PTAU_URL_BASE := "https://storage.googleapis.com/zkevm/ptau"
-# 2x2, 3x3 and tree_update_batch size to `cirPower = 16`, so one ptau serves
-# those three. snarkjs picks the domain from `nConstraints + nPubInputs +
-# nOutputs`, which caps a 2^16 ceremony at 65,533 constraints — see `budget`
-# below.
+# Both circuits are on the 2^17 ceremony: Transact(11,4,6) is 100,320 constraints
+# and TreeUpdateBatch(11,8) is 113,502, so neither fits 2^16. snarkjs picks the
+# domain from `nConstraints + nPubInputs + nOutputs`, which caps a 2^16 ceremony
+# at 65,533 constraints — see `budget` below.
+#
+# PTAU16 is kept because `_setup` takes the ptau as an argument and a future
+# smaller circuit would want it; nothing currently references it.
 PTAU16 := "powersOfTau28_hez_final_16.ptau"
-# 4x4 does not fit: Transact(10,4,4) is 86,680 constraints, so it needs its own
-# 2^17 ceremony (~2x the download and roughly 2x the proving time).
 PTAU17 := "powersOfTau28_hez_final_17.ptau"
 
 # Pinned revision of iden3/circom-witnesscalc, which supplies the relayer's
@@ -41,137 +42,20 @@ CONTRACTS_TREE_BATCH_VERIFIER := ROOT / ".." / "contracts" / "src" / "verifiers"
 default:
     @just --list
 
-# === 2x2 circuit ===
-
-# Compile 2x2.circom -> r1cs + wasm + sym, print constraint count.
-compile: (_compile "2x2")
-
-# Phase-2 trusted setup (single-contributor; INSECURE — prototype only).
-setup:
-    just _fetch-ptau "{{PTAU16}}"
-    echo "==> Phase-2 setup"
-    npx snarkjs groth16 setup "{{BUILD}}/2x2.r1cs" "{{PTAU_DIR}}/{{PTAU16}}" "{{BUILD}}/2x2_0.zkey"
-    echo "==> Single contribution (PROTOTYPE ONLY)"
-    npx snarkjs zkey contribute "{{BUILD}}/2x2_0.zkey" "{{BUILD}}/2x2_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
-    echo "==> Export verification key"
-    npx snarkjs zkey export verificationkey "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json"
-    echo "==> Export Solidity verifier"
-    npx snarkjs zkey export solidityverifier "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/Verifier.sol"
-    echo "==> Done. Verifier at {{BUILD}}/Verifier.sol"
-
-# Prove + verify a single witness from input.json.
-prove input="":
-    INPUT="{{ if input == "" { ROOT / "circuits/test/input.json" } else { input } }}"; \
-    echo "==> Compute witness from $INPUT"; \
-    node "{{BUILD}}/2x2_js/generate_witness.js" "{{BUILD}}/2x2_js/2x2.wasm" "$INPUT" "{{BUILD}}/witness.wtns"; \
-    echo "==> Prove (groth16)"; \
-    npx snarkjs groth16 prove "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/witness.wtns" "{{BUILD}}/proof.json" "{{BUILD}}/public.json"; \
-    echo "==> Verify"; \
-    npx snarkjs groth16 verify "{{BUILD}}/verification_key.json" "{{BUILD}}/public.json" "{{BUILD}}/proof.json"
-
-# Compile, run the prototype ceremony, then prove and verify one witness.
-all: compile setup prove
-
-# === 3x3 circuit — the deployed transact shape ===
+# === transact circuit ===
 #
-# `Transact(10, 3, 3)`: 3 shielded inputs x 3 shielded outputs. Constraint
-# counts are in budget.json. Published as a package artifact and wired on-chain:
-# `PubInputs.sol` carries the 42-slot compress for this layout,
-# `TRANSACT_IN = TRANSACT_OUT = 3`, and the exported verifier is
-# contracts/src/verifiers/Verifier.sol. Use `rebuild-3x3` to regenerate and sync
-# it. See src/3x3.circom.
-
-# Compile 3x3.circom -> r1cs + wasm + sym, print constraint count.
-compile-3x3: (_compile "3x3")
-
-# Phase-2 trusted setup for 3x3 (single-contributor; INSECURE — prototype only).
-setup-3x3:
-    just _fetch-ptau "{{PTAU16}}"
-    echo "==> Phase-2 setup (3x3)"
-    npx snarkjs groth16 setup "{{BUILD}}/3x3.r1cs" "{{PTAU_DIR}}/{{PTAU16}}" "{{BUILD}}/3x3_0.zkey"
-    echo "==> Single contribution (PROTOTYPE ONLY)"
-    npx snarkjs zkey contribute "{{BUILD}}/3x3_0.zkey" "{{BUILD}}/3x3_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
-    echo "==> Export verification key"
-    npx snarkjs zkey export verificationkey "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/3x3_verification_key.json"
-    echo "==> Export Solidity verifier"
-    npx snarkjs zkey export solidityverifier "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/Verifier3x3.sol"
-    # Single quotes, not backticks: this recipe runs under `bash -ceuo pipefail`,
-    # where a backtick inside a double-quoted string is command substitution.
-    # Backticking `just rebuild-3x3` here made the echo re-invoke this recipe
-    # through its own dependency chain, recursing until the job timed out.
-    echo "==> Done. Verifier at {{BUILD}}/Verifier3x3.sol — run 'just rebuild-3x3' to sync it"
-
-# Used by `package`, since publish CI has no sibling contracts checkout. Local
-# circuit authors should prefer `rebuild-3x3`, which also pushes the verifier
-# into contracts/.
-
-# Build all 3x3 artifacts WITHOUT the contracts/ sync.
-build-artifacts-3x3: compile-3x3 setup-3x3
-
-# === 4x4 circuit ===
-#
-# `Transact(10, 4, 4)`: 4 shielded inputs x 4 shielded outputs. Not deployed and
-# not published: no PubInputs.sol compress overload, no golden vectors, no Lean
-# layout dump. See src/4x4.circom.
-#
-# Never synced into contracts/ — that path holds the 3x3 verifier, and
-# overwriting it would swap the deployed circuit under an unchanged filename.
-
-# Compile 4x4.circom -> r1cs + wasm + sym, print constraint count.
-compile-4x4: (_compile "4x4")
-
-# Phase-2 trusted setup for 4x4 (single-contributor; INSECURE — prototype only).
-setup-4x4:
-    just _fetch-ptau "{{PTAU17}}"
-    echo "==> Phase-2 setup (4x4, 2^17 ptau)"
-    npx snarkjs groth16 setup "{{BUILD}}/4x4.r1cs" "{{PTAU_DIR}}/{{PTAU17}}" "{{BUILD}}/4x4_0.zkey"
-    echo "==> Single contribution (PROTOTYPE ONLY)"
-    npx snarkjs zkey contribute "{{BUILD}}/4x4_0.zkey" "{{BUILD}}/4x4_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
-    echo "==> Export verification key"
-    npx snarkjs zkey export verificationkey "{{BUILD}}/4x4_final.zkey" "{{BUILD}}/4x4_verification_key.json"
-    echo "==> Export Solidity verifier"
-    npx snarkjs zkey export solidityverifier "{{BUILD}}/4x4_final.zkey" "{{BUILD}}/Verifier4x4.sol"
-    echo "==> Done. Verifier at {{BUILD}}/Verifier4x4.sol — not synced into contracts/"
-
-# Compile + trusted setup for 4x4. Never synced into contracts/.
-build-artifacts-4x4: compile-4x4 setup-4x4
-
-# Full rebuild of the 4x4 shape after circuit edits.
-rebuild-4x4: build-artifacts-4x4
-    @just _rebuild-report "4x4" "{{BUILD}}/4x4.r1cs" "{{BUILD}}/4x4_js/4x4.wasm" "{{BUILD}}/4x4_final.zkey" "{{BUILD}}/4x4_verification_key.json" "(not synced — 4x4 is not deployed)"
-
-# === 4x6 circuit ===
-#
-# `Transact(11, 4, 6)`: 4 shielded inputs x 6 shielded outputs, at depth 11.
-# Six outputs so change lands on the withdrawal denomination ladder in one
-# spend; depth 11 to pay back the tree capacity those extra slots consume. See
-# src/4x6.circom.
-#
-# Not yet synced into contracts/: it needs a PubInputs.sol compress overload at
-# 69 slots, golden vectors and a Lean layout dump first.
+# `Transact(11, 4, 6)` — src/4x6.circom. The only transact shape: the three
+# narrower ones were removed once 4x6 landed, since each cost a ceremony per
+# release and 20-40 MB in every npm install for no unique coverage.
 
 # Compile 4x6.circom -> r1cs + wasm + sym, print constraint count.
 compile-4x6: (_compile "4x6")
 
 # Phase-2 trusted setup for 4x6 (single-contributor; INSECURE — prototype only).
-setup-4x6:
-    just _fetch-ptau "{{PTAU17}}"
-    echo "==> Phase-2 setup (4x6, 2^17 ptau)"
-    npx snarkjs groth16 setup "{{BUILD}}/4x6.r1cs" "{{PTAU_DIR}}/{{PTAU17}}" "{{BUILD}}/4x6_0.zkey"
-    echo "==> Single contribution (PROTOTYPE ONLY)"
-    npx snarkjs zkey contribute "{{BUILD}}/4x6_0.zkey" "{{BUILD}}/4x6_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
-    echo "==> Export verification key"
-    npx snarkjs zkey export verificationkey "{{BUILD}}/4x6_final.zkey" "{{BUILD}}/4x6_verification_key.json"
-    echo "==> Export Solidity verifier"
-    npx snarkjs zkey export solidityverifier "{{BUILD}}/4x6_final.zkey" "{{BUILD}}/Verifier4x6.sol"
-    echo "==> Done. Verifier at {{BUILD}}/Verifier4x6.sol — not synced into contracts/"
+setup-4x6: (_setup "4x6" PTAU17)
 
-# Compile + trusted setup for 4x6. Not synced into contracts/.
+# Compile + trusted setup for 4x6.
 build-artifacts-4x6: compile-4x6 setup-4x6
-
-# Full rebuild of the 4x6 shape after circuit edits.
-rebuild-4x6: build-artifacts-4x6
-    @just _rebuild-report "4x6" "{{BUILD}}/4x6.r1cs" "{{BUILD}}/4x6_js/4x6.wasm" "{{BUILD}}/4x6_final.zkey" "{{BUILD}}/4x6_verification_key.json" "(not synced — no compress overload yet)"
 
 # === tree_update_batch circuit ===
 
@@ -217,29 +101,39 @@ _ensure-build-circuit:
             --root "{{TOOLS}}/build-circuit"; \
     fi
 
-# tree_update_batch at MAX_L=4 has 57,106 constraints and so uses the 2^16 FFT
-# domain, with 8,427 constraints of headroom. A leaf slot costs roughly 12k
-# constraints, and `just budget` pins the domain so growth past it fails CI
-# rather than doubling proving time.
+# tree_update_batch at MAX_L=8, depth 11 has 113,502 constraints against the 2^17
+# domain — 17,570 of headroom, and the tighter of the two circuits. A leaf slot
+# costs roughly 12k constraints, so this is what a further widening breaks first;
+# `just budget` pins the domain so growth past it fails CI rather than silently
+# doubling proving time.
 #
-# 2x2 (44,406) and 3x3 (65,523) size to the same domain and share this ptau.
-# 3x3 clears it by 10 constraints, so a ceremony is also the second line of
-# defence: at 65,534 `groth16 setup` fails outright rather than silently
-# building a 2^17 zkey. 4x4 (86,680) is past that line by construction and takes
-# the 2^17 ptau instead — see `setup-4x4`.
+# The ceremony is a second line of defence on the same bound: `groth16 setup`
+# fails outright when the constraint count exceeds the ptau, rather than building
+# against a domain the budget did not sanction.
+
+# On the 2^17 ptau, not 2^16: at MAX_L = 8 and depth 11 this circuit is 113,502
+# constraints. It shares the ptau with 4x6 and is the tighter of the two.
 
 # Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
-setup-batch:
-    just _fetch-ptau "{{PTAU16}}"
-    echo "==> Phase-2 setup (tree_update_batch)"
-    npx snarkjs groth16 setup "{{BUILD}}/tree_update_batch.r1cs" "{{PTAU_DIR}}/{{PTAU16}}" "{{BUILD}}/tree_update_batch_0.zkey"
+setup-batch: (_setup "tree_update_batch" PTAU17)
+
+# The four snarkjs calls every phase-2 setup makes, written once.
+#
+# Was copied per shape, which is how `setup-batch` ended up pointing at the 2^16
+# ptau after the circuit outgrew it — the kind of drift a shared recipe cannot
+# have. `groth16 setup` fails outright when the constraint count exceeds the
+# ptau, so a wrong argument here is loud rather than silent.
+_setup shape ptau:
+    just _fetch-ptau "{{ptau}}"
+    echo "==> Phase-2 setup ({{shape}}, {{ptau}})"
+    npx snarkjs groth16 setup "{{BUILD}}/{{shape}}.r1cs" "{{PTAU_DIR}}/{{ptau}}" "{{BUILD}}/{{shape}}_0.zkey"
     echo "==> Single contribution (PROTOTYPE ONLY)"
-    npx snarkjs zkey contribute "{{BUILD}}/tree_update_batch_0.zkey" "{{BUILD}}/tree_update_batch_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
+    npx snarkjs zkey contribute "{{BUILD}}/{{shape}}_0.zkey" "{{BUILD}}/{{shape}}_final.zkey" --name="prototype-contributor" -e="$(openssl rand -hex 32)"
     echo "==> Export verification key"
-    npx snarkjs zkey export verificationkey "{{BUILD}}/tree_update_batch_final.zkey" "{{BUILD}}/tree_update_batch_verification_key.json"
+    npx snarkjs zkey export verificationkey "{{BUILD}}/{{shape}}_final.zkey" "{{BUILD}}/{{shape}}_verification_key.json"
     echo "==> Export Solidity verifier"
-    npx snarkjs zkey export solidityverifier "{{BUILD}}/tree_update_batch_final.zkey" "{{BUILD}}/TreeUpdateBatchVerifier.sol"
-    echo "==> Done. Verifier at {{BUILD}}/TreeUpdateBatchVerifier.sol"
+    npx snarkjs zkey export solidityverifier "{{BUILD}}/{{shape}}_final.zkey" "{{BUILD}}/Verifier_{{shape}}.sol"
+    echo "==> Done. Verifier at {{BUILD}}/Verifier_{{shape}}.sol"
 
 # Prove + verify a tree_update_batch witness.
 prove-batch input="":
@@ -251,45 +145,30 @@ prove-batch input="":
     echo "==> Verify"; \
     npx snarkjs groth16 verify "{{BUILD}}/tree_update_batch_verification_key.json" "{{BUILD}}/tree_update_batch_public.json" "{{BUILD}}/tree_update_batch_proof.json"
 
-# Build everything: 2x2 + tree_update_batch.
-all-tree: compile compile-batch setup setup-batch
+# The two are ceremony-paired — a spend's output leaves are inserted by the
+# batch circuit, so they share DEPTH.
+
+# Build everything: 4x6 + tree_update_batch.
+all-tree: build-artifacts-4x6 compile-batch setup-batch
 
 # === rebuild + sync into contracts/ ===
-
-# Never syncs into contracts/: 2x2 is not the deployed transact shape, so
-# `build/Verifier.sol` must not reach contracts/src/verifiers/Verifier.sol.
-# That path holds the 3x3 verifier, and overwriting it would swap the deployed
-# circuit under an unchanged filename.
 #
-# WARNING: re-runs the prototype single-contributor ceremony (INSECURE — see the
-# `setup` recipe). Existing proofs become invalid.
+# WARNING: every recipe here re-runs the prototype single-contributor ceremony
+# (INSECURE — see `_setup`). Existing proofs and the committed contract fixtures
+# become invalid.
 
-# Compile + trusted setup for 2x2. Never synced into contracts/.
-build-artifacts: compile setup
-
-# No contracts/ sync — see `build-artifacts` above, and use `rebuild-3x3` for
-# the deployed shape.
-
-# Full rebuild of the 2x2 shape after circuit edits.
-rebuild-2x2: build-artifacts
-    @just _rebuild-report "2x2" "{{BUILD}}/2x2.r1cs" "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2_final.zkey" "{{BUILD}}/verification_key.json" "(not synced — 2x2 is not deployed)"
-
-# Full rebuild of the DEPLOYED transact shape after circuit edits: recompile ->
-# trusted setup -> sync Verifier3x3.sol into contracts/src/verifiers/Verifier.sol.
-# Use after changes to 3x3.circom or any lib/*.circom.
-
-# Full rebuild of the DEPLOYED transact shape, syncing the verifier to contracts/.
-rebuild-3x3: build-artifacts-3x3
-    @echo "==> Syncing Verifier3x3.sol -> {{CONTRACTS_VERIFIER}}"
-    cp "{{BUILD}}/Verifier3x3.sol" "{{CONTRACTS_VERIFIER}}"
-    @just _rebuild-report "3x3" "{{BUILD}}/3x3.r1cs" "{{BUILD}}/3x3_js/3x3.wasm" "{{BUILD}}/3x3_final.zkey" "{{BUILD}}/3x3_verification_key.json" "{{CONTRACTS_VERIFIER}}"
+# Full rebuild of the transact shape, syncing the verifier into contracts/.
+rebuild-4x6: build-artifacts-4x6
+    @echo "==> Syncing Verifier_4x6.sol -> {{CONTRACTS_VERIFIER}}"
+    cp "{{BUILD}}/Verifier_4x6.sol" "{{CONTRACTS_VERIFIER}}"
+    @just _rebuild-report "4x6" "{{BUILD}}/4x6.r1cs" "{{BUILD}}/4x6_js/4x6.wasm" "{{BUILD}}/4x6_final.zkey" "{{BUILD}}/4x6_verification_key.json" "{{CONTRACTS_VERIFIER}}"
 
 # Syncs TreeUpdateBatchVerifier.sol into contracts/src/verifiers/.
 
 # Full rebuild of the tree_update_batch shape after circuit edits.
 rebuild-batch: compile-batch setup-batch
     @echo "==> Patching contract name (Groth16Verifier -> TreeUpdateBatchGroth16Verifier)"
-    @sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' "{{BUILD}}/TreeUpdateBatchVerifier.sol" > "{{BUILD}}/TreeUpdateBatchVerifier.patched.sol"
+    @sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' "{{BUILD}}/Verifier_tree_update_batch.sol" > "{{BUILD}}/TreeUpdateBatchVerifier.patched.sol"
     @echo "==> Syncing TreeUpdateBatchVerifier.sol -> {{CONTRACTS_TREE_BATCH_VERIFIER}}"
     cp "{{BUILD}}/TreeUpdateBatchVerifier.patched.sol" "{{CONTRACTS_TREE_BATCH_VERIFIER}}"
     @just _rebuild-report "tree_update_batch" "{{BUILD}}/tree_update_batch.r1cs" "{{BUILD}}/tree_update_batch_js/tree_update_batch.wasm" "{{BUILD}}/tree_update_batch_final.zkey" "{{BUILD}}/tree_update_batch_verification_key.json" "{{CONTRACTS_TREE_BATCH_VERIFIER}}"
@@ -422,22 +301,22 @@ lean-update:
 # picus-image` builds a native one instead and `picus` prefers it when present.
 #
 # Picus recommends --O0 input, so this compiles a separate artifact rather than reusing
-# build/2x2.r1cs.
+# build/4x6.r1cs.
 
 # Build the native arm64 Picus image, avoiding the emulated upstream one.
 picus-image:
     docker build --platform linux/arm64 -t picus:arm64 \
         -f "{{ROOT}}/docker/picus-arm64.Dockerfile" "{{ROOT}}/docker"
 
-#   just picus                     # 2x2, weak (default) safety
-#   just picus 3x3                 # another circuit under src/
+#   just picus                     # 4x6, weak (default) safety
+#   just picus tree_update_batch   # the other circuit under src/
 #   just picus tree_update_batch 1 # strong safety
 #
-# The circuit name comes first, so the old `just picus 1` (strong on 2x2) is now
-# `just picus 2x2 1`.
+# The circuit name comes first, so strong safety on the default shape is
+# `just picus 4x6 1`.
 
 # Check one circuit's R1CS for under-constrainedness (needs Docker). STRONG=1 for strong safety.
-picus CIRCUIT="2x2" STRONG="":
+picus CIRCUIT="4x6" STRONG="":
     #!/usr/bin/env bash
     set -euo pipefail
     command -v docker >/dev/null || { echo "docker not found"; exit 1; }
@@ -476,7 +355,7 @@ picus-all STRONG="":
     #!/usr/bin/env bash
     set -euo pipefail
     failed=()
-    for circuit in 2x2 3x3 4x4 tree_update_batch; do
+    for circuit in 4x6 tree_update_batch; do
         echo "==> picus: $circuit"
         just picus "$circuit" "{{STRONG}}" || failed+=("$circuit")
     done
@@ -488,29 +367,27 @@ picus-all STRONG="":
 
 # === package ===
 
-# Full rebuild + verify for npm publish. RE-RUNS ALL THREE TRANSACT CEREMONIES
-# (2x2, 3x3, 4x4) and so invalidates existing proofs — see `package-check` for
-# the gate alone. Copies the witness wasm out of `build/2x2_js/` to a flat
-# `build/2x2.wasm` so the package `files` whitelist (and `exports` subpath map)
-# resolves without shipping the redundant `2x2_js/` glue. Then runs
-# `scripts/check-artifacts.ts` to assert every artifact is present and sized in
-# range.
+# Full rebuild + verify for npm publish. RE-RUNS THE TRANSACT CEREMONY and so
+# invalidates existing proofs — see `package-check` for the gate alone. Copies
+# the witness wasm out of `build/4x6_js/` to a flat `build/4x6.wasm` so the
+# package `files` whitelist (and `exports` subpath map) resolves without shipping
+# the redundant `4x6_js/` glue. Then runs `scripts/check-artifacts.ts` to assert
+# every artifact is present and sized in range.
 #
-# 4x4 pulls the 2^17 ptau, which `setup-4x4` fetches on demand.
+# 4x6 pulls the 2^17 ptau, which `_setup` fetches on demand.
 #
-# Depends on the `build-artifacts*` recipes (NOT `rebuild-3x3`) so the publish
-# workflow does not require a sibling contracts/ checkout for the Verifier.sol
-# sync step.
+# Depends on `build-artifacts-4x6` (NOT `rebuild-4x6`) so the publish workflow
+# does not require a sibling contracts/ checkout for the Verifier.sol sync step.
 
-# Full rebuild + publish gate. RE-RUNS ALL THREE CEREMONIES, invalidating existing proofs.
-package: build-artifacts build-artifacts-3x3 build-artifacts-4x4
+# Full rebuild + publish gate. RE-RUNS THE CEREMONY, invalidating existing proofs.
+package: build-artifacts-4x6
     @just package-check
 
 # Stage the flat wasms and run the publish gate against whatever is ALREADY in
 # build/ — no compile, no ceremony.
 #
-# Split out of `package` because that recipe runs three trusted-setup ceremonies
-# as a side effect (2x2, 3x3 and 4x4). Each mints a fresh zkey from fresh entropy, which
+# Split out of `package` because that recipe runs a trusted-setup ceremony as a
+# side effect. It mints a fresh zkey from fresh entropy, which
 # invalidates every proof built against the previous one — including the
 # committed fixtures in ../contracts (proof_transfer.json,
 # proof_deposit_batch_n1.json). Reaching for `just package` to re-check the gate
@@ -521,10 +398,8 @@ package: build-artifacts build-artifacts-3x3 build-artifacts-4x4
 
 # Run the publish gate against whatever is already in build/. No compile, no ceremony.
 package-check:
-    @echo "==> Staging build/2x2.wasm + build/3x3.wasm + build/4x4.wasm (no rebuild)"
-    @[ -f "{{BUILD}}/2x2_js/2x2.wasm" ] && cp "{{BUILD}}/2x2_js/2x2.wasm" "{{BUILD}}/2x2.wasm" || echo "    skip: build/2x2_js/2x2.wasm absent"
-    @[ -f "{{BUILD}}/3x3_js/3x3.wasm" ] && cp "{{BUILD}}/3x3_js/3x3.wasm" "{{BUILD}}/3x3.wasm" || echo "    skip: build/3x3_js/3x3.wasm absent"
-    @[ -f "{{BUILD}}/4x4_js/4x4.wasm" ] && cp "{{BUILD}}/4x4_js/4x4.wasm" "{{BUILD}}/4x4.wasm" || echo "    skip: build/4x4_js/4x4.wasm absent"
+    @echo "==> Staging build/4x6.wasm (no rebuild)"
+    @[ -f "{{BUILD}}/4x6_js/4x6.wasm" ] && cp "{{BUILD}}/4x6_js/4x6.wasm" "{{BUILD}}/4x6.wasm" || echo "    skip: build/4x6_js/4x6.wasm absent"
     @echo "==> Verifying artifacts"
     NODE_OPTIONS="--import tsx/esm" node scripts/check-artifacts.ts
 

@@ -9,5 +9,5 @@
     "resolveJsonModule": true,
     "types": ["mocha", "node"]
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts"]
+  "include": ["test/**/*.ts", "scripts/**/*.ts"]
 }

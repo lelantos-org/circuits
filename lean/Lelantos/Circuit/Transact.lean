@@ -309,18 +309,6 @@ Note the depths differ. `Transact(11, 4, 6)` is paired with `TreeUpdateBatch(11,
 2x2 / 3x3 / 4x4 remain at depth 10 and cannot share a tree with it. They are modeled here
 as further instantiations of the same generic result, not as usable shapes. -/
 
-/-- `Transact(10, 2, 2)` — `src/2x2.circom:28`. The shape the satisfiability witnesses in
-`Proofs/Completeness.lean` are built at, and the one `src/test/formal/layout_parity.test.ts`
-cross-checks against `src/test/ref/compress.ts`. Depth 10. -/
-abbrev Transact2x2 := TxWitness 10 2 2
-
-/-- `Transact(10, 3, 3)` — `src/3x3.circom:44`. Depth 10. -/
-abbrev Transact3x3 := TxWitness 10 3 3
-
-/-- `Transact(10, 4, 4)` — `src/4x4.circom:45`. Depth 10. The shape deployed before the
-move to 4x6; 86,680 constraints, the first that does not fit the 2^16 FFT domain. -/
-abbrev Transact4x4 := TxWitness 10 4 4
-
 /-- `Transact(11, 4, 6)` — `src/4x6.circom`. **The target shape.**
 
 Six outputs so a withdrawal's change lands on the denomination ladder in one spend rather
@@ -332,33 +320,6 @@ otherwise cut the tree's lifetime by a third.
 100,320 constraints, inside 2^17. It is the shape that fixes the `≤ 6` end of the slot
 bound `transact_sound` carries — the bound itself is stated at 7, where the proof reaches. -/
 abbrev Transact4x6 := TxWitness 11 4 6
-
-/-- **Soundness at the `2x2` instance.** -/
-theorem transact2x2_sound {w : Transact2x2} (h : TransactSat w) : TxWellFormed w :=
-  transact_sound (by norm_num) (by norm_num) h
-
-/-- **Soundness of the deployed `3x3` instance.** -/
-theorem transact3x3_sound {w : Transact3x3} (h : TransactSat w) : TxWellFormed w :=
-  transact_sound (by norm_num) (by norm_num) h
-
-/-- **The `2x2` binding layer**, on the same unsatisfiable hypothesis. -/
-theorem transact2x2_binding {w : Transact2x2} (hnc : ¬ PoseidonCollision)
-    (h : TransactSat w) : TxBinding w :=
-  transact_binding hnc (by norm_num) h
-
-/-- **The `3x3` binding layer.** -/
-theorem transact3x3_binding {w : Transact3x3} (hnc : ¬ PoseidonCollision)
-    (h : TransactSat w) : TxBinding w :=
-  transact_binding hnc (by norm_num) h
-
-/-- **Soundness at the `4x4` instance.** -/
-theorem transact4x4_sound {w : Transact4x4} (h : TransactSat w) : TxWellFormed w :=
-  transact_sound (by norm_num) (by norm_num) h
-
-/-- **The `4x4` binding layer.** -/
-theorem transact4x4_binding {w : Transact4x4} (hnc : ¬ PoseidonCollision)
-    (h : TransactSat w) : TxBinding w :=
-  transact_binding hnc (by norm_num) h
 
 /-- **Soundness of the `4x6` instance.** -/
 theorem transact4x6_sound {w : Transact4x6} (h : TransactSat w) : TxWellFormed w :=

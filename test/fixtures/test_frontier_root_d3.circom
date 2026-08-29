@@ -3,8 +3,8 @@ pragma circom 2.2.3;
 // Test wrapper: FrontierRoot at DEPTH=3 (64 leaves). Wrapper decomposes
 // scalar start_index into 6 bits.
 
-include "../../../node_modules/circomlib/circuits/bitify.circom";
-include "../../lib/frontier_root.circom";
+include "../../node_modules/circomlib/circuits/bitify.circom";
+include "../../src/lib/frontier_root.circom";
 
 template TestFrontierRootD3() {
     signal input start_index;

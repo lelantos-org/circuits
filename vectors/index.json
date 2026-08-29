@@ -2,21 +2,6 @@
   "schema": "lelantos.circuits.vectors/1",
   "generator": "@lelantos-org/circuits@0.11.2",
   "files": {
-    "transact-2x2.json": {
-      "sha256": "7450c7221db0300ca9139834dc2cd0ca445e10446f83e51e353eac320b97a4d6",
-      "coeffCount": 31,
-      "layoutDigest": "0x05904e71214479c3abc5463830f4863da0ad20066c19105629e94178c394000a"
-    },
-    "transact-3x3.json": {
-      "sha256": "fbf84a9ab9c9e00cb92273907b60987d51ba9495512d7b83f67dfb1496e6eeed",
-      "coeffCount": 42,
-      "layoutDigest": "0x144fffddb22d2b0f48e184dae825ae2332130385e95c812072b305e2c5e03e78"
-    },
-    "transact-4x4.json": {
-      "sha256": "614475701aca111fd568d7974d14b1e135d2cddc2a5dd19f2ce8c40ed7281470",
-      "coeffCount": 53,
-      "layoutDigest": "0xc05073a914b7733e2187f5e7b7481af4f1f120ee66e7d99d93a113357a3efaa2"
-    },
     "transact-4x6.json": {
       "sha256": "6093eeeb4bf98e7d56c440a8c01d301592d0645bd36c95d9ffa972a458204027",
       "coeffCount": 69,

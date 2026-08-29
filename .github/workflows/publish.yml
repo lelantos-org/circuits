@@ -62,16 +62,9 @@ jobs:
       - name: Setup circom
         uses: ./.github/actions/setup-circom
 
-      # 2x2, 3x3 and tree_update_batch size to a 2^16 domain and share one ptau.
-      - name: Cache ptau
-        uses: actions/cache@v4
-        with:
-          path: ptau/powersOfTau28_hez_final_16.ptau
-          key: ptau-16
-
-      # 4x4 is 86,680 constraints and does not fit 2^16, so its ceremony needs
-      # its own ptau. Cached separately: a 3x3-only rebuild should not pay the
-      # 2^17 download.
+      # Both circuits are past the 2^16 domain — Transact(11,4,6) at 100,320
+      # constraints and TreeUpdateBatch(11,8) at 113,502 — so 2^17 is the only
+      # ptau either ceremony needs.
       - name: Cache ptau-17
         uses: actions/cache@v4
         with:
@@ -89,8 +82,8 @@ jobs:
       - name: Golden vectors are current
         run: just vectors-check
 
-      # Runs three transact ceremonies (2x2, 3x3, 4x4) and the publish gate.
-      - name: Build + verify 2x2 + 3x3 + 4x4 artifacts
+      # Runs the transact ceremony and the publish gate.
+      - name: Build + verify 4x6 artifacts
         run: just package
 
       - name: Build tree_update_batch artifacts
@@ -103,30 +96,19 @@ jobs:
           # ceremony consumed.
           just build-graph
 
-      # `setup` writes the 2x2 verifier to build/Verifier.sol and `setup-3x3`
-      # writes the deployed one to build/Verifier3x3.sol. Uploading the former
-      # under the bare name `Verifier.sol` invites a downloader to install the
-      # NON-deployed shape — the same filename hazard the justfile warns about
-      # for the contracts sync. Every release asset is named for its shape.
+      # Every release asset is named for its shape rather than a bare
+      # `Verifier.sol`, so a downloader cannot install one circuit's verifier
+      # believing it is another's — the same filename hazard the justfile warns
+      # about for the contracts sync.
       - name: Stage release assets
         run: |
           set -euo pipefail
           mkdir -p release
-          cp build/2x2.r1cs                          release/2x2.r1cs
-          cp build/2x2.wasm                          release/2x2.wasm
-          cp build/2x2_final.zkey                    release/2x2_final.zkey
-          cp build/verification_key.json             release/2x2_verification_key.json
-          cp build/Verifier.sol                      release/Verifier2x2.sol
-          cp build/3x3.r1cs                          release/3x3.r1cs
-          cp build/3x3.wasm                          release/3x3.wasm
-          cp build/3x3_final.zkey                    release/3x3_final.zkey
-          cp build/3x3_verification_key.json         release/3x3_verification_key.json
-          cp build/Verifier3x3.sol                   release/Verifier3x3.sol
-          cp build/4x4.r1cs                          release/4x4.r1cs
-          cp build/4x4.wasm                          release/4x4.wasm
-          cp build/4x4_final.zkey                    release/4x4_final.zkey
-          cp build/4x4_verification_key.json         release/4x4_verification_key.json
-          cp build/Verifier4x4.sol                   release/Verifier4x4.sol
+          cp build/4x6.r1cs                          release/4x6.r1cs
+          cp build/4x6.wasm                          release/4x6.wasm
+          cp build/4x6_final.zkey                    release/4x6_final.zkey
+          cp build/4x6_verification_key.json         release/4x6_verification_key.json
+          cp build/Verifier_4x6.sol                  release/Verifier4x6.sol
           cp build/tree_update_batch.r1cs            release/tree_update_batch.r1cs
           cp build/tree_update_batch.wasm            release/tree_update_batch.wasm
           cp build/tree_update_batch.wcd             release/tree_update_batch.wcd
@@ -134,9 +116,9 @@ jobs:
           cp build/tree_update_batch_verification_key.json \
                                                      release/tree_update_batch_verification_key.json
           # The generated contract name collides with the transact verifiers, so
-          # rename it before anyone compiles the three together.
+          # rename it before anyone compiles the two together.
           sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' \
-            build/TreeUpdateBatchVerifier.sol > release/TreeUpdateBatchVerifier.sol
+            build/Verifier_tree_update_batch.sol > release/TreeUpdateBatchVerifier.sol
 
       - name: Record release asset hashes
         id: shas
@@ -183,14 +165,14 @@ jobs:
 
             **PROTOTYPE — single-contributor trusted setup. NOT mainnet-safe.**
 
-            `Verifier3x3.sol` is the deployed transact verifier. `Verifier2x2.sol`
-            and `Verifier4x4.sol` are the other two instantiations and are **not**
-            deployed — do not install either as
-            `contracts/src/verifiers/Verifier.sol`.
+            `Verifier4x6.sol` is the transact verifier — `Transact(11, 4, 6)`,
+            the only shape this package ships. `TreeUpdateBatchVerifier.sol` is
+            its ceremony-paired batch verifier at `TreeUpdateBatch(11, 8)`; the
+            two share a tree depth and must be installed together.
 
-            `4x4` is built on the 2^17 ptau: its proofs cost roughly twice a `3x3`
-            proof, and it has no `PubInputs.sol` compress overload yet, so nothing
-            verifies it on-chain today.
+            Both are built on the 2^17 ptau. Note `4x6` has no `PubInputs.sol`
+            compress overload yet — it needs one at 69 slots, with a 50-word
+            calldata prefix — so nothing verifies it on-chain today.
 
             ### Release asset SHA-256
 

@@ -60,7 +60,7 @@ and one on the deposit side:
   `batch_deposit_opens` gets its point structure from the value-commitment gadget instead.
 * **`BatchCompress`** (step 11) is not re-proved here; `polyEval_sound` and
   `polyEval_binding` already cover the Horner chain, and the slot *order* is pinned by
-  `src/test/tree_update_batch.test.ts` against `PubInputs.sol`, not in Lean.
+  `test/tree_update_batch.test.ts` against `PubInputs.sol`, not in Lean.
 * Nothing here is a statement about `start_index` being the true tree size; that is the
   contract's obligation (`MASP._validateBatchHeader`).
 -/

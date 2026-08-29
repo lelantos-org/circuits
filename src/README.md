@@ -2,29 +2,32 @@
 
 Multi-Asset Shielded Pool circuits implemented in Circom 2.2.3 over the
 BN254 scalar field, with Baby-Jubjub used for the value-commitment
-subgroup. Four Groth16 entry points:
+subgroup. Two Groth16 entry points:
 
-| Circuit | Instantiation | Status | Purpose |
-|---|---|---|---|
-| [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` | not deployed | Second instantiation of the shared template, and the shape the Lean witnesses are built at. |
-| [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` | the transact shape; on-chain wiring incomplete | Transact at 3 shielded inputs × 3 shielded outputs. 42-slot PI layout (§2a). |
-| [`4x4.circom`](4x4.circom) | `Transact(10, 4, 4)` | published, not deployed | Transact at 4 shielded inputs × 4 shielded outputs. 53-slot PI layout, same construction as §2a, pinned by `lean/expected/layout-4x4.txt` and by `vectors/transact-4x4.json`. Needs a 2^17 ptau — it is 86,680 constraints — and a 53-slot `PubInputs.compress` overload before anything can verify it on-chain. |
-| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(10, 4)` | deployed | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 4 leaves, any count (odd included). See §14. |
+| Circuit | Instantiation | Purpose |
+|---|---|---|
+| [`4x6.circom`](4x6.circom) | `Transact(11, 4, 6)` | Transact at 4 shielded inputs × 6 shielded outputs. 69-slot PI layout ([§2a](#2a-public-input-compression)), pinned by `lean/expected/layout-4x6.txt` and `vectors/transact-4x6.json`. |
+| [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(11, 8)` | Relayer-side proof that the commitment tree advances `old_root → new_root` by inserting up to 8 leaves, any count (odd included). See [`TREE_UPDATE_BATCH.md`](TREE_UPDATE_BATCH.md). |
 
-All three transact shapes instantiate one shared template,
-[`Transact(DEPTH, N_IN, N_OUT)`](lib/transact.circom), over a quaternary
-Merkle tree of depth 10 (`4^10 = 1,048,576` leaves). Each output carries
-an off-circuit FMD clue `(R, clue_bits)` supplied by the sender and
-bound via PolyEval (§7a).
+The two are **ceremony-paired**: a spend emits `N_OUT = 6` leaves that the batch circuit
+inserts, so they share `DEPTH = 11` and cannot be mixed across versions. `MAX_L = 8` rather
+than 6 because `COUNT_BITS` requires a power of two.
 
-`3x3` is built by `just build-artifacts-3x3`, ships prover artefacts in
-the npm package, and is pinned by the vectors in
-[`vectors/`](../vectors/). `just rebuild-3x3` exports its verifier to
-`contracts/src/verifiers/Verifier.sol` — the path the deployed verifier
-occupies, which is why `rebuild-2x2` deliberately never writes there.
-Wiring it up still requires a `PubInputs.compress` overload for its 42
-slots, a production ceremony, `TRANSACT_OUT_LEAVES = 3` on the spend
-path, and generalising §10's pairwise-nullifier check to all three pairs.
+The transact circuit instantiates
+[`Transact(DEPTH, N_IN, N_OUT)`](lib/transact.circom), which stays generic — the Lean
+development proves against it at several shapes. Its tree is quaternary at depth 11
+(`4^11 = 4,194,304` leaves). Each output carries an off-circuit FMD clue
+`(R, clue_bits)` supplied by the sender and bound via PolyEval
+([§7a](#7a-fmd2-clue--off-circuit)).
+
+Three narrower shapes — `Transact(10, 2, 2)`, `(10, 3, 3)` and `(10, 4, 4)` — were removed
+once 4x6 landed. Each cost a trusted-setup ceremony per release and 20-40 MB in every npm
+install, and none covered anything the generic template did not. They are recoverable from
+git history if a second shape is ever wanted.
+
+Nothing verifies 4x6 on-chain yet: that needs a `PubInputs.compress` overload at 69 slots,
+whose calldata prefix is 50 words rather than the 40 the old 4x4 layout used, and a
+production ceremony.
 
 The design follows the Sapling/Namada multi-asset model: each note
 carries a private `asset_id`; a per-asset Baby-Jubjub generator `V^t`
@@ -43,16 +46,15 @@ balance, which is defense in depth only (§5).
 > The known-discrete-log weakness of §5 is formalised too — as a *negative* result,
 > `pointBalance_not_sound`, so that no one can re-derive conservation from the Edwards
 > point balance. Soundness is stated for the generic `(N_IN, N_OUT)` model and so
-> covers both shapes, and each has an exhibited satisfying assignment
-> (`transactSat_satisfiable`, `transact3x3Sat_satisfiable`), so neither soundness
-> result is vacuous. See
+> covers any shape within its slot bound, and the shipped one has an exhibited satisfying
+> assignment (`transact4x6Sat_satisfiable`), so the soundness result is not vacuous. See
 > [`lean/README.md`](../lean/README.md) for what is and is not covered, and
 > [`lean/FIDELITY.md`](../lean/FIDELITY.md) for how faithfully the Lean model tracks
 > this source.
 >
 > `tree_update_batch.circom` is covered too: `batch_advances_by_count` proves `new_root`
 > is the root after exactly `actual_count` appends — for any count, odd included — and
-> `batch_deposit_opens` proves the per-leaf deposit binding of §14. Both are insensitive
+> `batch_deposit_opens` proves the per-leaf deposit binding of [`TREE_UPDATE_BATCH.md`](TREE_UPDATE_BATCH.md). Both are insensitive
 > to the parity of `actual_count`. `batchSat_satisfiable` exhibits a satisfying assignment
 > for `TreeUpdateBatch(10, 4)` committing three leaves into four slots, so the padding
 > constraints and both muxes are exercised rather than satisfied trivially, and none of the
@@ -96,7 +98,7 @@ enforces the following properties for every accepted transaction:
   that leaf to exactly `leaf_public_in` units of `leaf_asset`. Binding
   each leaf on its own is what makes this tight: an aggregate over
   several leaves would fix only `Σvalue` mod the subgroup order, and
-  hence not the split (§14). Each spend of those leaves later
+  hence not the split ([`TREE_UPDATE_BATCH.md`](TREE_UPDATE_BATCH.md)). Each spend of those leaves later
   recomputes the same `cv_dep` from `(asset, value, rcv_dep)`, so
   substituting `(asset, value)` at spend time is infeasible.
 - **FMD clue binding.** Each output carries a sender-computed FMD2
@@ -192,17 +194,16 @@ byte-for-byte; reordering is a soundness change for the contract):
 |    |                      | 30 | `out_aux_digest` |
 
 Clue slots are appended in output order: `[Rx_j, Ry_j, bits_j]` for
-`j = 0..N_OUT-1`, starting at slot `8 + 3·N_IN + 5·N_OUT` (24 at 2×2,
-32 at 3×3). `out_aux_digest` is the single final slot, at
-`8 + 3·N_IN + 8·N_OUT`.
+`j = 0..N_OUT-1`, starting at slot `8 + 3·N_IN + 5·N_OUT` (50 at 4×6).
+`out_aux_digest` is the single final slot, at `8 + 3·N_IN + 8·N_OUT`.
 
-The same layout at `Transact(10, 3, 3)` gives 42 slots — see the header
-comment in [`3x3.circom`](3x3.circom) for the expanded ranges. That
-layout is pinned twice: `scripts/gen-vectors.ts` refuses to publish
-[`vectors/transact-3x3.json`](../vectors/transact-3x3.json) unless the
-compiled circuit's `y` matches the reference PolyEval over all 42
+At `Transact(11, 4, 6)` that is 69 slots — see the header comment in
+[`4x6.circom`](4x6.circom) for the full table. The layout is pinned
+twice: `scripts/gen-vectors.ts` refuses to publish
+[`vectors/transact-4x6.json`](../vectors/transact-4x6.json) unless the
+compiled circuit's `y` matches the reference PolyEval over all 69
 coefficients, and `test/formal/layout_parity.test.ts` pins the published
-vector against the Lean dump `lean/expected/layout-3x3.txt`.
+vector against the Lean dump `lean/expected/layout-4x6.txt`.
 
 `out_aux_digest` is `keccak256(abi.encode(aux)) mod r` over the whole
 `AuxValidation.Output` array. The contract MUST **recompute** it from
@@ -352,7 +353,7 @@ outside the image of the 72-bit `HashToAssetGen`.
 > new ceremony and an SDK/WASM mirror.
 
 Two mirrors reproduce this off-circuit, byte-for-byte: the test
-reference [`test/ref/jubjub.ts`](test/ref/jubjub.ts) passes the 9-byte
+reference [`test/ref/jubjub.ts`](../test/ref/jubjub.ts) passes the 9-byte
 buffer `[TAG_ASSET, ...asset_id_LE_8]` to `circomlibjs.pedersen.hash`,
 and the SDK's `hashToAssetGen`
 ([`sdk/src/crypto/jubjub-wasm/`](../../sdk/src/crypto/jubjub-wasm/))
@@ -364,7 +365,8 @@ Defense in depth: real notes reject `asset_id == 0` via
 same check unconditionally.
 
 Cost = 975 constraints per call: 911 for `Pedersen(72)` plus 64 for the
-`Num2Bits(64)`. (Measured from `build/2x2.r1cs` + `2x2.sym`.)
+`Num2Bits(64)`. (Measured at the former 2×2 shape, from its `.r1cs` + `.sym`;
+per-gadget costs are shape-independent.)
 
 ---
 
@@ -395,7 +397,7 @@ constraints; with its `Num2Bits(252)` the whole `MulH` is 1,000.
 > offset baked into every window. `FixedBaseMul` builds the tables in `var`
 > arithmetic and starts each window at the identity, so neither cost arises. The
 > two agree on every scalar — pinned by the committed `vectors/` and by
-> [`test/fuzz/fixed_base_mul.fuzz.test.ts`](test/fuzz/fixed_base_mul.fuzz.test.ts),
+> [`test/fuzz/fixed_base_mul.fuzz.test.ts`](../test/fuzz/fixed_base_mul.fuzz.test.ts),
 > which compares them over arbitrary 252-bit scalars.
 
 > **The window tables must be passed in, not computed in the template body.**
@@ -416,7 +418,7 @@ constraints; with its `Num2Bits(252)` the whole `MulH` is 1,000.
 > Fixed in 0.10.0. The constraint system is untouched — the r1cs of all three
 > shapes is byte-identical to 0.9.2, so the zkeys, verification keys, exported
 > verifiers and committed `vectors/` all carry over and no ceremony is implied.
-> Only `2x2.wasm` and `3x3.wasm` change.
+> Only `4x6.wasm` changes.
 
 `ValueCommit` exposes the `rH = rcv · H` component so balance can sum
 points; collapsing it to a scalar `Σrcv_in − Σrcv_out` would wrap into 254
@@ -517,7 +519,7 @@ clue_bits = pack(1 - bit_i for i in [GAMMA])     (sender flips; receiver ⊕ == 
 ```
 
 `legendre_bit(h)` is computed off-circuit by `fmdLegendreWitness`
-([`test/ref/sqrt.ts`](test/ref/sqrt.ts), mirrored in
+([`test/ref/sqrt.ts`](../test/ref/sqrt.ts), mirrored in
 [`sdk/src/crypto/sqrt.ts`](../../sdk/src/crypto/sqrt.ts)): for nonzero
 `h`, `bit = 1` iff `h` is a quadratic residue (`h = y²`), else `bit = 0`
 and `h = y²·Z` for the fixed non-residue `Z = 5` (`FMD_LEGENDRE_QNR`).
@@ -573,8 +575,8 @@ Constraints that hold regardless of asset mix:
   drift from one spend to the next.
 
 Caveats: the transparent bucket is single-asset per tx, and each side
-mixes at most `N_IN` / `N_OUT` asset ids — `3x3` raises that bound to 3
-per side; beyond it, recompile at a larger shape.
+mixes at most `N_IN` / `N_OUT` asset ids — 4 in and 6 out at `4x6`;
+beyond that, recompile at a larger shape.
 
 Padding rules:
 
@@ -623,8 +625,8 @@ verifier:
 4. `require(registry[public_asset_id].token != address(0))` — asset
    must be registered.
 5. `require(nullifier[i] != nullifier[k])` for every pair `i < k` (no
-   `!= 0` exception). At `2x2` that is one comparison; a `3x3`
-   deployment needs all three.
+   `!= 0` exception). At `4x6`'s four input slots that is six pairs; the
+   count is quadratic in `N_IN`, so a wider input side needs more.
 6. Type `recipient_address`, `payer_address`, `relayer_address` as
    `address`; pass `uint256(uint160(addr))`. Use `address(0)` for
    unused slots.
@@ -704,7 +706,7 @@ a per-slot gadget is multiplied by 6.
 
 ### Measured gadget costs
 
-Everything below is attributed from `build/2x2.r1cs` + `2x2.sym`, not
+Everything below is attributed from the former 2×2 shape's `.r1cs` + `.sym`, not
 estimated. Counts are as this repo compiles, at circom's default `--O1`,
 so surviving linear rows are included.
 
@@ -757,11 +759,9 @@ cheaper to verify, it caps how many deposits share one verification.
 
 | File | Role |
 |---|---|
-| [`2x2.circom`](2x2.circom) | `Transact(10, 2, 2)` — deployed 2-in × 2-out transact circuit. |
-| [`3x3.circom`](3x3.circom) | `Transact(10, 3, 3)` — 3-in × 3-out shape; built and vector-pinned, not on-chain. |
-| [`4x4.circom`](4x4.circom) | `Transact(10, 4, 4)` — 4-in × 4-out shape; built, vector-pinned and proved in Lean; not on-chain. |
-| [`tree_update_batch.circom`](tree_update_batch.circom) | Relayer batch tree-advance circuit (frontier-bound). See §14. |
-| [`lib/transact.circom`](lib/transact.circom) | `Transact(DEPTH, N_IN, N_OUT)` — the shared transact template all three shapes instantiate. |
+| [`4x6.circom`](4x6.circom) | `Transact(11, 4, 6)` — the transact circuit. |
+| [`tree_update_batch.circom`](tree_update_batch.circom) | Relayer batch tree-advance circuit (frontier-bound). Documented in [`TREE_UPDATE_BATCH.md`](TREE_UPDATE_BATCH.md). |
+| [`lib/transact.circom`](lib/transact.circom) | `Transact(DEPTH, N_IN, N_OUT)` — the template `4x6.circom` instantiates. Kept generic: the Lean development proves against it at several shapes. |
 | [`lib/tags.circom`](lib/tags.circom) | Domain-separation tag constants and `2^64`. |
 | [`lib/common.circom`](lib/common.circom) | `PathIndexSelectors`, `EmptySubtreeHashes` — shared between merkle / insert / frontier_root. |
 | [`lib/note.circom`](lib/note.circom) | Note commitment, key derivation, nullifier. |
@@ -774,124 +774,26 @@ cheaper to verify, it caps how many deposits share one verification.
 | [`lib/insert.circom`](lib/insert.circom) | `QuaternaryInsertLevel` + `QuaternaryInsert(DEPTH)` — single-leaf incremental insert with frontier IO. |
 | [`lib/frontier_root.circom`](lib/frontier_root.circom) | `FrontierRoot(DEPTH)` — rebuild `old_root` from frontier + leaf count (SOUNDNESS-CRITICAL). |
 | [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval(N)`, `TransactCompressN(N_IN, N_OUT)`, `BatchCompress(MAX_L)`. |
-| [`test/ref/`](test/ref/) | TypeScript reference implementation (field, tags, Poseidon, Baby-Jubjub, Merkle, notes, FMD, PolyEval compression, witness builders). No SDK dependency; the circom is the source of truth. |
-| [`test/lib/`](test/lib/) | Test harness: memoizing circuit loader and `CircuitTester` types, circuit dimensions and named actors, input shapers, witness assertions, transact and batch witness builders, seeded PRNG. |
-| [`test/helpers.ts`](test/helpers.ts) | Single import path over `test/ref/`. |
-| [`test/transact/`](test/transact/) | Transact suites, split by concern: `balance` (conservation, dummy/padding slots, Merkle membership), `multi_asset`, `tamper` (one table row per tampered field), `binding` (PolyEval binding), `rho` (faerie-gold), over a shared `setup.ts`. |
-| [`test/tree_update_batch.test.ts`](test/tree_update_batch.test.ts) | TreeUpdateBatch suite (deposit binding, odd leaf counts, frontier binding, padding). |
-| [`test/merkle.test.ts`](test/merkle.test.ts) | Merkle library suite, including the `EMPTY_SUBTREE` table read out of the circom source. |
-| [`test/frontier_root.test.ts`](test/frontier_root.test.ts) | FrontierRoot corruption tests. |
-| [`test/poly_eval.test.ts`](test/poly_eval.test.ts) | PolyEval suite. |
-| [`test/fixed_base_mul.test.ts`](test/fixed_base_mul.test.ts) | FixedBaseMul: the precomputed window coefficients, the 4-bit mux, the accumulator chain, and agreement with circomlib's `EscalarMulFix`. |
-| [`test/reference.test.ts`](test/reference.test.ts) | Unit tests for the parts of `test/ref/` no circuit test reaches transitively. |
-| [`test/check_budget.test.ts`](test/check_budget.test.ts) | Coverage for the constraint-budget gate itself. |
-| [`test/formal/layout_parity.test.ts`](test/formal/layout_parity.test.ts) | Pins the PI slot order of both shipped shapes against the Lean dumps `lean/expected/layout-{2x2,3x3}.txt`. |
-| [`test/formal/pubsignal_order.test.ts`](test/formal/pubsignal_order.test.ts) | Pins `_pubSignals = [y, z]` for both shapes against the published vectors. |
-| [`test/fixtures/`](test/fixtures/) | Small-parameter wrapper circuits instantiating library templates at compact sizes (`test_merkle_d2`, `test_frontier_root_d3`, `test_poly_eval`, and four `test_fixed_base_mul*` variants). |
-| [`test/fuzz/`](test/fuzz/) | Property-based suites (fast-check) over Transact (2×2, plus a variants suite), Merkle, FrontierRoot, PolyEval and FixedBaseMul. Run counts come from the shared `FUZZ` tier in `arbitraries.ts`. |
+| [`../test/ref/`](../test/ref/) | TypeScript reference implementation (field, tags, Poseidon, Baby-Jubjub, Merkle, notes, FMD, PolyEval compression, witness builders). No SDK dependency; the circom is the source of truth. |
+| [`../test/lib/`](../test/lib/) | Test harness: memoizing circuit loader and `CircuitTester` types, circuit dimensions and named actors, input shapers, witness assertions, transact and batch witness builders, seeded PRNG. |
+| [`../test/helpers.ts`](../test/helpers.ts) | Single import path over `test/ref/`. |
+| [`../test/transact/`](../test/transact/) | Transact suites, split by concern: `balance` (conservation, dummy/padding slots, Merkle membership), `multi_asset`, `tamper` (one table row per tampered field), `binding` (PolyEval binding), `rho` (faerie-gold), over a shared `setup.ts`. |
+| [`../test/tree_update_batch.test.ts`](../test/tree_update_batch.test.ts) | TreeUpdateBatch suite (deposit binding, odd leaf counts, frontier binding, padding). |
+| [`../test/merkle.test.ts`](../test/merkle.test.ts) | Merkle library suite, including the `EMPTY_SUBTREE` table read out of the circom source. |
+| [`../test/frontier_root.test.ts`](../test/frontier_root.test.ts) | FrontierRoot corruption tests. |
+| [`../test/poly_eval.test.ts`](../test/poly_eval.test.ts) | PolyEval suite. |
+| [`../test/fixed_base_mul.test.ts`](../test/fixed_base_mul.test.ts) | FixedBaseMul: the precomputed window coefficients, the 4-bit mux, the accumulator chain, and agreement with circomlib's `EscalarMulFix`. |
+| [`../test/reference.test.ts`](../test/reference.test.ts) | Unit tests for the parts of `test/ref/` no circuit test reaches transitively. |
+| [`../test/check_budget.test.ts`](../test/check_budget.test.ts) | Coverage for the constraint-budget gate itself. |
+| [`../test/formal/layout_parity.test.ts`](../test/formal/layout_parity.test.ts) | Pins the PI slot order against the Lean dump `lean/expected/layout-4x6.txt`. |
+| [`../test/formal/pubsignal_order.test.ts`](../test/formal/pubsignal_order.test.ts) | Pins `_pubSignals = [y, z]` against the published vector. |
+| [`../test/fixtures/`](../test/fixtures/) | Small-parameter wrapper circuits instantiating library templates at compact sizes (`test_merkle_d2`, `test_frontier_root_d3`, `test_poly_eval`, and four `test_fixed_base_mul*` variants). |
+| [`../test/fuzz/`](../test/fuzz/) | Property-based suites (fast-check) over Transact (plus a variants suite), Merkle, FrontierRoot, PolyEval and FixedBaseMul. Run counts come from the shared `FUZZ` tier in `arbitraries.ts`. |
 | [`scripts/gen-vectors.ts`](../scripts/gen-vectors.ts) | Orchestrates the published [`vectors/`](../vectors/); per-shape construction lives in [`scripts/vectors/`](../scripts/vectors/) (`common`, `transact`, `batch`). Every `y` is read out of a compiled-circuit witness and refuses to write if it disagrees with the reference. |
 | [`scripts/check-budget.mjs`](../scripts/check-budget.mjs) | The `just budget` gate: FFT domain plus the exact count in [`budget.json`](../budget.json). |
 | [`scripts/check-artifacts.ts`](../scripts/check-artifacts.ts) | Pre-publish gate over the shipped artifacts. |
 
 ---
 
-## 14. `TreeUpdateBatch(DEPTH, MAX_L)` — relayer batch tree-advance proof
-
-File: [`tree_update_batch.circom`](tree_update_batch.circom). Uses
-[`lib/insert.circom`](lib/insert.circom) and
-[`lib/frontier_root.circom`](lib/frontier_root.circom).
-
-**Purpose.** Lets the contract commit a fresh `new_root` after up to
-`MAX_L` leaves are inserted, *without* recomputing the tree on-chain.
-The contract advances the on-chain root ring once the proof verifies
-and `old_root == currentRoot()`.
-
-**Leaf granularity.** `actual_count` counts **leaves**, not pairs, so a
-batch may commit any number of leaves in `[1, MAX_L]` — odd included.
-That is what lets one batch carry a 3-output transact bundle
-(`Transact(10, 3, 3)`) or a single-leaf deposit — a pair-granular count
-could express neither, since it would insert exactly `2·actual_count`
-leaves.
-
-**Inputs.** Logical PIs (private witnesses; bound through
-`BatchCompress(MAX_L)`):
-
-| Logical PI | Width | Purpose |
-|---|---|---|
-| `old_root` | 1 | Anchor — contract validates against `currentRoot()`. |
-| `new_root` | 1 | Output — bound to the running root after `MAX_L` muxed inserts. |
-| `start_index` | 1 | First insertion slot. Contract validates against `committedCount`. |
-| `actual_count` | 1 | Active leaf count, range `[1, MAX_L]`. |
-| `cms[MAX_L]` | 4 | Per-leaf commitments; padding (inactive) MUST be 0. |
-| `cv_dep[MAX_L][2]` | 8 | Per-leaf deposit-anchored Pedersen value commitments; padding MUST be 0. |
-| `leaf_asset[MAX_L]` | 4 | Per-leaf public asset id (deposit only; padding 0). |
-| `leaf_public_in[MAX_L]` | 4 | Per-leaf public_in (deposit only; padding 0). |
-| `is_deposit[MAX_L]` | 4 | 0/1 per leaf; 1 selects the deposit binding check. |
-
-Private witnesses: `frontier_in[DEPTH][3]`, `rcv[MAX_L]` (the
-`rcv_dep` blinder of leaf `k`).
-
-Total compressed PI count: `4 + 6·MAX_L = 28` for `MAX_L = 4`.
-
-**Frontier binding (SOUNDNESS-CRITICAL).** `frontier_in` is
-prover-supplied. Without binding, a relayer could submit
-`oldRoot == currentRoot()` alongside a forged frontier and DoS the
-pool. [`FrontierRoot`](lib/frontier_root.circom) recomputes `old_root`
-in-circuit from `frontier_in + Num2Bits(2·DEPTH, start_index)` and
-asserts equality with the public `old_root`.
-
-**Padding constraints.** `active[k] = (k < actual_count)`. For every
-inactive leaf, all per-leaf fields (`cms`, `cv_dep`, `leaf_asset`,
-`leaf_public_in`, `is_deposit`, `rcv`) MUST be zero. Inactive slots
-still feed `PolyEval`, so zeroing prevents a prover from smuggling
-arbitrary cv_dep values into the verifier-visible compressed PIs.
-
-**Deposit binding (C-1 / C-1'' closure).** When `active[k] == 1` and
-`is_deposit[k] == 1`:
-
-```
-cv_dep[k] == leaf_public_in[k] · V^leaf_asset[k] + rcv[k] · H
-```
-
-The deposit path runs no transact SNARK, so this is the only guarantee
-that depositor funds are correctly attributed.
-
-Binding each leaf **individually** is what makes this tight. An
-aggregate over several leaves — e.g. the pair sum
-`cv_dep[2i] + cv_dep[2i+1] == pair_public_in · V^asset + rcv_total · H`
-used before — fixes only `Σvalue` mod the subgroup order `l`, not the
-split. A depositor could set `cv_dep[2i] = 2^63 · V^A + r0 · H` and let
-`cv_dep[2i+1]` absorb `(pair_public_in − 2^63) mod l` — a leaf no
-64-bit `ValueCommit` can reopen, so they simply abandon it — and walk
-away with a valid `2^63` note for a 1-unit deposit. With one equality
-per leaf there is no split to exploit, so no value-0 pad leaf is
-required.
-
-`rcv` is a private witness carried in `DepositIntent`. A Pedersen
-blinder is information-theoretically independent of value/asset/
-identity, so carrying it discloses nothing.
-
-**Insert chain.** For leaf `k`:
-`ins[k] = QuaternaryInsert(leaves[k], fr[k], start_index + k)`. A muxed
-update propagates `ins[k].frontier_out` and `ins[k].root` when
-`active[k] == 1`, else carries `fr[k]` / `running_root[k]` through.
-After `MAX_L` leaves, `new_root === running_root[MAX_L]`.
-
-**SnarkCompression.** 28 logical PIs folded into `(z, y)` via
-`BatchCompress(MAX_L)`. Slot order MUST match
-`contracts/src/libs/PubInputs.sol :: compress(TreeUpdateBatch)`. The
-two `uint64` blocks are adjacent and the `uint8` block follows them, so
-the contract can re-mask the sub-word members with two contiguous
-loops over the copied calldata:
-
-| Slot range | Coeffs |
-|---|---|
-| `0`               | `old_root` |
-| `1`               | `new_root` |
-| `2`               | `start_index` |
-| `3`               | `actual_count` |
-| `[4, 4+MAX_L)`  | `cms[0..MAX_L-1]` |
-| `[4+MAX_L, 4+3·MAX_L)` | `cv_dep` interleaved `(x0, y0, x1, y1, ...)` |
-| `[4+3·MAX_L, 4+4·MAX_L)` | `leaf_asset[0..MAX_L-1]` |
-| `[4+4·MAX_L, 4+5·MAX_L)` | `leaf_public_in[0..MAX_L-1]` |
-| `[4+5·MAX_L, 4+6·MAX_L)` | `is_deposit[0..MAX_L-1]` |
+The relayer's batch tree-advance circuit is documented separately in
+[`TREE_UPDATE_BATCH.md`](TREE_UPDATE_BATCH.md).

@@ -10,10 +10,11 @@ import { wasm as wasmTester } from "circom_tester";
 import type { Field } from "../helpers";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SRC_DIR = path.join(__dirname, "..", "..");
-const NODE_MODULES = path.join(SRC_DIR, "..", "node_modules");
+const ROOT = path.join(__dirname, "..", "..");
+const SRC_DIR = path.join(ROOT, "src");
+const NODE_MODULES = path.join(ROOT, "node_modules");
 
-export const FIXTURES = path.join(SRC_DIR, "test", "fixtures");
+export const FIXTURES = path.join(ROOT, "test", "fixtures");
 
 /**
  * A circom input object: signal name -> value, nested to whatever arity the

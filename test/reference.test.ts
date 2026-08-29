@@ -40,7 +40,7 @@ import {
     FMD_DEFAULT_GAMMA,
 } from "./helpers";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("reference / merkle path recomputation", function () {
     this.timeout(TIMEOUT_FAST);

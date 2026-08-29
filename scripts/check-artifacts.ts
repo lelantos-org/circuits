@@ -48,98 +48,12 @@ interface ArtifactCheck {
 /// Measured at the counts in budget.json: 2x2 / 3x3 / tree_update_batch on
 /// ptau-16, 4x4 on ptau-17.
 const FILES: ArtifactCheck[] = [
-    {
-        // The band is a broken-build detector rather than a size budget, so the
-        // ceiling carries enough headroom to absorb ordinary circuit growth
-        // without failing a healthy build at publish time.
-        name: "2x2.wasm",
-        path: resolve(BUILD, "2x2.wasm"),
-        minBytes: 3_000_000,
-        maxBytes: 6_000_000,
-    },
-    {
-        name: "2x2_final.zkey",
-        path: resolve(BUILD, "2x2_final.zkey"),
-        // Measured 21.7 MB.
-        minBytes: 12_000_000,
-        maxBytes: 36_000_000,
-    },
-    {
-        name: "verification_key.json",
-        path: resolve(BUILD, "verification_key.json"),
-        minBytes: 1_000,
-        maxBytes: 15_000,
-        json: isGroth16Vkey,
-    },
-    /// 3x3 = `Transact(10, 3, 3)`; see budget.json for its constraint count.
+    /// 4x6 = `Transact(11, 4, 6)`, the only published transact shape.
     ///
-    /// In the package `files` whitelist since 0.8.0, so SDK consumers can
-    /// resolve the 3x3 prover artifacts from npm instead of fetching GitHub
-    /// release assets (which needs a token against this private repo). It
-    /// still ships as a release asset too — the workflow uploads both.
-    ///
-    /// Cost of that choice: ~26 MB gzipped added to every install, including
-    /// 2x2-only consumers. `tree_update_batch` stays release-asset-only.
-    ///
-    /// Bands are measured, not scaled from 2x2: wasm size tracks generated
-    /// witness code rather than constraint count, so the two shapes' wasm files
-    /// are close in size while their zkeys are not.
-    {
-        name: "3x3.wasm",
-        path: resolve(BUILD, "3x3.wasm"),
-        minBytes: 2_500_000,
-        maxBytes: 6_000_000,
-    },
-    {
-        name: "3x3_final.zkey",
-        path: resolve(BUILD, "3x3_final.zkey"),
-        // Measured 30.0 MB.
-        minBytes: 18_000_000,
-        maxBytes: 48_000_000,
-    },
-    {
-        name: "3x3_verification_key.json",
-        path: resolve(BUILD, "3x3_verification_key.json"),
-        minBytes: 1_000,
-        maxBytes: 15_000,
-        json: isGroth16Vkey,
-    },
-    /// 4x4 = `Transact(10, 4, 4)`; see budget.json for its constraint count.
-    ///
-    /// The one shape built on ptau-17: at 86,680 constraints it does not fit the
-    /// 2^16 FFT domain, so its zkey carries a domain twice the size of 3x3's and
-    /// lands at ~42 MB against 3x3's ~30 MB even though it has only 1.3x the
-    /// constraints. Proving costs roughly twice a 3x3 proof.
-    ///
-    /// In the package `files` whitelist for the same reason as 3x3 — an SDK
-    /// consumer resolves it from npm rather than needing a token for GitHub
-    /// release assets — at a further ~37 MB gzipped on every install.
-    {
-        name: "4x4.wasm",
-        path: resolve(BUILD, "4x4.wasm"),
-        minBytes: 2_500_000,
-        maxBytes: 8_000_000,
-    },
-    {
-        name: "4x4_final.zkey",
-        path: resolve(BUILD, "4x4_final.zkey"),
-        // Measured 42.5 MB.
-        minBytes: 25_000_000,
-        maxBytes: 68_000_000,
-    },
-    {
-        name: "4x4_verification_key.json",
-        path: resolve(BUILD, "4x4_verification_key.json"),
-        minBytes: 1_000,
-        maxBytes: 15_000,
-        json: isGroth16Vkey,
-    },
-    /// 4x6 = `Transact(11, 4, 6)`, the target shape; see budget.json.
-    ///
-    /// Also on ptau-17, at 100,320 constraints — 76.5% of the 2^17 domain
-    /// against 4x4's 66.1%. Same domain as 4x4, so the zkey is the same order of
-    /// magnitude despite the wider output side and the extra tree level; the
-    /// bands below are 4x4's, widened at the top rather than re-measured.
+    /// On ptau-17 at 100,320 constraints — 76.5% of the 2^17 domain. The bands
+    /// below are wide because a re-ceremony changes the zkey size a little on
+    /// every run; they are there to catch a truncated or missing artifact, not
+    /// to pin a byte count.
     {
         name: "4x6.wasm",
         path: resolve(BUILD, "4x6.wasm"),

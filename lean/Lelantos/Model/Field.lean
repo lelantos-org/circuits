@@ -33,8 +33,8 @@ theorem two_lt_p : 2 < p := by unfold p; norm_num
 argument separate output slots. -/
 theorem three_lt_p : 3 < p := by unfold p; norm_num
 
-/-- `4 < p`: `N_OUT = 4` in `src/4x4.circom:45`. `transact_binding` needs every output
-index below `p`. -/
+/-- `4 < p`: retained as the smallest bound several older results were stated at.
+`transact_binding` now needs `seven_lt_p` below. -/
 theorem four_lt_p : 4 < p := by unfold p; norm_num
 
 /-- `7 < p`: the ceiling `transact_binding` and `perAssetValueBalance_nat` are stated at.

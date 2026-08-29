@@ -3,7 +3,7 @@ pragma circom 2.2.3;
 // Test wrapper: PolyEval(26). The gadget is generic in N; see
 // TransactCompressN for the production public-input layout.
 
-include "../../lib/poly_eval.circom";
+include "../../src/lib/poly_eval.circom";
 
 template TestPolyEval26() {
     signal input coeffs[26];

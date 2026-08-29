@@ -7,7 +7,7 @@ import Lelantos.Circuit.Transact
 contrapositive, that families of malformed transactions have no satisfying assignment at
 all. Each result takes `TransactSat w` plus a description of the malformation and derives
 `False`, so it rules out a family rather than one hand-built counterexample. These are the
-Lean counterparts of the rejecting cases in `src/test/transact.test.ts`.
+Lean counterparts of the rejecting cases in `test/transact.test.ts`.
 
 `cross_asset_cancellation_rejected` is the one to read first: the assignment that
 `Lelantos.pointBalance_not_sound` shows the Edwards point balance *accepts* has no
@@ -56,7 +56,7 @@ exactly, because `V¹ + V³ = 2·V²` (see `Lelantos.pointBalance_not_sound`). T
 value balance rejects it, because asset ids are compared as field elements rather than as
 curve points.
 
-This is the in-Lean counterpart of the `F2` case in `src/test/transact.test.ts`, and the
+This is the in-Lean counterpart of the `F2` case in `test/transact.test.ts`, and the
 reason `PerAssetValueBalance` exists. -/
 theorem cross_asset_cancellation_rejected (h : TransactSat w)
     (hnIn : nIn = 2) (hnOut : nOut = 2)

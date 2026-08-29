@@ -7,8 +7,8 @@ pragma circom 2.2.3;
 //   6 bits -> nWindows == 2 with the top window zero-padded (6 is not a multiple of 4)
 //   8 bits -> nWindows == 2, both full; small enough to enumerate exhaustively
 
-include "../../lib/fixed_base_mul.circom";
-include "../../lib/value_commit.circom";
+include "../../src/lib/fixed_base_mul.circom";
+include "../../src/lib/value_commit.circom";
 
 template TestFixedBaseMulWidths() {
     signal input s4;

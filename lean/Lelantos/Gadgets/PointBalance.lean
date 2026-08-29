@@ -24,7 +24,7 @@ satisfies the point equation and violates per-asset conservation for asset 1.
 
 Consequence for the rest of the development: conservation is proved **only** from
 `perAssetValueBalance_nat`, and no theorem is allowed to appeal to the point equation.
-The runtime counterpart of this proof is `src/test/transact/multi_asset.test.ts`.
+The runtime counterpart of this proof is `test/transact/multi_asset.test.ts`.
 -/
 
 namespace Lelantos

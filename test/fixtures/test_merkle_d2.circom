@@ -2,7 +2,7 @@ pragma circom 2.2.3;
 
 // Test wrapper: MerkleRoot at depth 2 (16 leaves).
 
-include "../../lib/merkle.circom";
+include "../../src/lib/merkle.circom";
 
 template TestMerkleRootD2() {
     signal input leaf;

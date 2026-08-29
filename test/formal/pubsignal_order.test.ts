@@ -32,14 +32,14 @@ import { TIMEOUT_HEAVY } from "../lib/constants";
 // here instead of at the first on-chain verification.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "../../..");
+const ROOT = resolve(HERE, "../..");
 
 // Every shape that ships a published vector. `4x6` is the target shape; the
 // others are retained as further instantiations of `Transact` and pin that the
 // ordering is a property of the template, not of one arity. `4x6` is also the
 // only one with `nIn ≠ nOut`, so it is what would catch an ordering that
 // happened to work only when the two agree.
-const SHIPPED_SHAPES = ["2x2", "3x3", "4x4", "4x6"] as const;
+const SHIPPED_SHAPES = ["4x6"] as const;
 
 interface PublishedVector {
     // Parsed straight out of the published JSON, so it is typed as the circom

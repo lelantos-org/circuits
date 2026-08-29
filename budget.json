@@ -5,31 +5,14 @@
     "same commit as any circuit change, so the change lands as a reviewable diff.",
     "`domain` is the Groth16 FFT domain the circuit must fit; exceeding it means",
     "a larger ptau and roughly double the proving time.",
-    "2x2 and 3x3 fit 2^16. Transact(10,3,3) clears it by 13 constraints, so a",
-    "change worth 3 constraints in one of its 6 per-slot gadgets costs the",
-    "domain. Transact(10,4,4) does not fit 2^16 at all and is budgeted against",
-    "2^17, with its own ptau.",
-    "4x6 and tree_update_batch are the depth-11 pair and both sit in 2^17.",
-    "tree_update_batch is the tighter of the two at ~17.5k of headroom against",
-    "4x6's ~30.7k, because it grew on both axes at once: four more leaf slots",
-    "at roughly 12k each, plus the depth level across all eight. It, not the",
-    "transact circuit, is what a further widening would break first.",
-    "2x2, 3x3 and 4x4 are still depth 10 and cannot share a tree with the",
-    "depth-11 pair; they are kept compiling, not kept usable."
+    "Both circuits sit in 2^17 and are ceremony-paired: a spend's output leaves",
+    "are inserted by the batch circuit, so they share DEPTH = 11.",
+    "tree_update_batch is the tighter of the two, at ~17.5k of headroom against",
+    "4x6's ~30.7k, because it grew on both axes at once: four more leaf slots at",
+    "roughly 12k each, plus the depth level across all eight. It, not the",
+    "transact circuit, is what a further widening would break first."
   ],
   "circuits": {
-    "2x2": {
-      "constraints": 44406,
-      "domain": 65536
-    },
-    "3x3": {
-      "constraints": 65523,
-      "domain": 65536
-    },
-    "4x4": {
-      "constraints": 86680,
-      "domain": 131072
-    },
     "4x6": {
       "constraints": 100320,
       "domain": 131072

@@ -7,10 +7,10 @@ pragma circom 2.2.3;
 // fixture covers the general case. Identical group elements mean identical
 // cv, cv_dep, leaves and roots.
 
-include "../../lib/fixed_base_mul.circom";
-include "../../lib/value_commit.circom";
-include "../../../node_modules/circomlib/circuits/bitify.circom";
-include "../../../node_modules/circomlib/circuits/escalarmulfix.circom";
+include "../../src/lib/fixed_base_mul.circom";
+include "../../src/lib/value_commit.circom";
+include "../../node_modules/circomlib/circuits/bitify.circom";
+include "../../node_modules/circomlib/circuits/escalarmulfix.circom";
 
 template TestFixedBaseMulReference() {
     signal input scalar;

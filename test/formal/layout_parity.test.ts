@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3";
 
 import { flatten } from "../helpers";
+import { N_IN, N_OUT } from "../lib/constants";
 
 // Public-input layout parity between the Lean model and `ref/compress.ts`.
 //
@@ -34,80 +35,67 @@ import { flatten } from "../helpers";
 // circuit's `y` disagrees with the reference Horner evaluation.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "../../..");
-const LAYOUT_FILE = resolve(ROOT, "lean/expected/layout-2x2.txt");
+const ROOT = resolve(HERE, "../..");
+const LAYOUT_FILE = resolve(ROOT, "lean/expected/layout-4x6.txt");
 
-// Every shape that ships both a Lean layout dump and a published vector. The
-// sentinel table below is 2x2-only (it is hand-written, one entry per slot), but
-// the vector-carries-Lean check is shape-agnostic and covers all of them —
-// including `4x6`, the only shape with `nIn ≠ nOut`.
-const SHIPPED_SHAPES = ["2x2", "3x3", "4x4", "4x6"] as const;
+// Every shape that ships both a Lean layout dump and a published vector.
+const SHIPPED_SHAPES = ["4x6"] as const;
 
-// Distinct sentinel per logical field, so any transposition shows up as a mismatch
-// rather than coincidentally agreeing.
-const SENTINEL: Record<string, bigint> = {
-    merkleRoot: 1000n,
-    "nullifier 0": 1010n,
-    "nullifier 1": 1011n,
-    "outCm 0": 1020n,
-    "outCm 1": 1021n,
-    publicAssetId: 1030n,
-    publicIn: 1031n,
-    publicOut: 1032n,
-    "inCvX 0": 1040n,
-    "inCvY 0": 1041n,
-    "inCvX 1": 1042n,
-    "inCvY 1": 1043n,
-    "outCvX 0": 1050n,
-    "outCvY 0": 1051n,
-    "outCvX 1": 1052n,
-    "outCvY 1": 1053n,
-    recipient: 1060n,
-    chainId: 1061n,
-    payer: 1062n,
-    relayer: 1063n,
-    "outCvDepX 0": 1070n,
-    "outCvDepY 0": 1071n,
-    "outCvDepX 1": 1072n,
-    "outCvDepY 1": 1073n,
-    "clueRx 0": 1080n,
-    "clueRy 0": 1081n,
-    "clueBits 0": 1082n,
-    "clueRx 1": 1090n,
-    "clueRy 1": 1091n,
-    "clueBits 1": 1092n,
-    auxDigest: 1100n,
-};
+const COEFF_COUNT = 9 + 3 * N_IN + 8 * N_OUT;
+
+// Distinct sentinel per logical field, so any transposition shows up as a
+// mismatch rather than coincidentally agreeing.
+//
+// Generated from the Lean layout's slot NAMES rather than hand-written, which is
+// what lets this scale past the 31 slots of the old 2x2 shape to 4x6's 69. The
+// independence the test needs is not in where the numbers come from — it is in
+// `SENTINEL_INPUT` below, which assigns each sentinel to a field by name. That
+// assignment is the transcription under test; `flatten` has to reproduce Lean's
+// order from it.
+const SENTINEL: Record<string, bigint> = Object.fromEntries(
+    readLayout(LAYOUT_FILE).map((name, i) => [name, BigInt(1000 + i)]),
+);
 
 const S = SENTINEL;
 
+/** `S[name]`, failing loudly rather than yielding `undefined` on a typo. */
+function sentinel(name: string): bigint {
+    const v = S[name];
+    if (v === undefined) throw new Error(`layout_parity: no sentinel for slot "${name}"`);
+    return v;
+}
+
+/** `[S["<field>X i"], S["<field>Y i"]]` for each of `n` slots. */
+function points(field: string, n: number): bigint[][] {
+    return Array.from({ length: n }, (_, i) => [
+        sentinel(`${field}X ${i}`),
+        sentinel(`${field}Y ${i}`),
+    ]);
+}
+
+/** `[S["<field> 0"], …, S["<field> n-1"]]`. */
+function scalars(field: string, n: number): bigint[] {
+    return Array.from({ length: n }, (_, i) => sentinel(`${field} ${i}`));
+}
+
 const SENTINEL_INPUT = {
-    merkle_root: S["merkleRoot"],
-    nullifier: [S["nullifier 0"], S["nullifier 1"]],
-    out_cm: [S["outCm 0"], S["outCm 1"]],
-    public_asset_id: S["publicAssetId"],
-    public_in: S["publicIn"],
-    public_out: S["publicOut"],
-    in_cv: [
-        [S["inCvX 0"], S["inCvY 0"]],
-        [S["inCvX 1"], S["inCvY 1"]],
-    ],
-    out_cv: [
-        [S["outCvX 0"], S["outCvY 0"]],
-        [S["outCvX 1"], S["outCvY 1"]],
-    ],
-    recipient_address: S["recipient"],
-    chain_id: S["chainId"],
-    payer_address: S["payer"],
-    relayer_address: S["relayer"],
-    out_cv_dep: [
-        [S["outCvDepX 0"], S["outCvDepY 0"]],
-        [S["outCvDepX 1"], S["outCvDepY 1"]],
-    ],
-    out_clue_Rx: [S["clueRx 0"], S["clueRx 1"]],
-    out_clue_Ry: [S["clueRy 0"], S["clueRy 1"]],
-    out_clue_bits: [S["clueBits 0"], S["clueBits 1"]],
-    out_aux_digest: S["auxDigest"],
+    merkle_root: sentinel("merkleRoot"),
+    nullifier: scalars("nullifier", N_IN),
+    out_cm: scalars("outCm", N_OUT),
+    public_asset_id: sentinel("publicAssetId"),
+    public_in: sentinel("publicIn"),
+    public_out: sentinel("publicOut"),
+    in_cv: points("inCv", N_IN),
+    out_cv: points("outCv", N_OUT),
+    recipient_address: sentinel("recipient"),
+    chain_id: sentinel("chainId"),
+    payer_address: sentinel("payer"),
+    relayer_address: sentinel("relayer"),
+    out_cv_dep: points("outCvDep", N_OUT),
+    out_clue_Rx: scalars("clueRx", N_OUT),
+    out_clue_Ry: scalars("clueRy", N_OUT),
+    out_clue_bits: scalars("clueBits", N_OUT),
+    out_aux_digest: sentinel("auxDigest"),
 };
 
 function readLayout(file: string): string[] {
@@ -122,10 +110,10 @@ function leanLayout(): string[] {
 }
 
 describe("formal model / public-input layout parity", () => {
-    it("the Lean layout file has exactly the 31 slots the circuit compresses", () => {
+    it("the Lean layout file has exactly the slots the circuit compresses", () => {
         const layout = leanLayout();
-        expect(layout.length).to.equal(31);
-        expect(new Set(layout).size).to.equal(31, "layout slot names must be distinct");
+        expect(layout.length).to.equal(COEFF_COUNT);
+        expect(new Set(layout).size).to.equal(COEFF_COUNT, "layout slot names must be distinct");
     });
 
     it("every Lean slot name has a sentinel (the test covers the whole layout)", () => {

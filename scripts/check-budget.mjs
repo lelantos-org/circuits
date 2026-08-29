@@ -26,7 +26,7 @@ const NAME_WIDTH = 18;
  * Newest mtime among the .circom sources the production circuits are built
  * from; an artifact older than this is stale.
  *
- * `src/test/` is excluded: fixtures are not inputs to 2x2 / 3x3 / 4x4 /
+ * `test/` is excluded: fixtures are not inputs to 2x2 / 3x3 / 4x4 /
  * tree_update_batch, and counting them would fail the gate on every added test.
  */
 function newestSourceMtime(dir) {

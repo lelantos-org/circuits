@@ -119,7 +119,7 @@ The one property the development *does* assume is the axiom `assetMul` (`Jubjub.
 `assetGen a` is a known multiple of `BASE0`. That is a **weakness** of the circuit, deliberately
 imported so `pointBalance_not_sound` can exhibit it, and `assetMul_arith` (`assetMul 1 +
 assetMul 3 = 2 · assetMul 2`) is checked against the real gadget at runtime by
-`src/test/transact/multi_asset.test.ts` ("FAILS on cross-asset cancellation V^1 + V^3 ==
+`test/transact/multi_asset.test.ts` ("FAILS on cross-asset cancellation V^1 + V^3 ==
 2·V^2"). No positive result depends on either.
 
 ### `src/lib/common.circom` / `src/lib/merkle.circom`
@@ -185,7 +185,7 @@ append results reach no curve axiom.
 | `:231-233` frontier mux | `BatchChainSat.fr_mux` |
 | `:237-239` root mux | `BatchChainSat.root_mux` |
 | `:243` `new_root === running_root[MAX_L]` | `BatchChainSat.new_root_def` |
-| `:246-259` `BatchCompress(MAX_L)` | **absent** — `PolyEval` is proved generically; the slot order is pinned by `src/test/tree_update_batch.test.ts` |
+| `:246-259` `BatchCompress(MAX_L)` | **absent** — `PolyEval` is proved generically; the slot order is pinned by `test/tree_update_batch.test.ts` |
 
 Three rows are deliberately empty. `BabyCheck` and `FrontierRoot` are genuine gaps, not
 simplifications, and both are listed in the README. `BatchCompress` is covered generically by
@@ -240,7 +240,7 @@ mirrors. They can be read side by side with the originals and checked a row at a
 witness plus `build/2x2.sym`, checks `TransactSat` evaluates to `true` on it, and compares
 every modelled intermediate signal against the circom-computed value at the matching
 label; plus a negative pass replaying the ~65 rejecting cases from
-[src/test/transact/](../src/test/transact/) and asserting the model rejects them too.
+[test/transact/](../test/transact/) and asserting the model rejects them too.
 
 This is the defence that would catch a model *stronger* than the circuit — the dangerous
 direction in the table above. Until it exists, the table and the layout check are the only
@@ -261,8 +261,8 @@ Checks, each mechanical:
 | Link | Check |
 |---|---|
 | Lean → `expected/layout-{2x2,3x3}.txt` | `lean/scripts/dump-layout.sh`, one dump per instantiated shape |
-| `expected/layout-2x2.txt` → SDK | `src/test/formal/layout_parity.test.ts`, sentinel-per-field so any transposition fails |
-| SDK → circuit | existing PolyEval binding cases, `src/test/transact/binding.test.ts` |
+| `expected/layout-4x6.txt` → SDK | `test/formal/layout_parity.test.ts`, sentinel-per-field so any transposition fails |
+| SDK → circuit | existing PolyEval binding cases, `test/transact/binding.test.ts` |
 
 The sentinel-per-field table in the second row is hand-written and exists for the **2x2
 shape only**; it is what catches a transposition between two slots of the same type. For

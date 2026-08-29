@@ -5,10 +5,10 @@
 # The layout is the highest-risk piece of hand transcription in the whole development:
 # it must agree with `src/lib/poly_eval.circom :: TransactCompressN`,
 # `contracts/src/lib/PubInputs.sol :: compress(Transact, aux)` and
-# `src/test/ref/compress.ts :: flatten`. Four implementations, one order.
+# `test/ref/compress.ts :: flatten`. Four implementations, one order.
 #
-# `lean/expected/layout-2x2.txt` is additionally consumed by
-# `src/test/formal/layout_parity.test.ts`, which checks it against `src/test/ref/compress.ts`
+# `lean/expected/layout-4x6.txt` is additionally consumed by
+# `test/formal/layout_parity.test.ts`, which checks it against `test/ref/compress.ts`
 # — the same implementation the published `vectors/` are generated from, which is how this
 # order reaches the SDK without either repo importing the other. That link exists for the
 # 2x2 shape only. For the other shapes this script pins Lean against its own expectation,
@@ -25,7 +25,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # shape name -> N_IN N_OUT, matching the entry points under src/.
-SHAPES=("2x2 2 2" "3x3 3 3" "4x4 4 4" "4x6 4 6")
+SHAPES=("4x6 4 6")
 
 ACTUAL=$(mktemp)
 SRC=$(mktemp /tmp/layoutXXXXXX.lean)

@@ -25,7 +25,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { MAX_L } from "../src/test/lib/constants.js";
+import { MAX_L } from "../test/lib/constants.js";
 import { ROOT, SCHEMA, writeJson } from "./vectors/common.js";
 import { TRANSACT_SHAPES, buildTransactVectors } from "./vectors/transact.js";
 import { buildBatchVectors } from "./vectors/batch.js";

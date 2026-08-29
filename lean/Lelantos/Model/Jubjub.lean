@@ -122,7 +122,7 @@ three windows to the consecutive multipliers `2, 3, 4`. Since `assetMul` is affi
 window contribution, the multipliers form an arithmetic progression.
 
 This is the concrete instance that makes `pointBalance_not_sound` bite. It is checked at
-runtime by `src/test/transact/multi_asset.test.ts`. -/
+runtime by `test/transact/multi_asset.test.ts`. -/
 axiom assetMul_arith : assetMul 1 + assetMul 3 = 2 * assetMul 2
 
 /-- `PointSum(n)` (`src/lib/value_commit.circom:156`): the identity for `n = 0`, otherwise a

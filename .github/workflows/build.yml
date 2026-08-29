@@ -25,12 +25,12 @@ jobs:
         uses: ./.github/actions/setup
 
       # Every shape in budget.json — the gate below reads one .r1cs per entry
-      # and fails on a missing or stale one. 3x3, 4x4 and tree_update_batch are
-      # otherwise compiled only indirectly, by `just vectors-check` and by
-      # circom_tester inside the mocha suite, neither of which runs the
-      # production `--r1cs --wasm --sym` path or reports constraint counts.
-      - name: Compile circuits (2x2, 3x3, 4x4, tree_update_batch)
-        run: just compile compile-3x3 compile-4x4 compile-batch
+      # and fails on a missing or stale one. Both are otherwise compiled only
+      # indirectly, by `just vectors-check` and by circom_tester inside the mocha
+      # suite, neither of which runs the production `--r1cs --wasm --sym` path or
+      # reports constraint counts.
+      - name: Compile circuits (4x6, tree_update_batch)
+        run: just compile-4x6 compile-batch
 
       # The witness-graph builder cannot compile `signal <== someFunction()`, so
       # the circuits hoist those through a `var` (see src/lib/note.circom). This

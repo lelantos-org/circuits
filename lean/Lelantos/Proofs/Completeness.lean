@@ -811,40 +811,29 @@ theorem dualTx_sat : TransactSat dualTx :=
 end Witness
 
 /-- **`transact_sound` is not vacuous.** There is an assignment satisfying the whole
-constraint system of `Transact(10, 2, 2)`, so the implication has non-empty domain. -/
-theorem transactSat_satisfiable : ∃ w : Transact2x2, TransactSat w :=
+constraint system, so the implication has non-empty domain.
+
+Stated at `TxWitness 10 2 2` rather than at the shipped shape. That is deliberate and the
+two things it proves are different: this file's *concrete* witnesses (`spendTx`, `dualTx`
+below) move real value through real Merkle openings, and building them at the smallest
+shape keeps them readable. `Transact(11, 4, 6)` gets its own witness further down.
+
+There is no `src/2x2.circom` any more — the narrow shapes were removed once 4x6 landed.
+The type is still perfectly well formed: every result here is proved for the generic
+`Transact(depth, nIn, nOut)`, and a shape needs no compiled circuit to instantiate it. -/
+theorem transactSat_satisfiable : ∃ w : TxWitness 10 2 2, TransactSat w :=
   ⟨Witness.padTx 10 2 2, Witness.padTx_sat 10 2 2⟩
 
 /-- …and the conclusion really is derivable for it. -/
 theorem transact_wellFormed_witness : TxWellFormed (Witness.padTx 10 2 2) :=
-  transact2x2_sound (Witness.padTx_sat 10 2 2)
+  transact_sound (by norm_num) (by norm_num) (Witness.padTx_sat 10 2 2)
 
-/-- **`transact3x3_sound` is not vacuous.** The same at `Transact(10, 3, 3)` — the shape
-`src/3x3.circom` instantiates and the one wired on-chain. `Transact3x3` is a distinct type
-from `Transact2x2`, so this does not follow from `transactSat_satisfiable`; without it the
-soundness result on the deployed path would read vacuously. -/
-theorem transact3x3Sat_satisfiable : ∃ w : Transact3x3, TransactSat w :=
-  ⟨Witness.padTx 10 3 3, Witness.padTx_sat 10 3 3⟩
+/-- **`transact4x6_sound` is not vacuous.** The shipped shape, `Transact(11, 4, 6)`.
 
-/-- …and the conclusion is derivable at the deployed shape too. -/
-theorem transact3x3_wellFormed_witness : TxWellFormed (Witness.padTx 10 3 3) :=
-  transact3x3_sound (Witness.padTx_sat 10 3 3)
-
-/-- **`transact4x4_sound` is not vacuous.** The same at `Transact(10, 4, 4)`, the shape
-deployed before the move to 4x6. `Transact4x4` is again a distinct type, so it needs its
-own witness. -/
-theorem transact4x4Sat_satisfiable : ∃ w : Transact4x4, TransactSat w :=
-  ⟨Witness.padTx 10 4 4, Witness.padTx_sat 10 4 4⟩
-
-/-- …and the conclusion is derivable there too. -/
-theorem transact4x4_wellFormed_witness : TxWellFormed (Witness.padTx 10 4 4) :=
-  transact4x4_sound (Witness.padTx_sat 10 4 4)
-
-/-- **`transact4x6_sound` is not vacuous.** The target shape, `Transact(11, 4, 6)`.
-
-The first witness at a depth other than 10 and the first with `nIn ≠ nOut`, which is what
-`padTx`'s depth index was added for. It is also what keeps the six-output end of the slot
-bound in `transact_sound` from being an unreachable hypothesis. -/
+`Transact4x6` is a distinct type from the one above, so this does not follow from
+`transactSat_satisfiable` — without it the soundness result on the only path anyone runs
+would read vacuously. It is also what keeps the six-output end of the slot bound in
+`transact_sound` from being an unreachable hypothesis. -/
 theorem transact4x6Sat_satisfiable : ∃ w : Transact4x6, TransactSat w :=
   ⟨Witness.padTx 11 4 6, Witness.padTx_sat 11 4 6⟩
 
@@ -868,13 +857,13 @@ constraint with zero values, which leaves open whether the balance and value-com
 machinery is satisfiable at all once the sums are non-trivial. This witness spends one unit
 of asset `1` through a non-dummy input slot. -/
 theorem transactSat_spend_satisfiable :
-    ∃ w : Transact2x2, TransactSat w ∧ (w.spent 0).isDummy = 0 ∧ (w.out 0).value = 1 :=
+    ∃ w : TxWitness 10 2 2, TransactSat w ∧ (w.spent 0).isDummy = 0 ∧ (w.out 0).value = 1 :=
   ⟨Witness.spendTx, Witness.spendTx_sat, rfl, rfl⟩
 
 /-- …and its well-formedness conclusion, including per-asset conservation of a non-zero
 amount. -/
 theorem transact_wellFormed_spend : TxWellFormed Witness.spendTx :=
-  transact2x2_sound Witness.spendTx_sat
+  transact_sound (by norm_num) (by norm_num) Witness.spendTx_sat
 
 /-- **A transaction moving two distinct assets is satisfiable.** Both witnesses above use a
 single asset id, which leaves the per-asset balance exercised only where all five candidates
@@ -882,13 +871,13 @@ agree. This one spends a shielded unit of asset `1` and moves a unit of asset `2
 the transparent bucket, so the candidate set holds two different assets and the public input
 is non-zero. -/
 theorem transactSat_twoAsset_satisfiable :
-    ∃ w : Transact2x2, TransactSat w ∧
+    ∃ w : TxWitness 10 2 2, TransactSat w ∧
       inAsset w 0 ≠ outAsset w 1 ∧ w.publicAssetId = 2 ∧ w.publicIn = 1 :=
   ⟨Witness.dualTx, Witness.dualTx_sat, by
     show (1 : F) ≠ 2
     simpa using natCast_ne_of_lt (m := 1) (n := 2) one_lt_p two_lt_p (by norm_num), rfl, rfl⟩
 
 theorem transact_wellFormed_twoAsset : TxWellFormed Witness.dualTx :=
-  transact2x2_sound Witness.dualTx_sat
+  transact_sound (by norm_num) (by norm_num) Witness.dualTx_sat
 
 end Lelantos

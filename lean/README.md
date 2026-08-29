@@ -15,7 +15,7 @@ The top-level theorem holds for **any** assignment satisfying the modeled constr
 not only those an honest prover produces.
 
 That distinction is the point. The test suite
-([src/test/transact/](../src/test/transact/), [fuzz/](../src/test/fuzz/)) exercises the
+([test/transact/](../test/transact/), [fuzz/](../test/fuzz/)) exercises the
 honest witness-generation path only; `circom_tester` cannot detect an under-constrained
 signal, so that bug class is untested by construction. These proofs quantify over satisfying
 assignments instead.
@@ -266,10 +266,10 @@ development may derive conservation from the point equation.
   value-commitment gadget instead.
 * **`BatchCompress` slot order.** `polyEval_sound` and `polyEval_binding` cover the Horner
   chain for any coefficient vector, but the batch layout (`4 + 6·MAX_L`) is pinned against
-  `PubInputs.sol` by `src/test/tree_update_batch.test.ts`, not in Lean. `dump-layout.sh`
+  `PubInputs.sol` by `test/tree_update_batch.test.ts`, not in Lean. `dump-layout.sh`
   covers the transact layouts only.
 * **Full layout parity against the SDK for `3x3` and `4x4`.** `dump-layout.sh` pins all
-  three layouts against Lean, and `src/test/formal/layout_parity.test.ts` pins each published
+  three layouts against Lean, and `test/formal/layout_parity.test.ts` pins each published
   vector to its Lean dump — all three shapes ship one. The hand-written sentinel-per-field
   table in that test, which is what catches a transposition between two same-typed slots,
   exists for `2x2` only. Neither `3x3` nor `4x4` has a `PubInputs.sol` overload yet, so for
@@ -417,7 +417,7 @@ lean/
       AxiomGuard           build-time axiom check over every declaration
   expected/                generated; regenerate with --update on the relevant script
     axioms.txt             expected output of Meta/Assumptions
-    layout-2x2.txt         expected output of Circuit/Witness :: layoutNames, one per shape
+    layout-4x6.txt         expected output of Circuit/Witness :: layoutNames, one per shape
     layout-3x3.txt
     layout-4x4.txt
   scripts/                 check-all, check-axioms, dump-layout, check-prime

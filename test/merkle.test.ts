@@ -174,7 +174,7 @@ describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
         P2 = await Poseidon.build();
 
         const src = fs.readFileSync(
-            path.join(__dirname, "..", "lib", "common.circom"),
+            path.join(__dirname, "..", "src", "lib", "common.circom"),
             "utf8",
         );
         const body = src.slice(src.indexOf("function EMPTY_SUBTREE"));
