@@ -86,6 +86,9 @@ jobs:
       - name: Build + verify 4x6 artifacts
         run: just package
 
+      - name: Setup build-circuit
+        uses: ./.github/actions/setup-build-circuit
+
       - name: Build tree_update_batch artifacts
         run: |
           just compile-batch setup-batch

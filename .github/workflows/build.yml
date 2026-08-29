@@ -32,12 +32,13 @@ jobs:
       - name: Compile circuits (4x6, tree_update_batch)
         run: just compile-4x6 compile-batch
 
+      - name: Setup build-circuit
+        uses: ./.github/actions/setup-build-circuit
+
       # The witness-graph builder cannot compile `signal <== someFunction()`, so
       # the circuits hoist those through a `var` (see src/lib/note.circom). This
       # step is what stops someone inlining one back: the release would
-      # otherwise fail at publish time instead. It builds the pinned
-      # build-circuit from git, which compiles the circom front end and is slow
-      # on a cold cache.
+      # otherwise fail at publish time instead.
       - name: Witness graph builds
         run: just build-graph
 

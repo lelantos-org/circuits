@@ -94,8 +94,19 @@ build-graph: compile-batch _ensure-build-circuit
     echo "==> Graph at {{BUILD}}/tree_update_batch.wcd"
 
 # Install the pinned build-circuit into .tools/ unless it is already there.
+#
+# `circom-witnesscalc` compiles its protobuf schema in a build script, so the
+# install needs `protoc` on PATH. Checked here because prost-build's own failure
+# surfaces from inside a dependency's build script, several hundred lines into a
+# `cargo install`, where it reads as a compile error rather than a missing tool.
 _ensure-build-circuit:
     @if [ ! -x "{{BUILD_CIRCUIT}}" ]; then \
+        if ! command -v protoc >/dev/null 2>&1; then \
+            echo "error: protoc not found; build-circuit needs it to compile its protobuf schema." >&2; \
+            echo "  macOS:  brew install protobuf" >&2; \
+            echo "  Debian: apt-get install -y protobuf-compiler" >&2; \
+            exit 1; \
+        fi; \
         echo "==> Installing build-circuit @ {{CWC_REV}} (compiles the circom front end; slow)"; \
         cargo install --git "{{CWC_REPO}}" --rev "{{CWC_REV}}" --locked build-circuit \
             --root "{{TOOLS}}/build-circuit"; \

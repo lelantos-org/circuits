@@ -1,0 +1,45 @@
+name: Setup build-circuit
+description: >-
+  Make `just build-graph` runnable: install protoc and put the pinned
+  `build-circuit` in .tools/, restoring it from cache when the pin is unchanged.
+
+  Shared by build.yml and publish.yml. publish.yml does not use
+  ./.github/actions/setup (it needs its own setup-node), so this cannot live
+  there.
+
+runs:
+  using: composite
+  steps:
+    # circom-witnesscalc compiles a protobuf schema in a build script. Without
+    # protoc the failure surfaces from inside prost-build, deep in a
+    # `cargo install`, reading as a compile error rather than a missing tool.
+    - name: Install protoc
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends protobuf-compiler
+        protoc --version
+
+    # The pin is the cache key, so bumping CWC_REV rebuilds rather than serving
+    # a binary from the previous revision. Read from the justfile so the pin has
+    # exactly one home.
+    - name: Read the pinned build-circuit revision
+      id: pin
+      shell: bash
+      run: |
+        rev=$(just --evaluate CWC_REV)
+        echo "rev=${rev}" >> "$GITHUB_OUTPUT"
+        echo "build-circuit pinned at ${rev}"
+
+    # Cache the installed binary, not the cargo registry: build-circuit pulls the
+    # circom front end from git and takes minutes to compile from cold.
+    - name: Cache build-circuit
+      uses: actions/cache@v4
+      with:
+        path: .tools/build-circuit
+        key: build-circuit-${{ runner.os }}-${{ steps.pin.outputs.rev }}
+
+    # No-op on a cache hit; the recipe only builds when the binary is absent.
+    - name: Build build-circuit if not cached
+      shell: bash
+      run: just _ensure-build-circuit
