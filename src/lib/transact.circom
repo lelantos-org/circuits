@@ -8,19 +8,20 @@ include "value_commit.circom";
 include "poly_eval.circom";
 
 // MASP pool: N_IN-input × N_OUT-output multi-asset transact circuit.
-// Instantiated by 2x2.circom, 3x3.circom (deployed) and 4x4.circom.
+// Instantiated by 4x6.circom.
 //
 // Parameters:
 //   DEPTH — Merkle depth; capacity 4^DEPTH leaves.
 //   N_IN  — spent-note slots; unused slots are dummies.
 //   N_OUT — output-note slots; unused slots are value-0 notes to self.
 //
-// Per-note generator V^t = HashToAssetGen(asset_id); the transparent bucket uses
-// V^pub = HashToAssetGen(public_asset_id); cv = value·V^t + rcv·H.
-// Conservation is enforced by PerAssetValueBalance; PerAssetPointBalance is
-// defence in depth (see balance.circom).
+// Per-note generator V^t = HashToAssetGen(asset_id); the transparent bucket
+// uses V^pub = HashToAssetGen(public_asset_id); cv = value·V^t + rcv·H.
+// PerAssetValueBalance enforces conservation; PerAssetPointBalance is defence
+// in depth (see balance.circom).
 //
-// Per-slot constraints live in SpentNote and OutputNote; this template is wiring.
+// Per-slot constraints live in SpentNote and OutputNote; this template wires
+// them together.
 //
 // The verifier sees only the public signals (y, z), in that order, with
 // y = PolyEval(coeffs, z). The coefficient layout is TransactCompressN's and
@@ -62,8 +63,8 @@ template Transact(DEPTH, N_IN, N_OUT) {
 
     // Digest of the encrypted-note payload (ephPub + ciphertext, per output),
     // computed off-circuit and constrained only by PolyEval, as the clue fields
-    // are. It prevents the relayer corrupting the payload while keeping the
-    // proof valid; see poly_eval.circom :: TransactCompressN.
+    // are. Stops a relayer corrupting the payload while keeping the proof
+    // valid; see poly_eval.circom :: TransactCompressN.
     signal input out_aux_digest;
 
     // ===== PRIVATE: spent notes =====

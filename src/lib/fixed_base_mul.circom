@@ -20,20 +20,19 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 //
 // The coefficient table must reach the gadget as a template parameter, never as
 // a `var` computed in a template body. circom emits a template body into the
-// witness generator as well as into the constraint system, and does not prove
-// that a `var` chain is input-independent: a `windowTable` call in a body is
+// witness generator as well as into the constraint system and does not prove
+// that a `var` chain is input-independent, so a `windowTable` call in a body is
 // compiled to wasm and re-executed on every proof, per component instance. Each
-// `bjAdd` costs two modular inversions, and a 252-bit scalar needs 18 per
-// window over 63 windows, so the 12 `MulH` instances of `Transact(10, 3, 3)`
-// would cost ~27,000 inversions (~345 ms) per witness — more than the Groth16
-// phase they save.
+// `bjAdd` costs two modular inversions and a window needs 18 of them, so over
+// 63 windows the 20 `MulH` instances of `Transact(11, 4, 6)` would cost roughly
+// 45,000 inversions per witness — more than the Groth16 phase they save.
 //
 // Template arguments must be compile-time known, so circom evaluates them
 // during instantiation and folds the results into the emitted coefficients.
 // `fixedBaseCoefs` is therefore called only from an argument position, and
 // `FixedBaseMulBits` takes coefficients rather than a base point. Moving that
 // call into a body regresses witness-generation time only: the constraint
-// count, the vectors and every test still pass.
+// count, the vectors and every test are unaffected.
 
 // Baby-Jubjub twisted Edwards addition, evaluated at compile time. Same formula
 // as circomlib's BabyAdd; complete, so it doubles and handles the identity
@@ -81,8 +80,8 @@ function windowTable(bx, by) {
 //     coef[m] = sum over j subset of m of (-1)^(|m|-|j|) * W[j]
 //
 // Computed rather than transcribed: the explicit form is 16 sixteen-term
-// alternating sums per coordinate, where a single sign error breaks only the
-// scalars that select the affected entry.
+// alternating sums per coordinate, and a single sign error there breaks only
+// the scalars that select the affected entry.
 function mobius8(W, half, coord) {
     var coef[8];
     for (var m = 0; m < 8; m++) {
@@ -103,9 +102,9 @@ function mobius8(W, half, coord) {
 // Windows covered by `fixedBaseCoefs`: enough for a 252-bit scalar, the widest
 // the field admits alias-free (2^252 < p) and the width `RCV_BITS()` uses.
 //
-// A literal rather than a function of N_BITS because circom requires array
-// lengths inside a `function` to be constant — a function's own parameters do
-// not qualify, unlike a template's.
+// A literal rather than a function of N_BITS: circom requires array lengths
+// inside a `function` to be constant, and a function's own parameters do not
+// qualify, unlike a template's.
 function FIXED_BASE_WINDOWS() { return 63; }
 
 // Per-window multilinear coefficients for BASE, indexed [window][row][mask]:
@@ -120,7 +119,7 @@ function FIXED_BASE_WINDOWS() { return 63; }
 // The sequence does not depend on the scalar width, so a narrower instance
 // reads a prefix of the same table and one table serves every width.
 //
-// Call only from a template argument position (see header): there it runs once
+// Call only from a template argument position (see header), where it runs once
 // per instantiation in the compiler and never reaches the witness generator.
 function fixedBaseCoefs(BASE) {
     var C[63][4][8];
@@ -165,8 +164,8 @@ function fixedBaseCoefs(BASE) {
 // `1 + d*tau` vanishes, so a missing booleanity constraint leaves the circuit
 // under-constrained.
 //
-// Prefer `FixedBaseMul` below unless the caller already holds a constrained bit
-// array to share; it derives COEFS itself and cannot be handed a table that
+// Use `FixedBaseMul` below unless the caller already holds a constrained bit
+// array to share: it derives COEFS itself and cannot be handed a table that
 // disagrees with the intended base.
 //
 // Bits above the top window are zero-padded, so N_BITS need not be a multiple

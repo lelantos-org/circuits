@@ -23,8 +23,8 @@ function H_BASE_Y() {
 //
 // 252 rather than the 251 the subgroup order admits: `ceil(252/4) ==
 // ceil(251/4)`, so both cost 63 windows and 252 is one constraint dearer.
-// Narrowing to 251 also requires regenerating every committed vector, since
-// `deterministicDummyBlinders` (`BLINDER_MASK` in src/test/ref/witness.ts)
+// Narrowing to 251 would also require regenerating every committed vector,
+// since `deterministicDummyBlinders` (`BLINDER_MASK` in test/ref/witness.ts)
 // masks to 252.
 //
 // Must satisfy 2^RCV_BITS < p for the Num2Bits decomposition to be alias-free
@@ -67,19 +67,19 @@ template MulH() {
     out[1] <== mul.out[1];
 }
 
-// Two commitments to the SAME (value, gen) under independent blinders, sharing
+// Two commitments to the same (value, gen) under independent blinders, sharing
 // one variable-base scalar multiplication:
 //   cv     = value·gen + rcv·H
 //   cv_dep = value·gen + rcv_dep·H
 //
 // Every note needs both: `cv` is the per-spend re-randomisation published in
-// the transaction, `cv_dep` is the note's permanent blinding that reproduces
-// its committed leaf. The blinders must stay independent — if rcv == rcv_dep
-// then in_cv at spend time equals the leaf's cv_dep and an observer learns
-// which leaf was spent.
+// the transaction, `cv_dep` the note's permanent blinding that reproduces its
+// committed leaf. The blinders must stay independent: at rcv == rcv_dep the
+// in_cv published at spend time equals the leaf's cv_dep, revealing which leaf
+// was spent.
 //
-// The value·gen term is shared, so it is computed once and each blinder added
-// to it, saving one EscalarMulAny(64) per note slot.
+// The value·gen term is computed once and each blinder added to it, saving one
+// EscalarMulAny(64) per note slot.
 //
 // rH / rH_dep are exposed for PerAssetPointBalance.
 template ValueCommitPair() {

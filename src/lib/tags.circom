@@ -21,6 +21,13 @@ pragma circom 2.2.3;
 // the value space stays single-sourced and a new in-circuit tag cannot collide:
 // | TAG_SUB_TOKEN  | 12 | sub token = Poseidon(TAG_SUB_TOKEN, ivk, epoch)      |
 // | TAG_FMD_EXPAND | 13 | h_i       = Poseidon(TAG_FMD_EXPAND, ck_x, ck_y, i)  |
+//
+// Call sites hoist the result through a `var` before assigning it to a signal.
+// The witness-graph builder (`build-circuit`, which produces the relayer's
+// native witness calculator) cannot store a function result into a signal, so
+// inlining these breaks `just build-graph`. The R1CS is unaffected either way:
+// the call folds to a constant. The same applies to EMPTY_SUBTREE in
+// common.circom.
 function TAG_CM()     { return 1; }
 function TAG_NF()     { return 2; }
 function TAG_PK()     { return 3; }

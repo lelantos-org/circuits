@@ -34,11 +34,11 @@ template PolyEval(N) {
 // out_aux_digest binds the encrypted-note payload the relayer carries in
 // calldata: keccak256(abi.encode(aux)) mod r over the full AuxValidation.Output
 // array. Without it only the three clue fields per output are bound, so a
-// relayer could keep the FMD clue intact — proof still verifies, recipient
-// still flags the note — while corrupting ephPub/ciphertext, leaving the
-// recipient unable to decrypt the opening of a note whose inputs are already
-// spent. It is appended after the clue block so slots
-// 0..(8+3·N_IN+8·N_OUT-1) keep their indices.
+// relayer could keep the FMD clue intact — the proof still verifies and the
+// recipient still flags the note — while corrupting ephPub/ciphertext, leaving
+// the recipient unable to decrypt the opening of a note whose inputs are
+// already spent. Appended after the clue block, so the preceding slots keep
+// their indices.
 template TransactCompressN(N_IN, N_OUT) {
     var PI_PER_OUT = 3;
     var N = 9 + 3 * N_IN + 5 * N_OUT + PI_PER_OUT * N_OUT;
@@ -119,8 +119,8 @@ template TransactCompressN(N_IN, N_OUT) {
 // is_deposit) are MAX_L wide.
 //
 // The two uint64 blocks (leaf_asset, leaf_public_in) are adjacent and the uint8
-// block (is_deposit) follows them, so PubInputs.compress can re-mask the
-// sub-word members with two contiguous loops over the copied calldata.
+// block (is_deposit) follows them, so PubInputs.compress re-masks the sub-word
+// members with two contiguous loops over the copied calldata.
 template BatchCompress(MAX_L) {
     var N = 4 + 6 * MAX_L;
 

@@ -15,9 +15,9 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // Relayer proof advancing the commitment tree from old_root to new_root by
 // inserting up to MAX_L leaves at [start_index, start_index + MAX_L).
 //
-// actual_count ∈ [1, MAX_L] is a LEAF count, so odd counts are permitted: one
-// batch carries either a 3-output transact bundle or a single-leaf deposit.
-// Trailing slots must be zero.
+// actual_count ∈ [1, MAX_L] is a LEAF count, so odd counts are permitted. One
+// batch carries either a spend's N_OUT output leaves or a run of deposits, two
+// leaves each. Trailing slots must be zero.
 //
 // leaf_k = Poseidon(TAG_LEAF, cms[k], cv_dep[k][0], cv_dep[k][1]), where cv_dep
 // is the depositor's or spender's Pedersen value commitment. Spends recompute
@@ -29,9 +29,9 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // Deposits carry no transact proof, so the batch circuit pins the leaf itself.
 // The binding is per leaf rather than over an aggregate: a sum would fix only
 // Σvalue modulo the subgroup order l, letting a depositor place 2^63·V^A in one
-// leaf, absorb (public_in − 2^63) mod l in a second leaf they abandon, and
-// retain a valid 2^63 note for a one-unit deposit. One equality per leaf admits
-// no such split.
+// leaf, absorb (public_in − 2^63) mod l in a second leaf they abandon, and keep
+// a valid 2^63 note for a one-unit deposit. One equality per leaf admits no
+// such split.
 //
 // is_deposit[k] == 0 skips the check; the transact circuit proves conservation
 // for spends.
@@ -47,7 +47,7 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 //   [4 + 3·MAX_L .. 3 + 4·MAX_L]   leaf_asset
 //   [4 + 4·MAX_L .. 3 + 5·MAX_L]   leaf_public_in
 //   [4 + 5·MAX_L .. 3 + 6·MAX_L]   is_deposit
-// Total = 4 + 6·MAX_L (28 for MAX_L = 4).
+// Total = 4 + 6·MAX_L (52 for MAX_L = 8).
 //
 // The caller must ensure start_index + MAX_L - 1 < 4^DEPTH.
 template TreeUpdateBatch(DEPTH, MAX_L) {
@@ -73,11 +73,9 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     // 1. Range-check actual_count ∈ [1, MAX_L] via Num2Bits(actual_count - 1).
     //    That bounds it by 2^COUNT_BITS, so the bound must be tight to MAX_L.
     //
-    //    Derived from MAX_L rather than written down: a hand-set constant has to
-    //    be edited in lockstep with the template argument, and the assert below
-    //    only catches the mismatch after someone has already made it. The assert
-    //    stays as the power-of-two guard, which is a real constraint on MAX_L
-    //    and not something the derivation can enforce.
+    //    COUNT_BITS is derived from MAX_L rather than written down, so the two
+    //    cannot fall out of step. The assert remains as the power-of-two guard,
+    //    which is a constraint on MAX_L the derivation cannot enforce.
     var COUNT_BITS = 0;
     var count_span = MAX_L;
     while (count_span > 1) {
@@ -111,7 +109,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     }
 
     // 4. Booleanize is_deposit[k] and zero the deposit-only fields on spend
-    //    leaves, so a relayer cannot smuggle a nonzero leaf_asset /
+    //    leaves, so a relayer cannot place a nonzero leaf_asset or
     //    leaf_public_in into the public inputs.
     for (var k = 0; k < MAX_L; k++) {
         is_deposit[k] * (1 - is_deposit[k]) === 0;
@@ -124,11 +122,8 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     signal leaves[MAX_L];
     for (var k = 0; k < MAX_L; k++) {
         leaf_h[k] = Poseidon(4);
-        // The tag is hoisted through a `var` rather than assigned straight from the
-        // call: the witness-graph builder (`build-circuit`, used to produce the
-        // relayer's native witness calculator) cannot store a function result into a
-        // signal. Inlining these back breaks `just build-graph`. The R1CS is
-        // unaffected either way — the call folds to a constant.
+        // Hoisted through a `var` rather than assigned straight from the
+        // call; see tags.circom.
         var tag = TAG_LEAF();
         leaf_h[k].inputs[0] <== tag;
         leaf_h[k].inputs[1] <== cms[k];
@@ -281,14 +276,13 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 // MAX_L is at its floor for the 4x6 transact shape: COUNT_BITS requires a power
 // of two, and a spend emits TRANSACT_OUT = 6 leaves that must fit one batch,
 // with MASP.sol pinning `actualCount` to exactly that on the spend path. Six is
-// not a power of two, so the floor is 8. Only flushBatch (deposits, two leaves
-// each) uses the slack, and at MAX_L = 8 it carries four deposits per batch
-// rather than two.
+// not a power of two, so the floor is 8. Only flushBatch uses the slack,
+// carrying four two-leaf deposits per batch.
 //
 // Budget: this circuit grows on both axes at once — four more leaf slots at
 // roughly 12k constraints each, plus a depth level across all eight — so it,
-// not the transact circuit, is the one that decides whether 2^17 holds. Run
-// `just budget` and read the real count rather than trusting that estimate.
+// not the transact circuit, decides whether 2^17 holds. Run `just budget` for
+// the measured count.
 //
 // Changing either parameter requires a new ceremony and a contract change,
 // since the public-input layout is 4 + 6·MAX_L.

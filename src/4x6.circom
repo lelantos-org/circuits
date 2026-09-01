@@ -4,26 +4,24 @@ include "lib/transact.circom";
 
 // 4-input × 6-output transact circuit. Logic is in Transact (lib/transact.circom).
 //
-// Six outputs rather than four so that change lands on the withdrawal
-// denomination ladder in one spend. A withdrawal's publicOut must be a
-// denomination to blend with other users'; change is decomposed greedily onto
-// the ladder, and four slots hold at most three ladder pieces plus a dust note,
-// so a remainder needing five pieces (4900 = 2000+2000+500+200+200) leaves 400
-// off-ladder and requires a follow-up transfer to clear. Five change slots
-// cover the great majority of decompositions outright.
+// Six output slots so that change lands on the withdrawal denomination ladder
+// in one spend. A withdrawal's publicOut must be a denomination to blend with
+// other users'; change is decomposed greedily onto the ladder, and four slots
+// hold at most three ladder pieces plus a dust note, so a remainder needing
+// five pieces (4900 = 2000+2000+500+200+200) leaves 400 off-ladder and requires
+// a follow-up transfer. Five change slots cover the great majority of
+// decompositions outright.
 //
-// Inputs stay at four. An input slot carries a DEPTH-level Merkle path and its
+// Inputs stay at four. An input slot carries a DEPTH-level Merkle path with its
 // key derivation and nullifier — roughly 16.8k constraints against an output
 // slot's 4.9k — so widening that side costs about 3.4x per slot for reach that
 // is not the bottleneck.
 //
-// DEPTH = 11 matches the on-chain CommitmentTree: 4^11 = 4,194,304 leaves.
-// Eleven rather than ten because an unused output slot is a real value-0 note
-// with a real Poseidon insertion, not a sentinel: every spend consumes N_OUT
-// leaves whether it fills them or not, so six outputs cut pool lifetime from
-// 262,144 spends to 174,762. One extra level restores it fourfold for roughly
-// 870 constraints per input, which is the cheapest capacity available and only
-// free while a ceremony is already being paid for.
+// DEPTH = 11 matches the on-chain CommitmentTree: 4^11 = 4,194,304 leaves. An
+// unused output slot is a real value-0 note with a real Poseidon insertion, not
+// a sentinel, so every spend consumes N_OUT leaves whether it fills them or
+// not: at six outputs a depth-10 tree holds 174,762 spends. The eleventh level
+// restores that fourfold for roughly 870 constraints per input.
 //
 // PolyEval coefficient slots, which must match the PubInputs.sol :: compress
 // overload for this shape:
@@ -44,19 +42,16 @@ include "lib/transact.circom";
 //     [68]      out_aux_digest           (contract recomputes; never read from calldata)
 // Total = 9 + 3·N_IN + 8·N_OUT = 69.
 //
-// The 40-word calldata prefix of the 4x4 layout becomes 50 words here
-// (1 + 4 + 6 + 3 + 8 + 12 + 4 + 12), and the uint64 and address words that
-// PubInputs.compress re-masks move with it. Those offsets are hardcoded
-// assembly in the contract; derive them from this table rather than adapting
-// the 4x4 literals by hand.
+// The struct's calldata prefix is 50 words (1 + 4 + 6 + 3 + 8 + 12 + 4 + 12).
+// PubInputs.compress re-masks the uint64 and address words at offsets hardcoded
+// in assembly; derive them from this table.
 //
 // Budget: this shape does not fit the 2^16 FFT domain. It is budgeted against
-// 2^17, so setup fetches ptau_17. The tighter of the two circuits is
-// tree_update_batch(11, 8), not this one — measure that first.
+// 2^17, so setup fetches ptau_17. tree_update_batch(11, 8) is the tighter of
+// the two circuits.
 //
-// Not established for this shape:
-//   - a PubInputs.sol compress overload and a deployed verifier.
-//   - a phase-2 ceremony beyond the single-contributor prototype.
+// Not established for this shape: a phase-2 ceremony beyond the
+// single-contributor prototype.
 //
 // Consumer-side checks indexed by input or output must range over the whole
 // shape: pairwise nullifier distinctness over all six pairs, and the out_cm and

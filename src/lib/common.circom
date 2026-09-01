@@ -29,18 +29,16 @@ template PathIndexSelectors() {
 // Empty-subtree hashes: zeros[0] = 0, zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] × 4).
 // TAG_MERKLE must match MerkleLevel4.
 //
-// These are compile-time constants, but circom does not constant-fold Poseidon:
-// computing the chain in-circuit costs DEPTH × Poseidon(5) constraints per
-// instantiation, and `tree_update_batch` instantiates EmptySubtreeHashes
-// MAX_L + 1 times (one per QuaternaryInsert, plus FrontierRoot) for the same
-// fixed table.
+// Compile-time constants, tabulated because circom does not constant-fold
+// Poseidon: computing the chain in-circuit costs DEPTH × Poseidon(5)
+// constraints per instantiation, and `tree_update_batch` instantiates
+// EmptySubtreeHashes MAX_L + 1 times (one per QuaternaryInsert, plus
+// FrontierRoot) for the same fixed table.
 //
-// The table is pinned two ways:
-//   - `src/test/merkle.test.ts` recomputes the chain with circomlibjs and asserts
-//     every entry, including that EMPTY_SUBTREE(10) is the genesis root.
-//   - EMPTY_SUBTREE(DEPTH) equals CommitmentTree.EMPTY_ROOT in the contracts
-//     repo. Read it from the table below and convert; a second copy written out
-//     here is a constant that can silently drift from the one that matters.
+// `test/merkle.test.ts` pins the table two ways: it recomputes the chain with
+// circomlibjs and asserts every entry, and it asserts EMPTY_SUBTREE(DEPTH)
+// against CommitmentTree.EMPTY_ROOT in the contracts repo. Read that root from
+// this table rather than writing out a second copy that can drift.
 //
 // Extending the tree beyond DEPTH = 11 requires appending entries here.
 function EMPTY_SUBTREE(d) {
@@ -65,11 +63,8 @@ function EMPTY_SUBTREE(d) {
 template EmptySubtreeHashes(DEPTH) {
     signal output zeros[DEPTH + 1];
 
-    // The value is hoisted through a `var` rather than assigned straight from the
-    // call: the witness-graph builder (`build-circuit`, used to produce the
-    // relayer's native witness calculator) cannot store a function result into a
-    // signal. Inlining these back breaks `just build-graph`. The R1CS is
-    // unaffected either way — the call folds to a constant.
+    // Hoisted through a `var` rather than assigned straight from the call; see
+    // tags.circom.
     for (var i = 0; i <= DEPTH; i++) {
         var zero = EMPTY_SUBTREE(i);
         zeros[i] <== zero;

@@ -15,11 +15,8 @@ template DeriveIvk() {
     signal output ivk;
 
     component h = Poseidon(2);
-    // The tag is hoisted through a `var` rather than assigned straight from the
-    // call: the witness-graph builder (`build-circuit`, used to produce the
-    // relayer's native witness calculator) cannot store a function result into a
-    // signal. Inlining these back breaks `just build-graph`. The R1CS is
-    // unaffected either way — the call folds to a constant.
+    // Hoisted through a `var` rather than assigned straight from the call; see
+    // tags.circom.
     var tag = TAG_IVK();
     h.inputs[0] <== tag;
     h.inputs[1] <== nsk;
@@ -50,9 +47,9 @@ template DerivePk() {
 
 // cm = Poseidon(packed_av, owner_pk, rho, rcm), packed_av = asset_id·2^64 + value.
 //
-// No leading tag: asset_id != 0 is enforced by the callers, so packed_av >= 2^64
-// and cm cannot collide with TAG_MERKLE (5) or TAG_LEAF (10) preimages, whose
-// first field element is a small constant.
+// No leading tag: callers enforce asset_id != 0, so packed_av >= 2^64 and cm
+// cannot collide with TAG_MERKLE (5) or TAG_LEAF (10) preimages, whose first
+// field element is a small constant.
 template NoteCommitment() {
     signal input asset_id;
     signal input value;
@@ -96,9 +93,9 @@ template DeriveRho() {
 // the pair (nk, rho). Without it, two notes sharing a rho share a nullifier and
 // spending either permanently locks the other. DeriveRho rules that out for
 // transact outputs, but the deposit path (tree_update_batch's cms[]) constrains
-// no rho and output rho is publicly derivable from nullifier[0], so a minimal
-// deposit could otherwise plant a rho-colliding note in a victim's wallet.
-// Binding cm closes this for every inserter.
+// no rho, and output rho is publicly derivable from nullifier[0], so a minimal
+// deposit could plant a rho-colliding note in a victim's wallet. Binding cm
+// closes this for every inserter.
 template Nullifier() {
     signal input nk;
     signal input rho;

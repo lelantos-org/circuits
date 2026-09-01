@@ -54,11 +54,11 @@ template DummyZeroValue(N) {
 // PerAssetPointBalance below is defence in depth, not a substitute.
 //
 // The point equality alone does not imply conservation. HashToAssetGen is
-// circomlib Pedersen over a 72-bit message, which fits in a single segment and
-// so reduces to m(asset_id)·BASE[0] for a publicly computable integer m(·).
-// Every asset generator therefore lies in the same prime-order group with known
+// circomlib Pedersen over a 72-bit message, which fits one segment and so
+// reduces to m(asset_id)·BASE[0] for a publicly computable integer m(·). Every
+// asset generator therefore lies in the same prime-order group with known
 // relative discrete logs. m(·) is ~2^85 and affine in the low nibbles of
-// asset_id, so V^1 + V^3 == 2·V^2 exactly, and the point equality is satisfied
+// asset_id, so V^1 + V^3 == 2·V^2 exactly and the point equality is satisfied
 // by spending X of asset 1 plus X of asset 3 to mint 2X of asset 2.
 //
 // This check makes no group-theoretic assumption. For every asset id c present
@@ -70,14 +70,15 @@ template DummyZeroValue(N) {
 // Candidates = {in_asset[*], out_asset[*], public_asset_id}. Any asset outside
 // that set contributes zero to both sides, so covering the candidates covers
 // every asset present. Dummy inputs carry value 0 (DummyZeroValue) and are
-// neutral regardless of the asset_id they declare.
+// neutral whatever asset_id they declare.
 //
-// Precondition (soundness-critical): every value passed in must already be
-// 64-bit range-checked by the caller. SpentNote / OutputNote apply RangeCheck64
-// to in_value / out_value, and the transact circuit applies it to public_in /
-// public_out. With at most N_IN+1 terms below 2^64 per side the sums stay under
-// 2^66, far below the modulus, so these are exact integer equalities that
-// cannot be satisfied by wrapping. Dropping a range check invalidates it.
+// Precondition (soundness-critical): the caller must already have 64-bit
+// range-checked every value passed in. SpentNote and OutputNote apply
+// RangeCheck64 to in_value and out_value; the transact circuit applies it to
+// public_in and public_out. With at most N_IN+1 terms below 2^64 per side the
+// sums stay under 2^66, far below the modulus, so these are exact integer
+// equalities that cannot be satisfied by wrapping. Dropping a range check
+// invalidates the argument.
 template PerAssetValueBalance(N_IN, N_OUT) {
     signal input in_asset[N_IN];
     signal input in_value[N_IN];
@@ -137,7 +138,7 @@ template PerAssetValueBalance(N_IN, N_OUT) {
 //   Σ in_cv + pub_in·V^pub + Σ out_rH  ==  Σ out_cv + pub_out·V^pub + Σ in_rH
 // Summing the rH points avoids a Σrcv_in − Σrcv_out field wrap.
 //
-// Defence in depth only: see PerAssetValueBalance above for why this equation
+// Defence in depth only; see PerAssetValueBalance above for why this equation
 // does not by itself imply per-asset conservation. It holds for every honest
 // transaction and keeps cv a meaningful on-chain value commitment.
 template PerAssetPointBalance(N_IN, N_OUT) {
