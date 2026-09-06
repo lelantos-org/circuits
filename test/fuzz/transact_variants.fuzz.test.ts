@@ -196,7 +196,14 @@ describe("transact_4x6 variants [fuzz]", function () {
                     inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
                 });
                 await circuit.calculateWitness(input, true);
-                const swapped = { ...input, in_nsk: [input.in_nsk[1], input.in_nsk[0]] };
+                // Transpose the first two entries IN PLACE on a copy of the
+                // full array. Rebuilding it as a two-element literal drops the
+                // padded slots, and the witness calculator then rejects the
+                // input object — "Not enough values for input signal in_nsk" —
+                // rather than the key check, which is what this case is about.
+                const nsk = [...input.in_nsk];
+                [nsk[0], nsk[1]] = [nsk[1], nsk[0]];
+                const swapped = { ...input, in_nsk: nsk };
                 await expectWitnessFails(circuit, swapped, "swapped nsk must reject");
             },
         ), fcParams);

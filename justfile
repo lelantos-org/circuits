@@ -172,7 +172,20 @@ test:
 test-unit:
     npm run test:unit
 
-# Run heavy fuzz suite.
+# Every run pins a fast-check seed and announces it on stderr, so a failure is
+# reproducible. Set FUZZ_SEED to replay one:
+#
+#   FUZZ=heavy FUZZ_SEED=1234 just test-fuzz
+#
+# To land straight on a single shrunk counterexample, add the `path` from the
+# fast-check report and grep to that test — a path belongs to one property, so
+# it needs the grep:
+#
+#   FUZZ_SEED=1234 FUZZ_PATH=<path> npm run test:fuzz -- --grep "<test name>"
+#
+# CI writes the replay line into the job summary; see .github/workflows/fuzz.yml.
+
+# Run heavy fuzz suite. FUZZ_SEED=N to replay a previous run.
 test-fuzz:
     npm run test:fuzz
 

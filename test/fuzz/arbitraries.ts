@@ -8,6 +8,8 @@
 //   FUZZ_RUNS_<SUITE>=N                per-suite override, takes precedence
 //     SUITE keys: FIXEDBASE, FRONTIER, MERKLE, POLYEVAL, TRANSACT,
 //                 TRANSACT_OVERFLOW, TRANSACT_VARIANTS
+//   FUZZ_SEED=N                        pin the fast-check seed (see below)
+//   FUZZ_PATH=a:b:c                    replay one shrunk counterexample
 
 import * as fc from "fast-check";
 import { BN254_FR } from "../helpers";
@@ -18,7 +20,52 @@ export const NUM_RUNS =
     FUZZ === "light" ? 5 :
     20;
 
-export const fcParams = { numRuns: NUM_RUNS };
+// ===== replayability =====
+//
+// Left to itself fast-check seeds from the clock, so a nightly `FUZZ=heavy`
+// failure is a witness nobody can regenerate: the run that found it is gone,
+// and re-running draws a different sequence. fast-check does print the seed in
+// its failure report, but only into CI log scrollback that expires.
+//
+// So the seed is chosen HERE, pinned when `FUZZ_SEED` is set and otherwise
+// drawn once per process and announced on stderr. Every suite shares the one
+// value, so a single `FUZZ_SEED=... just test-fuzz` reproduces the whole run.
+// `.github/workflows/fuzz.yml` sets it and writes the replay line into the job
+// summary, which outlives the log.
+//
+// `FUZZ_PATH` replays a single shrunk counterexample: paste the `path` from a
+// fast-check report alongside its seed to land straight on that case, without
+// re-running the trials before it. A path is meaningful only for the property
+// that produced it, and this sets it for every property in the process — so
+// pair it with a mocha `--grep` that isolates the failing test:
+//
+//   FUZZ_SEED=<seed> FUZZ_PATH=<path> npm run test:fuzz -- --grep "<test name>"
+
+function readSeed(): number {
+    const raw = process.env.FUZZ_SEED;
+    if (raw === undefined || raw === "") return Date.now();
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+        throw new Error(`FUZZ_SEED must be a number, got "${raw}"`);
+    }
+    return n;
+}
+
+export const FUZZ_SEED = readSeed();
+
+/** Set only when replaying; `undefined` lets fast-check run the full sequence. */
+const FUZZ_PATH = process.env.FUZZ_PATH || undefined;
+
+// Announced once per process, on stderr so it survives a reporter that buffers
+// stdout. Printed unconditionally: the seed is worth having on a green run too,
+// since it is what makes that run repeatable.
+console.error(
+    `[fuzz] FUZZ=${FUZZ} FUZZ_SEED=${FUZZ_SEED}` +
+        (FUZZ_PATH ? ` FUZZ_PATH=${FUZZ_PATH}` : "") +
+        `  (replay: FUZZ=${FUZZ} FUZZ_SEED=${FUZZ_SEED} just test-fuzz)`,
+);
+
+export const fcParams = { numRuns: NUM_RUNS, seed: FUZZ_SEED, path: FUZZ_PATH };
 
 // 64-bit value used by transact circuit (range-checked via Num2Bits(64)).
 export const MAX_VALUE = (1n << 64n) - 1n;
@@ -112,11 +159,23 @@ function runsFor(suite: string): number {
     return Math.max(2, Math.floor(NUM_RUNS * scale));
 }
 
+export interface FcParams<E> {
+    numRuns: number;
+    seed: number;
+    path?: string;
+    examples?: E[];
+}
+
+/**
+ * Per-suite fast-check parameters. Every suite carries the same `FUZZ_SEED`, so
+ * one env var reproduces a whole run; `runsFor` still scales the trial count
+ * per suite.
+ */
 export function fcParamsFor<E = unknown>(
     suite: string,
     extra?: { examples?: E[] },
-): { numRuns: number; examples?: E[] } {
-    const out: { numRuns: number; examples?: E[] } = { numRuns: runsFor(suite) };
+): FcParams<E> {
+    const out: FcParams<E> = { numRuns: runsFor(suite), seed: FUZZ_SEED, path: FUZZ_PATH };
     if (extra?.examples && extra.examples.length > 0) out.examples = extra.examples;
     return out;
 }

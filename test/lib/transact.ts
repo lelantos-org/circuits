@@ -184,6 +184,81 @@ export class TxBuilder {
             merkleRoot: root,
         });
     }
+
+    /**
+     * `N_IN` real inputs and `N_OUT` real outputs, balanced: every slot the
+     * shape declares holds a genuine note.
+     *
+     * `balanced()` and the scenario factories above fill at most two input and
+     * two output slots, leaving the rest to `padInputs` / `padOutputs`. A dummy
+     * input bypasses the key and Merkle checks and a padding output is
+     * value-0, so a constraint that is mis-indexed for slot >= 2 — a loop bound
+     * one short, a high slot left unconstrained — is satisfied by every witness
+     * those factories produce. `src/4x6.circom` makes the same point about the
+     * consumer's checks: they "must range over the whole shape".
+     *
+     * This is the base for the per-slot tamper expansion, which needs every
+     * slot to carry the same constraints as slot 0 for the expectations to be
+     * uniform across `i` and `j`.
+     *
+     * Values are distinct per slot so a witness that confuses two slots does
+     * not balance by coincidence, and the rho seeds are spaced well apart so a
+     * `+1` tamper on one slot's field cannot land on another slot's value.
+     */
+    fullShape(nsk: Field = ALICE_NSK): CircomTransactInput {
+        assertFullShapeValues();
+        const { root, inputs } = this.nRealInputs(FULL_SHAPE_IN_VALUES, nsk);
+        const outputs = FULL_SHAPE_OUT_VALUES.map((v, j) =>
+            this.note(v, nsk, 1_000_000n + BigInt(j) * 1_000n),
+        );
+        return this.build({ inputs, outputs, merkleRoot: root });
+    }
+
+    /**
+     * `values.length` real inputs from one owner against a single frozen root.
+     *
+     * Generalises `twoRealInputs`; rho seeds are spaced by 1000 so that no
+     * `+1` tamper on one input's field collides with another's.
+     */
+    nRealInputs(values: bigint[], nsk: Field, asset: Field = DEFAULT_ASSET): Scenario {
+        const tree = this.newTree();
+        let spent = values.map((v, i) =>
+            this.insert(tree, this.note(v, nsk, BigInt(i + 1) * 1_000n, asset), nsk),
+        );
+        const root = tree.root();
+        spent = spent.map(s => this.finalize(tree, s));
+        return { tree, root, inputs: spent };
+    }
+}
+
+/**
+ * Input and output values for `fullShape`, summing to the same total so the
+ * witness balances.
+ *
+ * Distinct per slot, so a witness that reads one slot's value into another
+ * changes that note's commitment rather than passing unnoticed.
+ */
+const FULL_SHAPE_IN_VALUES = [100n, 50n, 30n, 20n];
+const FULL_SHAPE_OUT_VALUES = [60n, 50n, 40n, 30n, 15n, 5n];
+
+/**
+ * The two tables above are written out rather than generated, so a change to
+ * `N_IN` or `N_OUT` leaves them the wrong length and `fullShape` silently stops
+ * filling every slot — which is the one thing it exists to do. Fail loudly
+ * instead.
+ */
+function assertFullShapeValues(): void {
+    const sum = (xs: bigint[]) => xs.reduce((a, b) => a + b, 0n);
+    if (FULL_SHAPE_IN_VALUES.length !== N_IN || FULL_SHAPE_OUT_VALUES.length !== N_OUT) {
+        throw new Error(
+            `fullShape: value tables are ${FULL_SHAPE_IN_VALUES.length}x` +
+                `${FULL_SHAPE_OUT_VALUES.length} but the shape is ${N_IN}x${N_OUT}. ` +
+                "Extend FULL_SHAPE_IN_VALUES / FULL_SHAPE_OUT_VALUES to match, keeping the sums equal.",
+        );
+    }
+    if (sum(FULL_SHAPE_IN_VALUES) !== sum(FULL_SHAPE_OUT_VALUES)) {
+        throw new Error("fullShape: input and output values must sum to the same total");
+    }
 }
 
 /**

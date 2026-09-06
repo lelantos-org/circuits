@@ -129,3 +129,19 @@ just vectors-check         # regenerate vectors/ and diff against the committed 
 
 `just --list` shows the rest. Rebuild recipes re-run the single-contributor
 ceremony and invalidate every existing proof and committed fixture.
+
+### Fuzzing
+
+`just test-fuzz` runs the property suite. Trial counts come from `FUZZ`
+(`light` / `medium` / `heavy` = 5 / 20 / 100), with `FUZZ_RUNS_<SUITE>=N` as a
+per-suite override.
+
+Each run pins one fast-check seed across every property and prints it on
+stderr, so a failure is reproducible:
+
+```bash
+FUZZ=heavy FUZZ_SEED=1234 just test-fuzz
+```
+
+CI picks the seed from the run id and writes the replay command into the job
+summary, so a nightly failure stays reproducible after the logs expire.

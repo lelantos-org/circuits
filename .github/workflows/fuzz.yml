@@ -12,6 +12,10 @@ on:
         description: 'FUZZ tier (light/medium/heavy)'
         required: false
         default: 'heavy'
+      fuzz_seed:
+        description: 'FUZZ_SEED to replay (blank = use the run id)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -46,5 +50,37 @@ jobs:
       - name: Setup toolchain
         uses: ./.github/actions/setup
 
+      # The seed is chosen here rather than left to the clock inside
+      # `test/fuzz/arbitraries.ts`, so the run is reproducible from the job
+      # summary alone. Without it a nightly `FUZZ=heavy` failure is a witness
+      # nobody can regenerate: fast-check prints the seed, but only into log
+      # scrollback that expires, and a re-run draws a different sequence.
+      #
+      # `workflow_dispatch` can override it, which is how a failed nightly is
+      # re-run against the exact seed that failed.
+      - name: Pick fuzz seed
+        run: echo "FUZZ_SEED=${{ inputs.fuzz_seed || github.run_id }}" >> "$GITHUB_ENV"
+
       - name: Run fuzz suite (FUZZ=${{ env.FUZZ }})
         run: just test-fuzz
+
+      # `always()`: the replay line matters most when the step above failed.
+      # The job summary outlives the logs, so this is what someone reads a week
+      # later to reproduce a nightly.
+      - name: Record replay command
+        if: always()
+        run: |
+          {
+            echo "### Fuzz run"
+            echo
+            echo "\`\`\`"
+            echo "FUZZ=$FUZZ FUZZ_SEED=$FUZZ_SEED just test-fuzz"
+            echo "\`\`\`"
+            echo
+            echo "To replay a single shrunk counterexample, add the \`path\` from the"
+            echo "fast-check report and grep to that test:"
+            echo
+            echo "\`\`\`"
+            echo "FUZZ=$FUZZ FUZZ_SEED=$FUZZ_SEED FUZZ_PATH=<path> npm run test:fuzz -- --grep \"<test name>\""
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
