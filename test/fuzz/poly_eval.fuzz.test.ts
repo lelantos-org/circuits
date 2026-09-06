@@ -1,6 +1,6 @@
 // Property-based coverage for `lib/poly_eval.circom`.
 //
-// The unit test [src/test/poly_eval.test.ts](../poly_eval.test.ts) pins a set
+// The unit test [test/poly_eval.test.ts](../poly_eval.test.ts) pins a set
 // of deterministic seeds. This file adds random coefficients and `z` values
 // across BN254 Fr, plus the algebraic identities (linearity, z=0, z=1) that tie
 // the gadget to its Horner-form specification.

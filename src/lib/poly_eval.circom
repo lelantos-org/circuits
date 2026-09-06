@@ -34,11 +34,9 @@ template PolyEval(N) {
 // out_aux_digest binds the encrypted-note payload the relayer carries in
 // calldata: keccak256(abi.encode(aux)) mod r over the full AuxValidation.Output
 // array. Without it only the three clue fields per output are bound, so a
-// relayer could keep the FMD clue intact — the proof still verifies and the
-// recipient still flags the note — while corrupting ephPub/ciphertext, leaving
-// the recipient unable to decrypt the opening of a note whose inputs are
-// already spent. Appended after the clue block, so the preceding slots keep
-// their indices.
+// relayer can keep the FMD clue intact, leaving the proof valid and the note
+// still flagged, while corrupting ephPub and the ciphertext so the recipient
+// cannot decrypt the opening of a note whose inputs are already spent.
 template TransactCompressN(N_IN, N_OUT) {
     var PI_PER_OUT = 3;
     var N = 9 + 3 * N_IN + 5 * N_OUT + PI_PER_OUT * N_OUT;
@@ -111,12 +109,11 @@ template TransactCompressN(N_IN, N_OUT) {
     y <== pe.y;
 }
 
-// TreeUpdateBatch public-input compressor: 4 + 6·MAX_L coefficients → (y, z).
+// TreeUpdateBatch public-input compressor: 4 + 6·MAX_L coefficients to (y, z).
 // Layout must match PubInputs.sol :: compress(TreeUpdateBatch).
 //
-// Every array is indexed by leaf slot: a batch commits to actual_count
-// individual leaves, so the deposit-binding fields (leaf_asset, leaf_public_in,
-// is_deposit) are MAX_L wide.
+// Every array is indexed by leaf slot, so the deposit-binding fields
+// (leaf_asset, leaf_public_in, is_deposit) are MAX_L wide.
 //
 // The two uint64 blocks (leaf_asset, leaf_public_in) are adjacent and the uint8
 // block (is_deposit) follows them, so PubInputs.compress re-masks the sub-word

@@ -7,7 +7,7 @@ include "asset_gen.circom";
 include "value_commit.circom";
 include "poly_eval.circom";
 
-// MASP pool: N_IN-input × N_OUT-output multi-asset transact circuit.
+// MASP pool: N_IN-input x N_OUT-output multi-asset transact circuit.
 // Instantiated by 4x6.circom.
 //
 // Parameters:
@@ -15,10 +15,10 @@ include "poly_eval.circom";
 //   N_IN  — spent-note slots; unused slots are dummies.
 //   N_OUT — output-note slots; unused slots are value-0 notes to self.
 //
-// Per-note generator V^t = HashToAssetGen(asset_id); the transparent bucket
-// uses V^pub = HashToAssetGen(public_asset_id); cv = value·V^t + rcv·H.
-// PerAssetValueBalance enforces conservation; PerAssetPointBalance is defence
-// in depth (see balance.circom).
+// Per-note generator V^t = HashToAssetGen(asset_id); the transparent bucket uses
+// V^pub = HashToAssetGen(public_asset_id); cv = value·V^t + rcv·H.
+// PerAssetValueBalance enforces conservation; PerAssetPointBalance is defence in
+// depth (see balance.circom).
 //
 // Per-slot constraints live in SpentNote and OutputNote; this template wires
 // them together.
@@ -55,7 +55,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
     // Pins (asset, value) into the inserted leaf; forwarded to tree_update_batch.
     signal input out_cv_dep[N_OUT][2];
 
-    // FMD clue. Computed off-circuit and constrained only by PolyEval; GAMMA is a
+    // FMD clue. Computed off-circuit and constrained only by PolyEval. GAMMA is a
     // subscription-time parameter, not a circuit parameter.
     signal input out_clue_bits[N_OUT];
     signal input out_clue_Rx[N_OUT];
@@ -63,8 +63,8 @@ template Transact(DEPTH, N_IN, N_OUT) {
 
     // Digest of the encrypted-note payload (ephPub + ciphertext, per output),
     // computed off-circuit and constrained only by PolyEval, as the clue fields
-    // are. Stops a relayer corrupting the payload while keeping the proof
-    // valid; see poly_eval.circom :: TransactCompressN.
+    // are. Binds the payload against relayer tampering; see
+    // poly_eval.circom :: TransactCompressN.
     signal input out_aux_digest;
 
     // ===== PRIVATE: spent notes =====
@@ -125,8 +125,8 @@ template Transact(DEPTH, N_IN, N_OUT) {
     // -------------------------------------------------------------------------
     // Output-note slots
     // -------------------------------------------------------------------------
-    // out_rho is pinned to DeriveRho(nullifier[0], j) so no two committed output
-    // notes can share a rho, and therefore no two can share a future nullifier.
+    // out_rho is pinned to DeriveRho(nullifier[0], j), so no two committed output
+    // notes share a rho and therefore none share a future nullifier.
     component out_rho_d[N_OUT];
     component out_note[N_OUT];
 

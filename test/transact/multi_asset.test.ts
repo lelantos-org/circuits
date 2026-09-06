@@ -59,7 +59,7 @@ describe("transact_4x6 / multi-asset", function () {
     });
 
     it("FAILS when an output asset is swapped for one of equal total value", async () => {
-        // Straight substitution: same numbers, wrong colour.
+        // Same values, different asset ids.
         const { tx, circuit } = ctx;
         const { root, inputs } = ctx.tx.twoRealInputs([100n, 50n], ALICE_NSK);
         await expectWitnessFails(circuit, tx.build({

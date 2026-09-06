@@ -35,7 +35,8 @@ export interface FlattenInput {
 }
 
 /**
- * TransactCompressN layout. Total = 9 + 3·N_IN + 8·N_OUT (31 at 2x2, 53 at 4x4, 69 at 4x6).
+ * TransactCompressN layout. Total = 9 + 3·N_IN + 8·N_OUT; 69 at (N_IN, N_OUT)
+ * = (4, 6).
  *
  * Arity is taken from the input array lengths, matching the circom template's
  * genericity over (N_IN, N_OUT).
@@ -167,8 +168,8 @@ export function hornerEval(coeffs: Field[], z: Field): Field {
  * `abi.encode(uint256[] coeffs)`: the preimage `fiatShamirZ` hashes.
  *
  * Layout: 32-byte offset (0x20) || 32-byte length || N × 32-byte big-endian.
- * Note the big-endian element order, which differs from the little-endian
- * encoding used elsewhere in this directory.
+ * The element order is big-endian, unlike the little-endian encoding used
+ * elsewhere in this directory.
  *
  * Exposed separately because the circuit places no constraint on `z`, so an
  * encoding error is not detectable through witness generation. The vectors

@@ -1,8 +1,8 @@
-// Transact vectors, for every shipped shape (2x2, 3x3, 4x4).
+// Transact vectors, for every shipped shape (4x6 is the only one).
 //
 // One case produces one vector. The construction matches `TxBuilder` in
-// test/lib/transact.ts — same note derivation, forced output rho and aux
-// digest — but keeps its own leaf and dummy bookkeeping, since the published
+// test/lib/transact.ts (same note derivation, forced output rho and aux digest)
+// but keeps its own leaf and dummy bookkeeping, since the published
 // `intermediates` block exposes values TxBuilder does not return.
 
 import {
@@ -30,7 +30,6 @@ import {
     type SpentNote,
 } from "../../test/ref/index.js";
 import { loadCircuit, readOutput, srcPath } from "../../test/lib/circuit.js";
-import { DEPTH } from "../../test/lib/constants.js";
 import { TEST_AUX_DIGEST } from "../../test/lib/transact.js";
 import {
     SCHEMA,
@@ -60,11 +59,10 @@ interface TransactShape {
     nIn: number;
     nOut: number;
     /**
-     * Quaternary tree depth this shape's circuit was instantiated at.
+     * Quaternary tree depth this shape's circuit is instantiated at.
      *
-     * Per shape, not global: `4x6` is `Transact(11, 4, 6)` while the older three
-     * remain at depth 10, and the Merkle path length in the witness has to match
-     * the circuit or witness calculation rejects it outright.
+     * Per shape, not global: the Merkle path length in the witness must match
+     * the circuit or witness calculation rejects it.
      */
     depth: number;
     source: string;
@@ -98,14 +96,14 @@ export const TRANSACT_SHAPES: TransactShape[] = [
         nOut: 6,
         depth: 11,
         source: "src/4x6.circom",
-        // The target shape, `Transact(11, 4, 6)`. Six outputs so a withdrawal's
-        // change lands on the denomination ladder in one spend; four inputs
-        // because an input slot costs roughly 3.4x an output slot.
+        // `Transact(11, 4, 6)`. Six outputs so a withdrawal's change lands on
+        // the denomination ladder in one spend; four inputs because an input
+        // slot costs roughly 3.4x an output slot.
         //
         // These vectors pin the 69-slot layout the Lean development proves
-        // against, so the `PubInputs.compress` overload has a byte-exact target.
-        // Note its calldata prefix is 50 words rather than 4x4's 40, which moves
-        // every word `compress` re-masks in assembly.
+        // against, giving the `PubInputs.compress` overload a byte-exact target.
+        // Its calldata prefix is 50 words, which fixes every word `compress`
+        // re-masks in assembly.
         cases: [
             {
                 name: "internal-4in6out-balanced",
@@ -177,10 +175,8 @@ export const TRANSACT_SHAPES: TransactShape[] = [
 ];
 
 /**
- * Reject a case the circuit would reject.
- *
- * Catches a mis-specified case here rather than as an opaque constraint failure
- * inside circom.
+ * Reject a case the circuit would reject, so a mis-specified case surfaces here
+ * rather than as a constraint failure inside circom.
  */
 function validateCase(shape: TransactShape, c: TransactCase): void {
     if (c.inputs.length !== shape.nIn || c.outputs.length !== shape.nOut) {
@@ -327,8 +323,8 @@ export async function buildTransactVectors(shape: TransactShape) {
         const { witnessInput, coeffs, z, y } =
             buildWitness(P, J, c, inputs, outputs, clueList, merkleRoot);
 
-        // The circuit is the oracle, not the Horner loop below. Recording only the TS
-        // value would make the file a TS-to-TS tautology.
+        // The compiled circuit is the oracle for `y`, not the TypeScript Horner
+        // evaluation.
         const w = await circuit.calculateWitness(witnessInput, true);
         await circuit.checkConstraints(w);
         const circuitY = readOutput(w);
@@ -390,7 +386,11 @@ export async function buildTransactVectors(shape: TransactShape) {
                     cvDep: pt(J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcvDep)),
                 })),
                 merkle: {
-                    depth: DEPTH,
+                    // The shape's own depth, not the global constant:
+                    // `TransactShape.depth` is per-shape, so reading the
+                    // constant would publish a wrong depth for any shape
+                    // instantiated at another one.
+                    depth: shape.depth,
                     leaves: tree.leaves.map(s),
                     root: s(merkleRoot),
                     proofs: finalizedReal.map((sn) => ({

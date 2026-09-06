@@ -3,17 +3,25 @@
 // out_clue_*, out_aux_digest and the four address fields carry no in-circuit
 // constraint. Their only binding is inclusion in the coefficient vector: change
 // one and `y` changes, invalidating the proof against the original (z, y) pair.
-// A TransactCompressN bug dropping a slot would pass every constraint test and
+// A TransactCompressN that dropped a slot would pass every constraint test and
 // fail only here.
 //
-// For the clue fields specifically, this is what stops a relayer leaving the
-// clue intact — so the proof verifies and the recipient's FMD scan flags the
-// note — while corrupting the ciphertext the recipient needs to open it.
+// The property holds only at a live Fiat-Shamir challenge. At z = 1 the Horner
+// chain collapses to a plain sum, so `y` is permutation-invariant and a compress
+// that transposed two slots would satisfy every assertion below.
+// `TxBuilder.build` derives z from the coefficients for that reason, and the
+// last case here pins it.
+//
+// For the clue fields, this is what stops a relayer leaving the clue intact — so
+// the proof verifies and the recipient's FMD scan flags the note — while
+// corrupting the ciphertext the recipient needs to open it.
 
 import { expect } from "chai";
 
 import { flatten, hornerEval, type CircomTransactInput } from "../helpers";
 import { N_IN, N_OUT, TIMEOUT_CIRCUIT } from "../lib/constants";
+import { expectWitnessY } from "../lib/expect";
+import { rebindFiatShamir } from "../lib/transact";
 import { useTransactCircuit } from "./setup";
 
 /** Fields with no in-circuit constraint, so PolyEval is the only thing binding them. */
@@ -52,6 +60,9 @@ describe("transact_4x6 / PolyEval binding", function () {
         base.chain_id          = "67890";
         base.payer_address     = "11111";
         base.relayer_address   = "22222";
+        // The four writes above are PolyEval coefficients, so the challenge
+        // `balanced()` derived does not describe this witness.
+        rebindFiatShamir(base);
     });
 
     /**
@@ -59,8 +70,12 @@ describe("transact_4x6 / PolyEval binding", function () {
      * reference predicts.
      *
      * The inequality establishes that the field reaches the polynomial; the two
-     * assertOut calls establish that the circuit and the reference agree on what
-     * the polynomial evaluates to.
+     * `expectWitnessY` calls establish that the circuit and the reference agree
+     * on its evaluation over a checked constraint system.
+     *
+     * `z` is held fixed across the pair: that is the tamper the verifier sees, a
+     * relayer rewriting a coefficient in calldata while replaying the original
+     * challenge.
      */
     async function assertBinds(
         label: string,
@@ -78,10 +93,8 @@ describe("transact_4x6 / PolyEval binding", function () {
 
         // No constraint covers these fields, so both witnesses generate and `y`
         // carries the entire signal.
-        const wBase = await circuit.calculateWitness(base, true);
-        const wTampered = await circuit.calculateWitness(tampered, true);
-        await circuit.assertOut(wBase, { y: yBase.toString() });
-        await circuit.assertOut(wTampered, { y: yTampered.toString() });
+        await expectWitnessY(circuit, base, yBase);
+        await expectWitnessY(circuit, tampered, yTampered);
     }
 
     for (const field of BOUND_FIELDS) {
@@ -108,5 +121,29 @@ describe("transact_4x6 / PolyEval binding", function () {
         const coeffs = flatten(base);
         expect(coeffs.length).to.equal(COEFF_COUNT);
         expect(coeffs[COEFF_COUNT - 1]).to.equal(BigInt(base.out_aux_digest));
+    });
+
+    // Pins that `y` depends on coefficient ORDER, not only on which fields reach
+    // the total. At z = 1 PolyEval degenerates to a plain sum, and a
+    // TransactCompressN that transposed two slots would satisfy every case above.
+    it("y is sensitive to slot order, not just slot membership", () => {
+        const z = BigInt(base.z);
+        expect(z, "z must not be 1: at z = 1 any permutation of the layout yields the same y")
+            .to.not.equal(1n);
+
+        // recipient_address and chain_id: adjacent slots, distinct values.
+        const recipient = 1 + N_IN + N_OUT + 3 + 2 * N_IN + 2 * N_OUT;
+        const coeffs = flatten(base);
+        expect(coeffs[recipient]).to.equal(BigInt(base.recipient_address));
+        expect(coeffs[recipient + 1]).to.equal(BigInt(base.chain_id));
+
+        const swapped = [...coeffs];
+        swapped[recipient] = coeffs[recipient + 1];
+        swapped[recipient + 1] = coeffs[recipient];
+
+        expect(
+            hornerEval(swapped, z),
+            "transposing two coefficients must move y",
+        ).to.not.equal(hornerEval(coeffs, z));
     });
 });

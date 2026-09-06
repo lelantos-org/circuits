@@ -126,6 +126,23 @@ theorem dig_high {k : ℕ} (hk : k < slots) {d : ℕ} (hd : 2 ≤ d) : dig k d =
   have : k / 4 ^ d = 0 := Nat.div_eq_of_lt (by omega)
   simp [dig, this]
 
+/-- The index slot `k` actually decomposes.
+
+The circuit range-checks `active[k] · (start_index + k)`, not `start_index + k`, so an
+inactive slot decomposes zero rather than the index it would have had. Nothing downstream
+depends on which digits an inactive slot produces — both muxes discard its insert — but the
+assignment still has to be internally consistent, so the digits, the per-slot insert and the
+bit decomposition all read this index rather than `k`. -/
+def eff (k : ℕ) : ℕ := if k < filled then k else 0
+
+theorem eff_lt (k : ℕ) (hk : k < slots) : eff k < slots := by
+  unfold eff; split <;> omega
+
+theorem eff_val (k : ℕ) (hk : k < slots) :
+    act k * (0 + ((k : ℕ) : F)) = ((eff k : ℕ) : F) := by
+  rw [act_eq k hk]
+  by_cases h : k < filled <;> simp [eff, h]
+
 /-- The digit the circuit reads off the index bits is the one `dig` names. -/
 theorem dig_eq {k : ℕ} (hk : k < slots) (d : ℕ) :
     natBits k (2 * d) + 2 * natBits k (2 * d + 1) = ((dig k d : ℕ) : F) := by
@@ -165,14 +182,14 @@ written out; everything downstream goes through `chainOf`. -/
 noncomputable def frAt : ℕ → ℕ → ℕ → F
   | 0, _, _ => 0
   | k + 1, d, s =>
-      act k * insFrontierOut (dig k d)
-          (insCur (leafOf k) (dig k) emptyFill (frAt k) d) (frAt k d) s
+      act k * insFrontierOut (dig (eff k) d)
+          (insCur (leafOf k) (dig (eff k)) emptyFill (frAt k) d) (frAt k d) s
         + (1 - act k) * frAt k d s
 
 /-- The running-node chain of slot `k`'s insert: `chainOf k d` is the node at level `d`, and
 `chainOf k depth` is the root that insert produces. Every insert-related field of the
 assignment is a projection of this. -/
-noncomputable def chainOf (k : ℕ) : ℕ → F := insCur (leafOf k) (dig k) emptyFill (frAt k)
+noncomputable def chainOf (k : ℕ) : ℕ → F := insCur (leafOf k) (dig (eff k)) emptyFill (frAt k)
 
 /-- The root after slot `k`. -/
 noncomputable def rootAt : ℕ → F
@@ -201,14 +218,15 @@ noncomputable def batch : BatchSignals depth slots where
   active := act
   -- derived: leaves and indices
   leaves := leafOf
-  idxBits := fun k => natBits k
-  idxDig := fun k d => ((dig k d : ℕ) : F)
+  idxIn := fun k => act k * (0 + ((k : ℕ) : F))
+  idxBits := fun k => natBits (eff k)
+  idxDig := fun k d => ((dig (eff k) d : ℕ) : F)
   -- derived: one insert per slot, all projections of `chainOf`
-  insB := fun k d => natBits (dig k d)
-  insS := fun k d => selAt (dig k d)
-  insC := fun k d => insChildren (dig k d) (chainOf k d) (emptyFill d) (frAt k d)
+  insB := fun k d => natBits (dig (eff k) d)
+  insS := fun k d => selAt (dig (eff k) d)
+  insC := fun k d => insChildren (dig (eff k) d) (chainOf k d) (emptyFill d) (frAt k d)
   insCur := chainOf
-  insFrOut := fun k d => insFrontierOut (dig k d) (chainOf k d) (frAt k d)
+  insFrOut := fun k d => insFrontierOut (dig (eff k) d) (chainOf k d) (frAt k d)
   insRoot := fun k => chainOf k depth
   -- derived: the two muxes
   fr := frAt
@@ -222,6 +240,8 @@ noncomputable def batch : BatchSignals depth slots where
   vT := fun _ => Witness.vTOf Witness.zeroBits 0
   rH := fun _ => Witness.rH
   expected := fun _ => Witness.cvOf Witness.zeroBits 0
+  assetInv := fun _ => 0
+  assetIsZero := fun _ => 1
 
 /-! ## The two halves of the constraint system -/
 
@@ -243,18 +263,21 @@ theorem batch_chain_sat : BatchChainSat countBits batch where
   spend_zero_asset k _ := by simp [batch]
   spend_zero_public_in k _ := by simp [batch]
   leaf_def k _ := rfl
+  idx_in_def _ _ := rfl
   idx_bits k hk := by
-    -- `start_index = 0`, so the value decomposed is just `k`, and `k < 8 ≤ 2 ^ 22`.
+    -- `start_index = 0`, so an active slot decomposes `k` and an inactive one 0;
+    -- either way the value is `eff k`, and `eff k < 8 ≤ 2 ^ 22`.
     have hk8 : k < 8 := hk
-    have hlt : k < 2 ^ (2 * depth) := by
+    have hlt : eff k < 2 ^ (2 * depth) := by
+      have he : eff k < 8 := by unfold eff; split <;> omega
       have h : (8 : ℕ) ≤ 2 ^ (2 * depth) := by norm_num
       omega
-    show Num2BitsSat (2 * depth) (0 + ((k : ℕ) : F)) (natBits k)
-    rw [zero_add]
+    show Num2BitsSat (2 * depth) (act k * (0 + ((k : ℕ) : F))) (natBits (eff k))
+    rw [eff_val k hk]
     exact num2Bits_witness hlt
-  idx_dig k hk d _ := (dig_eq hk d).symm
+  idx_dig k hk d _ := (dig_eq (eff_lt k hk) d).symm
   insert k hk :=
-    quaternaryInsert_witness (leafOf k) (dig k) (dig_lt hk) emptyFill (frAt k)
+    quaternaryInsert_witness (leafOf k) (dig (eff k)) (dig_lt (eff_lt k hk)) emptyFill (frAt k)
   fr_base _ _ _ _ := rfl
   root_base := rfl
   fr_mux _ _ _ _ _ _ := rfl
@@ -267,6 +290,8 @@ and the `ValueCommit`) is still discharged in full, which is what `batch_deposit
 quantifies over. -/
 theorem batch_deposit_sat : BatchDepositSat batch where
   active_dep_def k _ := by simp [batch]
+  asset_isZero k _ := by constructor <;> simp [batch]
+  asset_nonzero k _ := by simp [batch]
   gen_def k _ := rfl
   public_in_range k _ := Witness.num2Bits_zero 64
   expected_def k _ := Witness.valueCommit_witness Witness.zeroBits 0

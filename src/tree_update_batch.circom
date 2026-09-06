@@ -13,30 +13,42 @@ include "../node_modules/circomlib/circuits/bitify.circom";
 include "../node_modules/circomlib/circuits/comparators.circom";
 
 // Relayer proof advancing the commitment tree from old_root to new_root by
-// inserting up to MAX_L leaves at [start_index, start_index + MAX_L).
+// inserting actual_count leaves at start_index.
 //
-// actual_count ∈ [1, MAX_L] is a LEAF count, so odd counts are permitted. One
-// batch carries either a spend's N_OUT output leaves or a run of deposits, two
-// leaves each. Trailing slots must be zero.
+// actual_count is in [1, MAX_L] and counts leaves, so odd counts are permitted.
+// One batch carries either a spend's N_OUT output leaves or a run of deposits,
+// two leaves each. Trailing slots must be zero.
 //
 // leaf_k = Poseidon(TAG_LEAF, cms[k], cv_dep[k][0], cv_dep[k][1]), where cv_dep
 // is the depositor's or spender's Pedersen value commitment. Spends recompute
-// the same leaf in spent.circom, so (asset, value) cannot be substituted later.
+// the same leaf in spent.circom, binding (asset, value) across the two proofs.
 //
 // Per-leaf deposit binding, applied when is_deposit[k] == 1:
 //   cv_dep[k] == leaf_public_in[k]·V^leaf_asset[k] + rcv[k]·H
 //
-// Deposits carry no transact proof, so the batch circuit pins the leaf itself.
-// The binding is per leaf rather than over an aggregate: a sum would fix only
+// Deposits carry no transact proof, so this circuit pins the leaf itself. The
+// binding is per leaf rather than over an aggregate: a sum would fix only
 // Σvalue modulo the subgroup order l, letting a depositor place 2^63·V^A in one
 // leaf, absorb (public_in − 2^63) mod l in a second leaf they abandon, and keep
 // a valid 2^63 note for a one-unit deposit. One equality per leaf admits no
 // such split.
 //
-// is_deposit[k] == 0 skips the check; the transact circuit proves conservation
-// for spends.
+// The binding is not injective in (asset, value) on its own. HashToAssetGen is
+// circomlib Pedersen over a 72-bit message, so V^a = m(a)·BASE0 for a publicly
+// computable m(a) of about 2^85 (src/README.md § 5), and the equality pins the
+// product value·m(asset) rather than the pair. Two registered ids whose
+// multipliers share a large factor admit v·m(a) == v'·m(a') with both values
+// inside the 64-bit range, letting a depositor pay v of the cheap asset while
+// committing the depositor-chosen cms[k] to (a', v') and spending the leaf as
+// the expensive one. The separation of the registered id set is what rules this
+// out: `just asset-ids <ids>` computes the bound and must be run before
+// registration, since AssetRegistry.addAsset accepts an arbitrary uint64.
 //
-// PolyEval coefficient layout, which must match
+// is_deposit[k] == 0 skips the binding; the transact circuit proves conservation
+// for spends. Asset id 0 is rejected on a deposit leaf, since SpentNote refuses
+// that id on every real note and the leaf would be unspendable.
+//
+// PolyEval coefficient layout. Must match
 // PubInputs.sol :: compress(TreeUpdateBatch):
 //   [0]                            old_root
 //   [1]                            new_root
@@ -49,7 +61,24 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 //   [4 + 5·MAX_L .. 3 + 6·MAX_L]   is_deposit
 // Total = 4 + 6·MAX_L (52 for MAX_L = 8).
 //
-// The caller must ensure start_index + MAX_L - 1 < 4^DEPTH.
+// Capacity: the per-slot index range check is gated on active[k], so the bound
+// is start_index + actual_count - 1 < 4^DEPTH, over the leaves actually
+// inserted.
+//
+// Soundness obligations left to the contract. FrontierRoot binds frontier_in to
+// old_root but cannot bind start_index: a tree holding n leaves and one holding
+// n leaves plus trailing empties have the same root, so a (frontier, root) pair
+// is consistent with more than one index. The consumer must enforce, as MASP.sol
+// does:
+//
+//   1. start_index == committedCount, the authoritative leaf count
+//      (MASP._validateBatchHeader). Without it a relayer replays a valid batch
+//      at a lower index and overwrites committed leaves.
+//   2. actual_count pinned to the emitting operation, exactly TRANSACT_OUT
+//      leaves on the spend path.
+//   3. cms[k] and cv_dep[k] forwarded from the paired transact proof rather than
+//      taken from the relayer, for every output slot of that spend.
+//
 template TreeUpdateBatch(DEPTH, MAX_L) {
     // ===== PUBLIC =====
     signal input  z;
@@ -70,12 +99,10 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     signal input frontier_in[DEPTH][3];
     signal input rcv[MAX_L];              // rcv_dep of leaf k
 
-    // 1. Range-check actual_count ∈ [1, MAX_L] via Num2Bits(actual_count - 1).
-    //    That bounds it by 2^COUNT_BITS, so the bound must be tight to MAX_L.
-    //
-    //    COUNT_BITS is derived from MAX_L rather than written down, so the two
-    //    cannot fall out of step. The assert remains as the power-of-two guard,
-    //    which is a constraint on MAX_L the derivation cannot enforce.
+    // 1. Range-check actual_count in [1, MAX_L] via Num2Bits(actual_count - 1),
+    //    which bounds it by 2^COUNT_BITS. COUNT_BITS is derived from MAX_L so
+    //    the two cannot diverge; the assert enforces the power-of-two
+    //    requirement the derivation cannot.
     var COUNT_BITS = 0;
     var count_span = MAX_L;
     while (count_span > 1) {
@@ -96,8 +123,8 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
         active[k] <== lt[k].out;
     }
 
-    // 3. Zero every field of an inactive leaf. cv_dep feeds PolyEval, so without
-    //    this a prover could inject arbitrary cv_dep into inactive slots.
+    // 3. Zero every field of an inactive leaf. These fields feed PolyEval, so
+    //    otherwise a prover injects arbitrary values into inactive slots.
     for (var k = 0; k < MAX_L; k++) {
         (1 - active[k]) * cms[k]            === 0;
         (1 - active[k]) * cv_dep[k][0]      === 0;
@@ -110,7 +137,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 
     // 4. Booleanize is_deposit[k] and zero the deposit-only fields on spend
     //    leaves, so a relayer cannot place a nonzero leaf_asset or
-    //    leaf_public_in into the public inputs.
+    //    leaf_public_in into the public inputs of a batch carrying no deposit.
     for (var k = 0; k < MAX_L; k++) {
         is_deposit[k] * (1 - is_deposit[k]) === 0;
         (1 - is_deposit[k]) * leaf_asset[k]     === 0;
@@ -122,8 +149,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     signal leaves[MAX_L];
     for (var k = 0; k < MAX_L; k++) {
         leaf_h[k] = Poseidon(4);
-        // Hoisted through a `var` rather than assigned straight from the
-        // call; see tags.circom.
+        // Hoisted through a `var`; see tags.circom.
         var tag = TAG_LEAF();
         leaf_h[k].inputs[0] <== tag;
         leaf_h[k].inputs[1] <== cms[k];
@@ -132,10 +158,10 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
         leaves[k] <== leaf_h[k].out;
     }
 
-    // 6. cv_dep points must lie on Baby-Jubjub. For spend leaves this is the
-    //    only per-point cv_dep constraint here: an off-curve point produces a
-    //    note no on-curve ValueCommit can respend. Inactive slots hold (0, 0),
-    //    which is off-curve, so (1 - active) shifts y to check (0, 1).
+    // 6. cv_dep must lie on Baby-Jubjub. For spend leaves this is the only
+    //    per-point cv_dep constraint here: an off-curve point produces a note no
+    //    on-curve ValueCommit can respend. Inactive slots hold (0, 0), which is
+    //    off-curve, so (1 - active) shifts y to check (0, 1).
     component cv_on_curve[MAX_L];
     for (var k = 0; k < MAX_L; k++) {
         cv_on_curve[k] = BabyCheck();
@@ -143,16 +169,23 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
         cv_on_curve[k].y <== cv_dep[k][1] + (1 - active[k]);
     }
 
-    // 7. Per-leaf deposit binding, gated by active[k]·is_deposit[k]. The single
-    //    equality pins cv_dep[k] to exactly leaf_public_in units of leaf_asset;
-    //    see the header for why an aggregate over several leaves would not.
+    // 7. Per-leaf deposit binding, gated by active[k]·is_deposit[k]. The
+    //    equality pins cv_dep[k] to leaf_public_in units of leaf_asset.
     component asset_gen[MAX_L];
     component pub_in_mul[MAX_L];
     component rH_mul[MAX_L];
     component expected[MAX_L];
+    component leaf_asset_nz[MAX_L];
     signal active_dep[MAX_L];
     for (var k = 0; k < MAX_L; k++) {
         active_dep[k] <== active[k] * is_deposit[k];
+
+        // Asset id 0 is reserved. SpentNote rejects it on every real note, so a
+        // leaf minted at asset 0 is committed and unspendable. The deposit path
+        // is the only inserter that mints a leaf without a transact proof.
+        leaf_asset_nz[k] = IsZero();
+        leaf_asset_nz[k].in <== leaf_asset[k];
+        active_dep[k] * leaf_asset_nz[k].out === 0;
 
         asset_gen[k] = HashToAssetGen();
         asset_gen[k].asset_id <== leaf_asset[k];
@@ -196,6 +229,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     // 9. Sequential single-leaf inserts; active[k] selects whether the leaf
     //    propagates.
     component idx_bits[MAX_L];
+    signal idx_in[MAX_L];
     signal idx_dig[MAX_L][DEPTH];
 
     component ins[MAX_L];
@@ -217,9 +251,14 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     signal mux_root_b[MAX_L];
 
     for (var k = 0; k < MAX_L; k++) {
-        // Insertion index, range-checked to 2·DEPTH bits.
+        // Insertion index, range-checked to 2·DEPTH bits and gated on active[k].
+        // An inactive slot's insert is muxed away below, so range-checking its
+        // index would bound capacity alone and put the top MAX_L - 1 leaves of
+        // the tree out of reach. An inactive slot decomposes 0; its digits are
+        // discarded with the insert.
+        idx_in[k] <== active[k] * (start_index + k);
         idx_bits[k] = Num2Bits(BITS);
-        idx_bits[k].in <== start_index + k;
+        idx_bits[k].in <== idx_in[k];
 
         for (var d = 0; d < DEPTH; d++) {
             idx_dig[k][d] <== idx_bits[k].out[2 * d] + 2 * idx_bits[k].out[2 * d + 1];

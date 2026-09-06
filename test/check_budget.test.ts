@@ -13,9 +13,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CIRCUITS = path.join(__dirname, "..");
 const SCRIPT = path.join(CIRCUITS, "scripts", "check-budget.mjs");
 
-// Coverage for the constraint-budget gate, which is what keeps a per-slot
-// gadget change from pushing Transact(10,3,3) out of its 2^16 FFT domain and
-// roughly doubling proving time without any test failing.
+// Coverage for the constraint-budget gate, which keeps a per-slot gadget change
+// from pushing tree_update_batch out of its 2^17 FFT domain.
 //
 // Each case builds a throwaway root laid out the way the script expects
 // (<root>/scripts, <root>/build, <root>/src, <root>/budget.json) and runs the
@@ -28,10 +27,12 @@ describe("check-budget.mjs", function () {
     const SCRATCH = path.join(CIRCUITS, "build", ".budget-test-fixture");
     const R1CS = path.join(SCRATCH, "tiny.r1cs");
     let actualConstraints: number;
+    /** nConstraints + nPubInputs + nOutputs — what snarkjs sizes the domain from. */
+    let sizedSignals: number;
 
-    // Compiles a throwaway circuit rather than reading build/2x2.r1cs: the test
-    // job never runs the production compile, so depending on it would make these
-    // cases skip in CI. A two-constraint circuit also parses in milliseconds.
+    // Compiles a throwaway circuit rather than reading a production artifact:
+    // the test job never runs the production compile, so depending on one would
+    // make these cases skip in CI.
     before(async function () {
         fs.rmSync(SCRATCH, { recursive: true, force: true });
         fs.mkdirSync(SCRATCH, { recursive: true });
@@ -54,7 +55,9 @@ describe("check-budget.mjs", function () {
         execFileSync("circom", [src, "--r1cs", "-o", SCRATCH, "-l", path.join(CIRCUITS, "node_modules")], {
             stdio: "ignore",
         });
-        actualConstraints = (await snarkjs.r1cs.info(R1CS)).nConstraints;
+        const info = await snarkjs.r1cs.info(R1CS);
+        actualConstraints = info.nConstraints;
+        sizedSignals = info.nConstraints + info.nPubInputs + info.nOutputs;
     });
 
     after(() => {
@@ -136,6 +139,28 @@ describe("check-budget.mjs", function () {
         expect(code).to.equal(1);
     });
 
+    // snarkjs sizes the FFT from nConstraints + nPubInputs + nOutputs and
+    // requires that sum to be at most domain - 1, so the gate must count public
+    // signals as well. The domain: 1 case above is far enough over to miss the
+    // boundary; this case and the next pin both sides of it.
+    it("counts public signals against the FFT domain", () => {
+        // sized == domain is one too large: snarkjs needs sized <= domain - 1.
+        scaffold(budgetWith(actualConstraints, sizedSignals));
+        const tight = run();
+        expect(tight.out, "sized == domain must not fit").to.contain("EXCEEDS");
+        expect(tight.code).to.equal(1);
+    });
+
+    it("accepts the largest count that still fits the domain", () => {
+        fs.rmSync(ROOT, { recursive: true, force: true });
+        scaffold(budgetWith(actualConstraints, sizedSignals + 1));
+        const ok = run();
+        expect(ok.out, "sized == domain - 1 is the last count that fits").to.contain(
+            "constraint budget ok",
+        );
+        expect(ok.code).to.equal(0);
+    });
+
     it("FAILS when the artifact is missing", () => {
         scaffold(budgetWith(actualConstraints, 65536), { withR1cs: false });
         const { code, out } = run();
@@ -143,8 +168,7 @@ describe("check-budget.mjs", function () {
         expect(code).to.equal(1);
     });
 
-    // Reading an artifact older than its sources would report the previous
-    // commit's numbers as a pass — the one way this gate could do harm.
+    // An artifact older than its sources would report stale counts as a pass.
     it("FAILS when the artifact is older than the sources", () => {
         scaffold(budgetWith(actualConstraints, 65536), { sourceOffsetMs: 60_000 });
         const { code, out } = run();
@@ -152,8 +176,8 @@ describe("check-budget.mjs", function () {
         expect(code).to.equal(1);
     });
 
-    // Regression: an earlier version scanned all of src/, so adding any test
-    // fixture failed the gate until the production circuits were recompiled.
+    // Staleness is decided from production sources only, so adding a test
+    // fixture does not require recompiling the production circuits.
     it("ignores src/test when deciding staleness", () => {
         scaffold(budgetWith(actualConstraints, 65536), { testFixture: true });
         const { code, out } = run();

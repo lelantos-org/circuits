@@ -3,9 +3,10 @@
 // `lib/frontier_root.circom` rebinds `frontier_in` to public `old_root`, so a
 // relayer cannot pair a real `oldRoot` with a forged frontier.
 // `frontier_root.test.ts` covers a depth-3 wrapper over canned indices; this
-// file drives the full `tree_update_batch` circuit at DEPTH = 10 over random:
+// file drives the full `tree_update_batch` circuit at the production DEPTH over
+// random:
 //   - edge-digit `start_index` patterns (digits ∈ {0, 3}: minimal or maximal
-//     slot fill at each of the 10 levels);
+//     slot fill at each level);
 //   - active-leaf counts k ∈ [1, MAX_L], odd counts included, so every padding
 //     shape is covered alongside the rebuild;
 //   - tamper coordinates (level, slot) over the filled siblings.
@@ -15,8 +16,8 @@
 // circuit, so a rejection here means `verifyProof` also rejects and a tampered
 // batch cannot corrupt the authoritative root.
 //
-// Each fast-check trial builds two depth-10 batch witnesses. The prefilled tree
-// behind them reaches ~4^10 leaves, so `buildHonest` relies on
+// Each fast-check trial builds two production-depth batch witnesses. The
+// prefilled tree behind them reaches ~4^DEPTH leaves, so `buildHonest` relies on
 // `MerkleTree.fillConstant` to build it in O(depth) hashes; a distinct-leaf fill
 // costs ~40s per trial and blows the suite timeout. Run count follows the shared
 // `FUZZ` env (`light` / `medium` / `heavy`).
@@ -40,7 +41,8 @@ const WRAPPER = srcPath("tree_update_batch.circom");
 
 /// Compose a `start_index` whose quaternary digits at every level are
 /// in {0, 3} — the "edge" slot positions at each tree level. Returns the
-/// integer; bits length is 2·DEPTH = 20 (Num2Bits-safe).
+/// integer, which is at most 4^DEPTH - 1 and so always fits the circuit's
+/// Num2Bits(2·DEPTH).
 function startIndexFromEdgeDigits(digits: number[]): number {
     let n = 0;
     for (let lvl = digits.length - 1; lvl >= 0; lvl--) n = n * 4 + digits[lvl];
@@ -82,11 +84,16 @@ describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
                     return d;
                 })();
                 const startIndex = startIndexFromEdgeDigits(digits);
-                const headroom = Math.max(1, Math.min(MAX_L, CAPACITY - startIndex));
+                // The circuit range-checks start_index + k only for ACTIVE slots
+                // (k < actual_count), so the batch fits exactly when the last
+                // active index stays inside the tree. An all-3 draw puts
+                // startIndex at 4^DEPTH - 1, where the only legal count is 1;
+                // bounding by MAX_L alone would then hand the property an
+                // over-capacity batch and fail the honest-witness assertion.
+                const headroom = Math.min(MAX_L, CAPACITY - startIndex);
                 return fc.integer({ min: 1, max: headroom }).map(k => ({ digits, k }));
             });
-        // Tamper level picked uniformly over the filled subset (no levelSeed
-        // bias from the previous `levelSeed % tLevels.length` mod).
+        // Tamper level picked uniformly over the filled subset.
         const arbTamperLevel = arbDigitsK.chain(({ digits, k }) => {
             const tLevels = tamperableLevels(digits);
             return fc.constantFrom(...tLevels).map(level => ({ digits, k, level }));

@@ -1,9 +1,9 @@
 // tree_update_batch vectors.
 //
-// A batch commits `actual_count` individual leaves starting at `start_index`;
-// the remaining slots are padding the circuit constrains to zero. Cases cover
-// a single deposit, the odd count a 3-output transact bundle produces, and a
-// mixed deposit/spend batch at a non-zero start index.
+// A batch commits `actual_count` leaves starting at `start_index`; the
+// remaining slots are padding the circuit constrains to zero. Cases cover a
+// single deposit, an odd count, and a mixed deposit/spend batch at a non-zero
+// start index.
 
 import {
     Jubjub,
@@ -40,7 +40,7 @@ interface BatchLeafSpec {
 interface BatchCase {
     name: string;
     description: string;
-    /** Throwaway leaves already in the tree, so start_index is non-zero. */
+    /** Leaves already in the tree, making start_index non-zero. */
     prefilled: number;
     leaves: BatchLeafSpec[];
 }
@@ -88,7 +88,7 @@ interface BuiltLeaf {
  * Build a leaf from its spec.
  *
  * The commitment is hashed directly rather than via `buildNoteCommitment`: the
- * batch circuit constrains no note structure, so a distinct well-formed field
+ * batch circuit constrains no note structure, so any distinct well-formed field
  * element suffices. Only deposit leaves declare an asset and a public_in; a
  * spend leaf zeroes both and skips the binding check.
  */

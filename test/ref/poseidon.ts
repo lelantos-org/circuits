@@ -30,8 +30,8 @@ const TABLE: Record<number, (xs: Field[]) => bigint> = {
 export class Poseidon {
     private constructor() {}
 
-    // Async factory, for symmetry with `Jubjub.build()`, which
-    // does need to await circomlibjs.
+    // Async factory, for symmetry with `Jubjub.build()`, which awaits
+    // circomlibjs.
     static async build(): Promise<Poseidon> {
         return new Poseidon();
     }

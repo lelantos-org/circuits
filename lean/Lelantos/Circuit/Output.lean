@@ -6,7 +6,7 @@ import Lelantos.Gadgets.Note
 
 Simpler than `SpentNote`: no Merkle proof, no key chain, no dummy branch. `pk` is the
 recipient's key and is deliberately unconstrained — the circuit proves nothing about who
-can later spend the note, by design — `src/README.md § 1, "Out of scope (v1)"` puts spend
+can later spend the note, by design: `src/README.md § 1, "Out of scope"` puts spend
 authorization out of scope for v1.
 
 Two things it does prove, and both matter:
@@ -18,9 +18,9 @@ Two things it does prove, and both matter:
 * `cv` and `cv_dep` are built from the *same* range-checked bit array and the *same*
   generator — structurally so, since both come out of one `ValueCommitPair`
   (`src/lib/output.circom:59-66`) — so they cannot open to different
-  `(asset, value)` pairs. That is `outputNote_cvDep_binds` — the 2x2 half of deposit
-  binding. The value-inflation defences C-1' and C-1'' live in
-  `tree_update_batch.circom` and are **not** covered by this development.
+  `(asset, value)` pairs. That is `outputNote_cvDep_binds`, the transact half of
+  deposit binding. The value-inflation defences live in `tree_update_batch.circom`
+  and are **not** covered by this development.
 -/
 
 namespace Lelantos
@@ -109,7 +109,7 @@ theorem outputNote_sound {o : OutputSlot} (h : OutputNoteSat o) : OutputWellForm
       cvOpens := valueCommit_opens h.value_range hvc
       cvDepOpens := valueCommit_opens h.value_range hvcd }
 
-/-- **Deposit binding, 2x2 half.** The exported `cv_dep` carries the same
+/-- **Deposit binding, transact half.** The exported `cv_dep` carries the same
 `value · V^asset` term as `cv`, so an output cannot advertise one value on-chain and
 deposit another. -/
 theorem outputNote_cvDep_binds {o : OutputSlot} (h : OutputNoteSat o) :

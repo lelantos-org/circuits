@@ -62,8 +62,8 @@ template SpentNote(DEPTH) {
     component rng_in = RangeCheck64();
     rng_in.v <== value;
 
-    // 4. cv     = ValueCommit(value, V^asset, rcv)      — bound in step 9.
-    //    cv_dep  = ValueCommit(value, V^asset, rcv_dep)  — feeds the leaf below.
+    // 4. cv     = ValueCommit(value, V^asset, rcv), bound in step 9.
+    //    cv_dep  = ValueCommit(value, V^asset, rcv_dep), feeds the leaf below.
     //    Both share one value·V^asset scalar mul; see ValueCommitPair.
     component gen_in = HashToAssetGen();
     gen_in.asset_id <== asset_id;
@@ -77,11 +77,10 @@ template SpentNote(DEPTH) {
     vc.rcv     <== rcv;
     vc.rcv_dep <== rcv_dep;
 
-    // 5. leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y). Recomputing the same
-    //    leaf that tree_update_batch inserted pins (asset, value) to the note.
+    // 5. leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y). Recomputing the leaf
+    //    tree_update_batch inserted pins (asset, value) to the note.
     component leaf_h = Poseidon(4);
-    // Hoisted through a `var` rather than assigned straight from the call; see
-    // tags.circom.
+    // Hoisted through a `var`; see tags.circom.
     var tag = TAG_LEAF();
     leaf_h.inputs[0] <== tag;
     leaf_h.inputs[1] <== cm.cm;
@@ -101,7 +100,7 @@ template SpentNote(DEPTH) {
     }
 
     // 7. nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm). cm is in the
-    //    preimage so a rho collision alone cannot lock a note.
+    //    preimage, so a rho collision alone cannot lock a note.
     component nk_d = DeriveNk();
     nk_d.nsk <== nsk;
 

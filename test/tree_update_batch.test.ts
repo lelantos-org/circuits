@@ -1,7 +1,7 @@
 // Tests for `tree_update_batch.circom`. Covers:
 //   - per-leaf format leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
 //   - per-leaf deposit binding cv_dep = leaf_public_in · V^leaf_asset + rcv · H
-//   - C-1 regression: cross-asset / value-inflation rejection
+//   - C-1: cross-asset and value-inflation rejection
 //   - odd leaf counts (1, 3) and leaf-granular multiplexing
 //   - padding zero constraints
 //
@@ -11,7 +11,7 @@
 //
 // The witness builders live in `lib/batch.ts`, shared with the fuzz suite.
 
-import { Jubjub, Poseidon } from "./helpers";
+import { BN254_FR, Jubjub, Poseidon } from "./helpers";
 import { loadCircuit, srcPath, type CircuitTester } from "./lib/circuit";
 import { treeUpdateBatchInputJson } from "./lib/inputs";
 import { expectWitnessFails, expectWitnessY } from "./lib/expect";
@@ -23,7 +23,10 @@ import {
     type BatchWitness,
     type LeafWitness,
 } from "./lib/batch";
-import { MAX_L, TIMEOUT_HEAVY, TWO_64 } from "./lib/constants";
+import { ARITY, BATCH_DEPTH, MAX_L, TIMEOUT_HEAVY, TWO_64, TWO_252 } from "./lib/constants";
+
+/** Leaf capacity of the batch circuit's tree: 4^11. */
+const CAPACITY = ARITY ** BATCH_DEPTH;
 
 const WRAPPER = srcPath("tree_update_batch.circom");
 
@@ -83,7 +86,7 @@ describe("tree_update_batch", function () {
         );
     });
 
-    // ===== Frontier-binding regression coverage (H-1 fix) =====
+    // ===== Frontier binding (H-1) =====
     //
     // FrontierRoot rebinds `frontier_in` to public `old_root`, so a relayer
     // cannot pair a real `oldRoot` with a forged frontier. Without the binding,
@@ -217,8 +220,14 @@ describe("tree_update_batch", function () {
 
     const PADDING_CASES: PaddingCase[] = [
         { field: "cm",             poison: w => { w.cms[1] = 0xbadcafen; } },
+        // Step 6 shifts an inactive slot's y by 1 and runs BabyCheck over
+        // (x, y + 1), so this row trips that too: no x other than 0 puts (x, 1)
+        // on the curve, and the padding constraint cannot be isolated here.
         { field: "cv_dep_x",       poison: w => { w.cvDep[1] = [1n, w.cvDep[1][1]]; } },
-        { field: "cv_dep_y",       poison: w => { w.cvDep[2] = [w.cvDep[2][0], 1n]; } },
+        // y = -2 shifts to (0, -1), which is on the curve, so BabyCheck stays
+        // satisfied and the rejection is attributable to the padding constraint
+        // alone.
+        { field: "cv_dep_y",       poison: w => { w.cvDep[1] = [0n, BN254_FR - 2n]; } },
         { field: "leaf_asset",     poison: w => { w.leafAsset[1] = 42n; } },
         { field: "leaf_public_in", poison: w => { w.leafPublicIn[1] = 99n; } },
         { field: "is_deposit",     poison: w => { w.isDeposit[1] = 1; } },
@@ -354,6 +363,124 @@ describe("tree_update_batch", function () {
             circuit,
             treeUpdateBatchInputJson(w),
             "a deposit leaf must open to exactly its declared public_in",
+        );
+    });
+
+    // ===== Spend-leaf field zeroing (section 4) =====
+    //
+    // Section 3 zeroes every field of an INACTIVE slot; section 4 additionally
+    // zeroes the two deposit-only fields on an ACTIVE spend leaf, so a relayer
+    // cannot push a nonzero leaf_asset or leaf_public_in into the public inputs
+    // of a batch that carries no deposit. The padding rows above never reach
+    // these: they poison inactive slots, which section 3 rejects first.
+
+    it("FAILS on a nonzero leaf_asset in an active spend leaf", async () => {
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 100n, isDeposit: 0 })]);
+        w.leafAsset[0] = 42n;
+        rebindFiatShamir(w);
+        await expectWitnessFails(
+            circuit,
+            treeUpdateBatchInputJson(w),
+            "(1 - is_deposit[0]) * leaf_asset[0] === 0 did not reject a spend leaf",
+        );
+    });
+
+    it("FAILS on a nonzero leaf_public_in in an active spend leaf", async () => {
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 100n, isDeposit: 0 })]);
+        w.leafPublicIn[0] = 99n;
+        rebindFiatShamir(w);
+        await expectWitnessFails(
+            circuit,
+            treeUpdateBatchInputJson(w),
+            "(1 - is_deposit[0]) * leaf_public_in[0] === 0 did not reject a spend leaf",
+        );
+    });
+
+    // ===== Remaining single-constraint negatives =====
+
+    it("FAILS when an active cv_dep is off the curve (BabyCheck)", async () => {
+        // (1, 1) is off Baby-Jubjub: a + 1 = 168701 while 1 + d = 168697. Set on
+        // the leaf witness BEFORE the tree is built, so the inserted leaf hashes
+        // this same point and new_root still matches — BabyCheck is then the only
+        // constraint left to reject it. A spend leaf, so the deposit binding
+        // (which would also catch it) is skipped.
+        const honest = simpleLeaf({ J, P, val: 100n, isDeposit: 0 });
+        const offCurve: LeafWitness = { ...honest, cvDep: [1n, 1n] };
+        const w = buildHonest(P, 0, [offCurve]);
+        await expectWitnessFails(
+            circuit,
+            treeUpdateBatchInputJson(w),
+            "BabyCheck must reject an off-curve cv_dep on an active slot",
+        );
+    });
+
+    it("FAILS when new_root does not match the computed insert chain", async () => {
+        // The mirror of the old_root frontier test: old_root binds the frontier
+        // in, new_root binds the result out. Without `new_root === running_root`
+        // a relayer names any root it likes for the advanced tree.
+        const w = buildHonest(P, 4, [simpleLeaf({ J, P, val: 100n, isDeposit: 1 })]);
+        w.newRoot = w.newRoot + 1n;
+        rebindFiatShamir(w);
+        await expectWitnessFails(
+            circuit,
+            treeUpdateBatchInputJson(w),
+            "new_root === running_root[MAX_L] must reject a forged new_root",
+        );
+    });
+
+    it("FAILS when rcv reaches 2^252 (MulH's Num2Bits(RCV_BITS))", async () => {
+        // rcv feeds MulH on every slot, deposit or not, so the width bound holds
+        // for a spend leaf too — and there the deposit binding is skipped, so
+        // Num2Bits(252) is the only constraint that can reject. rcv is not a
+        // PolyEval coefficient, so the challenge is unchanged.
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 100n, isDeposit: 0 })]);
+        w.rcv[0] = TWO_252;
+        await expectWitnessFails(
+            circuit,
+            treeUpdateBatchInputJson(w),
+            "Num2Bits(RCV_BITS) must reject rcv at 2^252",
+        );
+    });
+
+    it("FAILS on a deposit leaf claiming asset id 0", async () => {
+        // asset 0 is reserved: SpentNote rejects it on every real note, so a leaf
+        // minted at asset 0 is committed and then unspendable. Built honestly at
+        // asset 0 — cv_dep opens correctly to leaf_public_in units of V^0 — so
+        // the deposit equality holds and the IsZero guard is what rejects.
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 100n, isDeposit: 1, asset: 0n })]);
+        await expectWitnessFails(
+            circuit,
+            treeUpdateBatchInputJson(w),
+            "active_dep[0] * IsZero(leaf_asset[0]) === 0 must reject a deposit at asset 0",
+        );
+    });
+
+    // ===== Tree capacity =====
+    //
+    // Every slot's insertion index is range-checked to 2·DEPTH bits, gated on
+    // active[k]. Ungated, a Num2Bits over start_index + k for every k would make
+    // the top MAX_L - 1 leaves unreachable, leaving an honest one-leaf batch at
+    // the last free index unsatisfiable.
+
+    it("accepts a single leaf at the last index in the tree", async () => {
+        const w = buildHonest(P, CAPACITY - 1, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
+        await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
+    });
+
+    it("FAILS when a batch runs past the end of the tree", async () => {
+        // One free slot left, two leaves offered: slot 1's index is exactly
+        // CAPACITY = 2^(2·DEPTH), one past what Num2Bits(2·DEPTH) can hold. The
+        // reference tree does not bound-check, so it builds the witness and the
+        // circuit is what must refuse it.
+        const leaves = [
+            simpleLeaf({ J, P, val: 1n, isDeposit: 1, pk: 0xe01n }),
+            simpleLeaf({ J, P, val: 2n, isDeposit: 1, pk: 0xe02n }),
+        ];
+        const w = buildHonest(P, CAPACITY - 1, leaves);
+        await expectWitnessFails(
+            circuit,
+            treeUpdateBatchInputJson(w),
+            "Num2Bits(2·DEPTH) must reject an active insertion index at capacity",
         );
     });
 });

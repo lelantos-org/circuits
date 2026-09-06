@@ -5,7 +5,7 @@ import Lelantos.Model.Bits
 
 The circuit only ever manipulates points of the **prime-order subgroup** of Baby Jubjub:
 `EscalarMulAny` requires its base to lie there (`circomlib/escalarmulany.circom:129`), and
-every point in `2x2.circom` is produced by `Pedersen`, `EscalarMulFix`, `EscalarMulAny` or
+every point in the circuit is produced by `Pedersen`, `FixedBaseMul`, `EscalarMulAny` or
 `BabyAdd` applied to such points.
 
 That subgroup is cyclic of prime order `ell`, so it is *isomorphic to* `ZMod ell` — and
@@ -109,11 +109,11 @@ axiom assetMul : F → ℕ
 /-- The per-asset generator `V^a`. -/
 noncomputable def assetGen (a : F) : G := (assetMul a : ZMod ell) • BASE0
 
-/-- **The known-discrete-log fact.** `HashToAssetGen` (`src/lib/asset_gen.circom:11`)
+/-- **The known-discrete-log fact.** `HashToAssetGen` (`src/lib/asset_gen.circom:14`)
 Pedersen-hashes a 72-bit message, which circomlib packs into a *single* segment, so the
 result is always `assetMul a • BASE[0]` for a multiplier anyone can compute. This is
 `assetGen` by definition above; the axiom is that `assetMul` exists and is computable,
-which `src/lib/balance.circom:56-62` and `src/README.md § 5` already state in prose. -/
+which `src/lib/balance.circom:56-56` and `src/README.md § 5` already state in prose. -/
 theorem assetGen_dl (a : F) : assetGen a = (assetMul a : ZMod ell) • BASE0 := rfl
 
 /-- Asset ids `1, 2, 3` differ only in the lowest 4-bit Pedersen window (the tag occupies
@@ -125,7 +125,7 @@ This is the concrete instance that makes `pointBalance_not_sound` bite. It is ch
 runtime by `test/transact/multi_asset.test.ts`. -/
 axiom assetMul_arith : assetMul 1 + assetMul 3 = 2 * assetMul 2
 
-/-- `PointSum(n)` (`src/lib/value_commit.circom:156`): the identity for `n = 0`, otherwise a
+/-- `PointSum(n)` (`src/lib/value_commit.circom:149`): the identity for `n = 0`, otherwise a
 left-nested chain of `BabyAdd`. -/
 def pointSum (pts : ℕ → G) (n : ℕ) : G := ∑ i ∈ Finset.range n, pts i
 

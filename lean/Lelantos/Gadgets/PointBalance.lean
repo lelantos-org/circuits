@@ -3,12 +3,12 @@ import Lelantos.Gadgets.ValueCommit
 /-!
 # `PerAssetPointBalance` is **not** a conservation check
 
-`src/lib/balance.circom:143` checks the Edwards point equation
+`src/lib/balance.circom:144` checks the Edwards point equation
 
     Σ in_cv ⊕ pub_in_pt ⊕ Σ out_rH  ==  Σ out_cv ⊕ pub_out_pt ⊕ Σ in_rH
 
 and the source comment is emphatic that this is defence in depth only
-(`src/lib/balance.circom:140-142`, `src/README.md` § 6, "Per-asset point balance
+(`src/lib/balance.circom:140-141`, `src/README.md` § 6, "Point balance
 (defense in depth)"). This module turns that
 warning into a theorem.
 

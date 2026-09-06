@@ -50,16 +50,16 @@ template DummyZeroValue(N) {
     }
 }
 
-// Explicit per-asset value conservation: the binding balance check.
+// Per-asset value conservation: the binding balance check.
 // PerAssetPointBalance below is defence in depth, not a substitute.
 //
 // The point equality alone does not imply conservation. HashToAssetGen is
-// circomlib Pedersen over a 72-bit message, which fits one segment and so
-// reduces to m(asset_id)·BASE[0] for a publicly computable integer m(·). Every
-// asset generator therefore lies in the same prime-order group with known
-// relative discrete logs. m(·) is ~2^85 and affine in the low nibbles of
-// asset_id, so V^1 + V^3 == 2·V^2 exactly and the point equality is satisfied
-// by spending X of asset 1 plus X of asset 3 to mint 2X of asset 2.
+// circomlib Pedersen over a 72-bit message, which fits one segment and reduces
+// to m(asset_id)·BASE[0] for a publicly computable integer m(·), so every asset
+// generator lies in the same prime-order group with known relative discrete
+// logs. m(·) is ~2^85 and affine in the low nibbles of asset_id, so
+// V^1 + V^3 == 2·V^2 exactly and the point equality is satisfied by spending X
+// of asset 1 plus X of asset 3 to mint 2X of asset 2.
 //
 // This check makes no group-theoretic assumption. For every asset id c present
 // in the transaction:
@@ -72,7 +72,7 @@ template DummyZeroValue(N) {
 // every asset present. Dummy inputs carry value 0 (DummyZeroValue) and are
 // neutral whatever asset_id they declare.
 //
-// Precondition (soundness-critical): the caller must already have 64-bit
+// Precondition, soundness-critical: the caller must already have 64-bit
 // range-checked every value passed in. SpentNote and OutputNote apply
 // RangeCheck64 to in_value and out_value; the transact circuit applies it to
 // public_in and public_out. With at most N_IN+1 terms below 2^64 per side the
@@ -139,8 +139,8 @@ template PerAssetValueBalance(N_IN, N_OUT) {
 // Summing the rH points avoids a Σrcv_in − Σrcv_out field wrap.
 //
 // Defence in depth only; see PerAssetValueBalance above for why this equation
-// does not by itself imply per-asset conservation. It holds for every honest
-// transaction and keeps cv a meaningful on-chain value commitment.
+// does not imply per-asset conservation. It holds for every honest transaction
+// and keeps cv a meaningful on-chain value commitment.
 template PerAssetPointBalance(N_IN, N_OUT) {
     signal input in_cv[N_IN][2];
     signal input out_cv[N_OUT][2];

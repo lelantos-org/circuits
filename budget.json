@@ -5,6 +5,11 @@
     "same commit as any circuit change, so the change lands as a reviewable diff.",
     "`domain` is the Groth16 FFT domain the circuit must fit; exceeding it means",
     "a larger ptau and roughly double the proving time.",
+    "snarkjs sizes that domain from nConstraints + nPubInputs + nOutputs and",
+    "requires the sum to be at most domain - 1, so with one public input and one",
+    "public output the ceiling on `constraints` is domain - 3 = 131069, not",
+    "131072. check-budget.mjs computes that bound rather than comparing against",
+    "`domain` directly.",
     "Both circuits sit in 2^17 and are ceremony-paired: a spend's output leaves",
     "are inserted by the batch circuit, so they share DEPTH = 11.",
     "tree_update_batch is the tighter of the two, at ~17.5k of headroom against",
@@ -18,7 +23,7 @@
       "domain": 131072
     },
     "tree_update_batch": {
-      "constraints": 113502,
+      "constraints": 113527,
       "domain": 131072
     }
   }

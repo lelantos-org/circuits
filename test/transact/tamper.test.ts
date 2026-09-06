@@ -1,8 +1,8 @@
 // One tampered field per test: take an honest witness, change exactly one
 // field, and require the circuit to reject it.
 //
-// Each row's `reason` names the constraint expected to fire, so a regression
-// reports which one stopped firing.
+// Each row's `reason` names the constraint expected to fire, so a failure
+// reports which constraint stopped firing.
 
 import {
     type CircomTransactInput,
@@ -133,10 +133,10 @@ describe("transact_4x6 / single-field tamper", function () {
         });
     }
 
-    // Not a tamper case: the witness is honest, and the assertion is that the
-    // top of the declared blinder range remains spendable. A Num2Bits width one
-    // bit too narrow in MulH would make notes near the ceiling unspendable, and
-    // the SDK never mints one this large, so nothing else covers it.
+    // An honest witness, not a tamper case: the top of the declared blinder
+    // range must stay spendable. A Num2Bits one bit too narrow in MulH would
+    // make notes near the ceiling unspendable, and the SDK never mints one this
+    // large, so nothing else covers it.
     it("accepts blinders at the top of the 252-bit range", async () => {
         const { tx, circuit } = ctx;
         const maxRcv = TWO_252 - 1n;
@@ -167,7 +167,7 @@ describe("transact_4x6 / single-field tamper", function () {
         const { root, inputs } = tx.oneRealOneDummy(100n, ALICE_NSK);
         const input = tx.build({
             inputs,
-            outputs: [tx.note(100n, ALICE_NSK, 9n), dummyOutput()],
+            outputs: [tx.note(100n, ALICE_NSK, 9n), dummyOutput(tx.P, 1)],
             merkleRoot: root,
         });
         writeField(input, "out_cm[0]", 12345n);
@@ -179,7 +179,7 @@ describe("transact_4x6 / single-field tamper", function () {
         const { root, inputs } = tx.oneRealOneDummy(100n, ALICE_NSK);
         const input = tx.build({
             inputs,
-            outputs: [tx.note(100n, ALICE_NSK, 9n), dummyOutput()],
+            outputs: [tx.note(100n, ALICE_NSK, 9n), dummyOutput(tx.P, 1)],
             merkleRoot: root,
         });
         writeField(input, "out_cm[1]", 777n);

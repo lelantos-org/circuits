@@ -70,7 +70,7 @@ namespace Lelantos
 /-- Every signal of one `TreeUpdateBatch(depth, maxL)` instance. Array signals are total
 functions, read only below their declared length, per the convention in `Model.Bits`. -/
 structure BatchSignals (depth maxL : ℕ) where
-  -- Logical public inputs (`:61-69`).
+  -- Logical public inputs (`:101-109`).
   oldRoot : F
   newRoot : F
   startIndex : F
@@ -80,16 +80,16 @@ structure BatchSignals (depth maxL : ℕ) where
   leafAsset : ℕ → F
   leafPublicIn : ℕ → F
   isDeposit : ℕ → F
-  -- Private inputs (`:72-73`).
+  -- Private inputs (`:112-113`).
   frontierIn : ℕ → ℕ → F
   rcv : ℕ → F
-  -- Activity (`:79-90`).
+  -- Activity (`:121-138`).
   cntBits : ℕ → F
   ltBits : ℕ → ℕ → F
   active : ℕ → F
-  -- Leaf hashes (`:114-123`).
+  -- Leaf hashes (`:162-174`).
   leaves : ℕ → F
-  -- Deposit binding (`:139-168`).
+  -- Deposit binding (`:188-229`).
   activeDep : ℕ → F
   gen : ℕ → Pt
   pubInBits : ℕ → ℕ → F
@@ -97,10 +97,13 @@ structure BatchSignals (depth maxL : ℕ) where
   vT : ℕ → Pt
   rH : ℕ → Pt
   expected : ℕ → Pt
-  -- Insert indices (`:210-216`).
+  assetInv : ℕ → F
+  assetIsZero : ℕ → F
+  -- Insert indices (`:280-287`).
+  idxIn : ℕ → F
   idxBits : ℕ → ℕ → F
   idxDig : ℕ → ℕ → F
-  -- Per-leaf insert instances (`:218-226`).
+  -- Per-leaf insert instances (`:290-296`).
   zeros : ℕ → F
   insB : ℕ → ℕ → ℕ → F
   insS : ℕ → ℕ → ℕ → F
@@ -108,7 +111,7 @@ structure BatchSignals (depth maxL : ℕ) where
   insCur : ℕ → ℕ → F
   insFrOut : ℕ → ℕ → ℕ → F
   insRoot : ℕ → F
-  -- Running state and its mux (`:194-239`).
+  -- Running state and its mux (`:258-311`).
   fr : ℕ → ℕ → ℕ → F
   runningRoot : ℕ → F
 
@@ -116,68 +119,85 @@ structure BatchSignals (depth maxL : ℕ) where
 Line numbers refer to `src/tree_update_batch.circom`. -/
 structure BatchChainSat {depth maxL : ℕ} (countBits : ℕ)
     (w : BatchSignals depth maxL) : Prop where
-  /-- `:79-80` — `Num2Bits(COUNT_BITS)` on `actual_count - 1`. -/
+  /-- `:128-129` — `Num2Bits(COUNT_BITS)` on `actual_count - 1`. -/
   count_bits : Num2BitsSat countBits (w.actualCount - 1) w.cntBits
-  /-- `:85-90` — `active[k] = LessThan(COUNT_BITS+1)(k, actual_count)`. -/
+  /-- `:134-138` — `active[k] = LessThan(COUNT_BITS+1)(k, actual_count)`. -/
   active_def : ∀ k, k < maxL →
     LessThanSat (countBits + 1) ((k : ℕ) : F) w.actualCount (w.ltBits k) (w.active k)
-  /-- `:95` — inactive `cms` are zero. -/
+  /-- `:144` — inactive `cms` are zero. -/
   pad_cm : ∀ k, k < maxL → (1 - w.active k) * w.cms k = 0
-  /-- `:96-97` — inactive `cv_dep` coordinates are zero. -/
+  /-- `:145-146` — inactive `cv_dep` coordinates are zero. -/
   pad_cv_x : ∀ k, k < maxL → (1 - w.active k) * (w.cvDep k).x = 0
   pad_cv_y : ∀ k, k < maxL → (1 - w.active k) * (w.cvDep k).y = 0
-  /-- `:98-101` — inactive deposit fields are zero. -/
+  /-- `:147-149` — inactive deposit fields are zero. -/
   pad_asset : ∀ k, k < maxL → (1 - w.active k) * w.leafAsset k = 0
   pad_public_in : ∀ k, k < maxL → (1 - w.active k) * w.leafPublicIn k = 0
   pad_is_deposit : ∀ k, k < maxL → (1 - w.active k) * w.isDeposit k = 0
-  /-- `:101` — inactive blinders are zero. -/
+  /-- `:150` — inactive blinders are zero. -/
   pad_rcv : ∀ k, k < maxL → (1 - w.active k) * w.rcv k = 0
-  /-- `:108` — `is_deposit` is boolean. -/
+  /-- `:157` — `is_deposit` is boolean. -/
   deposit_bit : ∀ k, k < maxL → IsBit (w.isDeposit k)
-  /-- `:109-110` — spend leaves carry no deposit fields. -/
+  /-- `:158-159` — spend leaves carry no deposit fields. -/
   spend_zero_asset : ∀ k, k < maxL → (1 - w.isDeposit k) * w.leafAsset k = 0
   spend_zero_public_in : ∀ k, k < maxL → (1 - w.isDeposit k) * w.leafPublicIn k = 0
-  /-- `:117-122` — `leaf_k = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)`. -/
+  /-- `:170-174` — `leaf_k = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)`. -/
   leaf_def : ∀ k, k < maxL → w.leaves k = leafHash (w.cms k) (w.cvDep k).x (w.cvDep k).y
-  /-- `:211-212` — the insertion index `start_index + k`, range-checked to `2·depth` bits. -/
+  /-- `:282` — the insertion index, gated on `active[k]`. -/
+  idx_in_def : ∀ k, k < maxL →
+    w.idxIn k = w.active k * (w.startIndex + ((k : ℕ) : F))
+  /-- `:284` — that gated index, range-checked to `2·depth` bits.
+
+  The gate is load-bearing for fidelity, not a convenience: the circuit decomposes
+  `active[k] · (start_index + k)`, so a model demanding the decomposition of
+  `start_index + k` for EVERY slot would assume something a prover need not
+  satisfy — the dangerous direction of the table in `FIDELITY.md`. It would also
+  be false of the circuit, which deliberately admits a batch whose last active
+  index is the final leaf of the tree. On an active slot `active[k] = 1` and the
+  two coincide; `activeIdx_eq` below is where that is used. -/
   idx_bits : ∀ k, k < maxL →
-    Num2BitsSat (2 * depth) (w.startIndex + ((k : ℕ) : F)) (w.idxBits k)
-  /-- `:214-216` — quaternary digits read off the bit decomposition. -/
+    Num2BitsSat (2 * depth) (w.idxIn k) (w.idxBits k)
+  /-- `:287` — quaternary digits read off the bit decomposition. -/
   idx_dig : ∀ k, k < maxL → ∀ d, d < depth →
     w.idxDig k d = w.idxBits k (2 * d) + 2 * w.idxBits k (2 * d + 1)
-  /-- `:219-226` — one `QuaternaryInsert` per leaf slot, over the running frontier. -/
+  /-- `:290-296` — one `QuaternaryInsert` per leaf slot, over the running frontier. -/
   insert : ∀ k, k < maxL →
     QuaternaryInsertSat depth (w.leaves k) (w.idxDig k) (w.fr k) w.zeros
       (w.insB k) (w.insS k) (w.insC k) (w.insCur k) (w.insFrOut k) (w.insRoot k)
-  /-- `:197-201` — the chain starts at `frontier_in`. -/
+  /-- `:262` — the chain starts at `frontier_in`. -/
   fr_base : ∀ d, d < depth → ∀ s, s < 3 → w.fr 0 d s = w.frontierIn d s
-  /-- `:202` — …and at `old_root`. -/
+  /-- `:265` — …and at `old_root`. -/
   root_base : w.runningRoot 0 = w.oldRoot
-  /-- `:231-233` — the frontier mux. -/
+  /-- `:303-305` — the frontier mux. -/
   fr_mux : ∀ k, k < maxL → ∀ d, d < depth → ∀ s, s < 3 →
     w.fr (k + 1) d s = w.active k * w.insFrOut k d s + (1 - w.active k) * w.fr k d s
-  /-- `:237-239` — the root mux. -/
+  /-- `:309-311` — the root mux. -/
   root_mux : ∀ k, k < maxL →
     w.runningRoot (k + 1) = w.active k * w.insRoot k + (1 - w.active k) * w.runningRoot k
-  /-- `:243` — `new_root === running_root[MAX_L]`. -/
+  /-- `:315` — `new_root === running_root[MAX_L]`. -/
   new_root_def : w.newRoot = w.runningRoot maxL
 
-/-- The deposit-binding half of the constraint system (`:139-168`). Kept apart from
+/-- The deposit-binding half of the constraint system (`:188-229`). Kept apart from
 `BatchChainSat` deliberately: it is the only part mentioning the curve, so the chain
 results below reach no curve axiom. `expected/axioms.txt` records the split. -/
 structure BatchDepositSat {depth maxL : ℕ} (w : BatchSignals depth maxL) : Prop where
-  /-- `:145` — `active_dep = active · is_deposit`. -/
+  /-- `:198` — `active_dep = active · is_deposit`. -/
   active_dep_def : ∀ k, k < maxL → w.activeDep k = w.active k * w.isDeposit k
-  /-- `:147-148` — `HashToAssetGen(leaf_asset)`. -/
+  /-- `:210` — `HashToAssetGen(leaf_asset)`. -/
   gen_def : ∀ k, k < maxL → w.gen k = coords (assetGen (w.leafAsset k))
-  /-- `:151-152` — `ValueTimesGen` range-checks `leaf_public_in` to 64 bits. -/
+  /-- `:214-216` — `ValueTimesGen` range-checks `leaf_public_in` to 64 bits. -/
   public_in_range : ∀ k, k < maxL → RangeCheck64Sat (w.leafPublicIn k) (w.pubInBits k)
-  /-- `:151-164` — `expected = leaf_public_in · V^asset + rcv · H`, which is exactly a
+  /-- `:214-226` — `expected = leaf_public_in · V^asset + rcv · H`, which is exactly a
   `ValueCommit` over the public-input bits. -/
   expected_def : ∀ k, k < maxL →
     ValueCommitSat (w.pubInBits k) (w.gen k) (w.rcv k) (w.rcvBits k) (w.vT k) (w.rH k)
       (w.expected k)
-  /-- `:166-167` — the binding, gated on `active · is_deposit`. -/
+  /-- `:206` — `IsZero(leaf_asset)`. -/
+  asset_isZero : ∀ k, k < maxL →
+    IsZeroSat (w.leafAsset k) (w.assetInv k) (w.assetIsZero k)
+  /-- `:207` — an active deposit leaf may not claim asset id 0. `SpentNote` rejects
+  that id on every real note, so such a leaf would be committed and unspendable. -/
+  asset_nonzero : ∀ k, k < maxL → w.activeDep k * w.assetIsZero k = 0
+  /-- `:228-229` — the binding, gated on `active · is_deposit`. -/
   deposit_x : ∀ k, k < maxL → w.activeDep k * ((w.cvDep k).x - (w.expected k).x) = 0
   deposit_y : ∀ k, k < maxL → w.activeDep k * ((w.cvDep k).y - (w.expected k).y) = 0
 

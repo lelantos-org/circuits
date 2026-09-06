@@ -2,15 +2,10 @@
 
 A machine-checked development for `Transact(DEPTH, N_IN, N_OUT)`, the multi-asset transact
 circuit, and for `TreeUpdateBatch(DEPTH, MAX_L)`, the relayer batch tree-advance circuit.
-The transact half covers all four shapes the repository instantiates — `src/2x2.circom`,
-`src/3x3.circom`, `src/4x4.circom` and `src/4x6.circom`. **`4x6` is the target shape**:
-`Transact(11, 4, 6)`, paired with `TreeUpdateBatch(11, 8)`. The other three remain at depth
-10 and cannot share a tree with it; they are retained so the shape-generic results are
-exercised at more than one slot count, not because they are usable alongside `4x6`.
+Every result is proved for the generic `Transact(depth, nIn, nOut)` and then instantiated at
+**`src/4x6.circom`**, the shape the repository ships: `Transact(11, 4, 6)`, paired with
+`TreeUpdateBatch(11, 8)`.
 
-Note the deployed contract currently verifies `4x4`, not `3x3` — several documents under
-`circuits/` still say otherwise. Nothing here depends on which is deployed: every result is
-proved for the generic `Transact(depth, nIn, nOut)` and then instantiated.
 The top-level theorem holds for **any** assignment satisfying the modeled constraint system,
 not only those an honest prover produces.
 
@@ -53,7 +48,7 @@ Individually:
 |---|---|
 | `lake build` | elaborates and kernel-checks every proof; runs the axiom guard over every declaration |
 | `./scripts/check-axioms.sh` | trusted base still matches `expected/axioms.txt` |
-| `./scripts/dump-layout.sh` | public-input layouts still match `expected/layout-{2x2,3x3,4x4}.txt` |
+| `./scripts/dump-layout.sh` | the public-input layout still matches `expected/layout-4x6.txt` |
 | `python3 scripts/check-prime.py` | discharges the two arithmetic axioms externally |
 
 CI runs the same set ([.github/workflows/lean.yml](../.github/workflows/lean.yml)).
@@ -69,19 +64,16 @@ assumptions recorded in a statement, not results — see
 | Theorem | Where | Statement |
 |---|---|---|
 | `transact_sound` | `Circuit/Transact.lean` | `TransactSat w → TxWellFormed w`, for `N_IN ≤ 7` and `N_OUT ≤ 7` |
-| `transact2x2_sound` / `transact3x3_sound` / `transact4x4_sound` / `transact4x6_sound` | `Circuit/Transact.lean` | the same for each instantiated shape: `Transact(11,4,6)` (the target), plus `(10,2,2)`, `(10,3,3)` and `(10,4,4)` |
+| `transact4x6_sound` | `Circuit/Transact.lean` | the same at the shipped shape, `Transact(11, 4, 6)` |
 | `transact_binding` † | `Circuit/Transact.lean` | `TransactSat w → TxBinding w` |
 
 The `≤ 7` bound is not a property of the circuit — `PerAssetValueBalance` is written for
 arbitrary `N_IN` / `N_OUT`. It is the largest slot count for which the balance sums provably
 stay below `p` using `two_pow_67_lt_p`, whose proof rounds `(n+1) · 2^64` up to `8 · 2^64`.
-Seven is therefore where that argument runs out, not where any shape sits: the widest
-instantiated is `nOut = 6`.
-
-Stating it at the argument's ceiling rather than at the current shape is deliberate. Moving
-from `≤ 3` to `≤ 4` for `src/4x4.circom` required a new power of two in `Model/Field.lean`
-*and* touching every theorem that cites the bound; `4x6` needed neither, because `2^67`
-already covered it. Going past seven does need the next power.
+Seven is where that argument runs out, not where any shape sits: the widest instantiated is
+`nOut = 6`. It is stated at the argument's ceiling rather than at the shipped shape, so a
+wider shape within the bound needs no change here. Going past seven needs the next power of
+two in `Model/Field.lean` and every theorem citing the bound.
 
 ### Value conservation
 
@@ -92,7 +84,7 @@ The load-bearing result, and the one with the smallest trusted base.
 | `perAssetValueBalance_all_assets` | `Gadgets/Balance.lean` | the five candidate checks imply conservation for **every** asset id in the field |
 | `perAssetValueBalance_nat` | `Gadgets/Balance.lean` | …and as an exact **integer** equation, not a modular one |
 | `no_asset_creation` | `Circuit/Transact.lean` | an asset on no input and not in the public bucket cannot appear on any output |
-| `pointBalance_not_sound` | `Gadgets/PointBalance.lean` | the Edwards point balance is **not** a conservation check, at the deployed `(2,2)` shape |
+| `pointBalance_not_sound` | `Gadgets/PointBalance.lean` | the Edwards point balance is **not** a conservation check; exhibited at a 2-in, 2-out instance |
 
 ### Per-slot soundness
 
@@ -112,8 +104,8 @@ The load-bearing result, and the one with the smallest trusted base.
 | Theorem | Where | Statement |
 |---|---|---|
 | `polyEval_sound` | `Gadgets/PolyEval.lean` | the Horner chain computes `Σ cₖ zᵏ` |
-| `polyEval_binding` | `Gadgets/PolyEval.lean` | distinct coefficient vectors agree on `≤ 30` challenges |
-| `transact_pi_binding` | `Circuit/Transact.lean` | two transactions with different public inputs share `(z, y)` for at most 30 challenges |
+| `polyEval_binding` | `Gadgets/PolyEval.lean` | coefficient vectors differing below `n` agree on at most `n - 1` challenges |
+| `transact_pi_binding` | `Circuit/Transact.lean` | two transactions with different public inputs share `(z, y)` for at most `piCount - 1` challenges, 68 at the shipped shape |
 | `transact_pi_binding_slot` | `Circuit/Transact.lean` | …stated per **named** public input |
 | `piSlot_slotIndex` | `Circuit/Witness.lean` | `slotIndex` inverts the coefficient layout, turning a named-field difference into a coefficient index |
 
@@ -161,6 +153,17 @@ form binding only `cv_dep[2i] + cv_dep[2i+1]` would fix `Σvalue` modulo the sub
 gap rather than
 patching it, and the Lean statement shows the difference: it mentions one leaf.
 
+**Read its direction carefully.** It says the leaf *has* an opening at its declared
+`(leaf_asset, leaf_public_in)` — an existence statement. It does **not** say the opening is
+unique, and it is not: `assetGen` is opaque here, but the circuit's `HashToAssetGen` is
+Pedersen over one segment, so `V^a = m(a) · BASE0` and the equality pins the product
+`value · m(asset)` rather than the pair. Two registered ids whose multipliers share a large
+factor therefore admit a deposit paid as one asset and spent as the other. `assetMul`
+(`Model/Jubjub.lean`) is exactly that weakness, imported so `pointBalance_not_sound` can
+exhibit it; nothing here rules out its consequences on the deposit path. What does is the
+registered id set, checked outside Lean by `scripts/check-asset-ids.ts` (`just asset-ids`).
+Listed under *Not covered* below.
+
 ### Hash binding †
 
 | Theorem | Where | Statement |
@@ -179,17 +182,14 @@ patching it, and the Lean statement shows the difference: it mentions one leaf.
 | `transactSat_spend_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable by a transaction that actually **moves value** through a non-dummy slot |
 | `transactSat_twoAsset_satisfiable` | `Proofs/Completeness.lean` | …and by one moving **two distinct assets** with a non-zero public input |
 | `spentReal_witness` | `Proofs/Completeness.lean` | `SpentReal` is inhabited, so `spentNote_sound`'s `is_dummy = 0` case is reachable |
-| `transact3x3Sat_satisfiable` | `Proofs/Completeness.lean` | …and satisfiable at `Transact(10,3,3)` |
-| `transact4x4Sat_satisfiable` | `Proofs/Completeness.lean` | …and at `Transact(10,4,4)` |
-| `transact4x6Sat_satisfiable` | `Proofs/Completeness.lean` | …and at `Transact(11,4,6)`, **the target shape** — the only witness at a depth other than 10, and the only one with `nIn ≠ nOut` |
+| `transact4x6Sat_satisfiable` | `Proofs/Completeness.lean` | …and at `Transact(11, 4, 6)`, **the shipped shape**, the only witness with `nIn ≠ nOut` |
 | `batchSat_satisfiable` | `Proofs/BatchCompleteness.lean` | `BatchSat` is satisfiable at `TreeUpdateBatch(11,8)`, so the batch results are not vacuous either |
 | `batchSat_partial_batch` | `Proofs/BatchCompleteness.lean` | …by a batch committing **three** leaves into eight slots, so the padding constraints and both muxes are exercised rather than satisfied trivially |
 
-The first four assignments are built at the `2x2` shape; `transact3x3Sat_satisfiable`,
-`transact4x4Sat_satisfiable` and `transact4x6Sat_satisfiable` repeat the padding
-construction at the other three, so each `transact*_sound` is non-vacuous too. `padTx` is
-indexed by depth for the last of these — it is the only witness not at depth 10. The batch
-witness lives in `Proofs/BatchCompleteness.lean`.
+The first four assignments are built at a small `(10, 2, 2)` shape;
+`transact4x6Sat_satisfiable` repeats the padding construction at the shipped shape, so
+`transact4x6_sound` is non-vacuous too. `padTx` is indexed by depth because those two sit at
+different depths. The batch witness lives in `Proofs/BatchCompleteness.lean`.
 
 ### Assignments with no satisfying witness
 
@@ -213,9 +213,8 @@ Two independent questions hide under that word, and both need an answer.
 constructs the degenerate-but-legal padding transaction; `transactSat_spend_satisfiable` one
 that actually spends, with a non-dummy input, a real Merkle path, a non-zero scalar
 multiplication and a balance whose sums are not all zero; `transactSat_twoAsset_satisfiable`
-one whose five balance candidates are not all the same asset.
-`transact3x3Sat_satisfiable`, `transact4x4Sat_satisfiable` and `transact4x6Sat_satisfiable`
-repeat the first at the other three shapes, and `batchSat_satisfiable` covers
+one whose balance candidates are not all the same asset. `transact4x6Sat_satisfiable`
+repeats the first at the shipped shape, and `batchSat_satisfiable` covers
 `TreeUpdateBatch(11, 8)` with a partially-filled batch.
 
 This matters because `A → B` is trivially true when `A` is unsatisfiable, so a modelling slip
@@ -232,7 +231,7 @@ guard, and the hash assumption survives only as the explicit † hypothesis.
 ## The two results worth reading first
 
 **Per-asset conservation** mechanizes the candidate-set argument from
-[src/README.md § 6 "Value conservation (binding check)"](../src/README.md).
+[src/README.md § 6 "Value conservation, the binding check"](../src/README.md).
 `PerAssetValueBalance` checks only the five asset ids present in the transaction;
 `perAssetValueBalance_all_assets` shows that covers every asset id, and
 `perAssetValueBalance_nat` lifts the field equality to `ℕ` using the 64-bit range checks —
@@ -260,6 +259,14 @@ development may derive conservation from the point equation.
   frontier is the honest one for `old_root`. The constraint `old_root === frontier_root.root`
   is what stops a relayer pairing a real `old_root` with a forged frontier — a permanent-DoS
   vector — and it is modelled nowhere. This is the largest remaining gap in the batch proof.
+* **Uniqueness of a deposit leaf's opening.** `batch_deposit_opens` gives existence, not
+  uniqueness, and uniqueness is false in general: the Pedersen asset generators are known
+  multiples of one base, so `v · m(a) == v' · m(a')` with both values under `2^64` lets a
+  deposit be spent as a different asset. Nothing in the circuit closes this — `cms[k]` is
+  depositor-chosen and carries no proof — so it rests on which ids are registered.
+  `scripts/check-asset-ids.ts` computes the bound over an id set and
+  `test/check_asset_ids.test.ts` pins the gate; both live outside Lean because the argument
+  is about `m(·)`, which the model deliberately keeps opaque.
 * **`BabyCheck` on `cv_dep` (`tree_update_batch.circom` step 6).** The development has no
   curve equation, only the opaque `coords` / `babyAdd` interface, so "the point is on the
   curve" is not expressible. `batch_deposit_opens` gets its point structure from the
@@ -268,12 +275,10 @@ development may derive conservation from the point equation.
   chain for any coefficient vector, but the batch layout (`4 + 6·MAX_L`) is pinned against
   `PubInputs.sol` by `test/tree_update_batch.test.ts`, not in Lean. `dump-layout.sh`
   covers the transact layouts only.
-* **Full layout parity against the SDK for `3x3` and `4x4`.** `dump-layout.sh` pins all
-  three layouts against Lean, and `test/formal/layout_parity.test.ts` pins each published
-  vector to its Lean dump — all three shapes ship one. The hand-written sentinel-per-field
-  table in that test, which is what catches a transposition between two same-typed slots,
-  exists for `2x2` only. Neither `3x3` nor `4x4` has a `PubInputs.sol` overload yet, so for
-  those two the chain ends at the published vector rather than at the contract.
+* **Layout parity all the way to the contract.** `dump-layout.sh` pins the `4x6` layout
+  against Lean and `test/formal/layout_parity.test.ts` pins the published vector to that
+  dump, but `PubInputs.sol` has no 69-slot `compress` overload yet, so the chain ends at the
+  vector rather than at the contract.
 * **Under-constrainedness of the compiled R1CS**, beyond what Picus establishes — see
   [Under-constrainedness](#under-constrainedness-of-the-compiled-r1cs) below.
 * **Contract obligations.** Nullifier freshness, `z` being a genuine Fiat-Shamir challenge,
@@ -303,7 +308,7 @@ prover may choose freely in a way that reaches `y`.
 | Artifact | Wires | Verdict |
 |---|---|---|
 | `--O0` build, as Picus recommends | 158,793 | **properly constrained** (exit `8` = `safe`) |
-| `build/2x2.r1cs`, circom default `--O1` | 70,171 | **properly constrained** (exit `8` = `safe`) |
+| circom default `--O1` build | 70,171 | **properly constrained** (exit `8` = `safe`) |
 
 Both verdicts came from the propagation phase alone — the `binary01`, `linear`, `basis2`,
 `aboz` and `bim` lemmas determined every signal without a single SMT query, which is what
@@ -312,7 +317,7 @@ run took under 90 seconds. Both wire counts are from the circuit revision curren
 run was recorded; re-run `just picus` after a circuit change rather than reading them as live.
 
 Reproduce with `just picus` (needs Docker; the image is ~4.5 GB). `.github/workflows/picus.yml`
-runs `just picus-all` nightly over all three shapes; it does not run on pull requests.
+runs `just picus-all` nightly over both circuits; it does not run on pull requests.
 
 Two caveats worth stating precisely:
 
@@ -336,7 +341,7 @@ flowchart LR
     GUARD --> ALLOW{{"axiom ∈ allow-list?"}}
     ALLOW -->|no| FAILB["build fails"]
 
-    SRC -->|"lake env lean Meta/Assumptions"| PRINT["axiom report<br/><i>35 headline theorems</i>"]
+    SRC -->|"lake env lean Meta/Assumptions"| PRINT["axiom report<br/><i>48 headline theorems</i>"]
     PRINT --> DIFF{{"diff expected/axioms.txt"}}
     DIFF -->|differs| FAILA["check-axioms.sh fails"]
 
@@ -405,7 +410,7 @@ lean/
     Circuit/               the circuits themselves
       Spent                SpentNote
       Output               OutputNote
-      Witness              TxWitness and the 31-slot public-input layout
+      Witness              TxWitness and the 69-slot public-input layout
       Transact             TransactSat, TxWellFormed, TxBinding, transact_sound
       TreeUpdateBatch      BatchChainSat, BatchDepositSat, the batch chain results
     Proofs/                results about the finished system
@@ -417,9 +422,7 @@ lean/
       AxiomGuard           build-time axiom check over every declaration
   expected/                generated; regenerate with --update on the relevant script
     axioms.txt             expected output of Meta/Assumptions
-    layout-4x6.txt         expected output of Circuit/Witness :: layoutNames, one per shape
-    layout-3x3.txt
-    layout-4x4.txt
+    layout-4x6.txt         expected output of Circuit/Witness :: layoutNames
   scripts/                 check-all, check-axioms, dump-layout, check-prime
 ```
 

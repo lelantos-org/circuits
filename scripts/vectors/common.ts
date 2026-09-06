@@ -32,16 +32,14 @@ export const s = (x: Field | number | bigint): string => x.toString();
 export const pt = (p: Point) => ({ x: s(p[0]), y: s(p[1]) });
 export const hex = (b: Uint8Array) => "0x" + Buffer.from(b).toString("hex");
 
-/** keccak256 over the newline-joined slot names — one line that moves when the layout does. */
+/** keccak256 over the newline-joined slot names; changes whenever the layout does. */
 export function layoutDigest(layout: string[]): string {
     return hex(keccak_256(new TextEncoder().encode(layout.join("\n"))));
 }
 
 /**
- * The Lean model's layout dump.
- *
- * Read rather than regenerated: the vector file carries Lean's ordering to the
- * SDK, so deriving it here would break that chain.
+ * The Lean model's layout dump. Read rather than regenerated, so the vector
+ * file carries Lean's slot ordering through to the SDK.
  */
 export function readLeanLayout(shape: string): string[] {
     const p = path.join(LEAN_EXPECTED, `layout-${shape}.txt`);
@@ -64,7 +62,7 @@ export function writeJson(file: string, value: unknown): string {
  * Curve, field and tag values repeated in every vector file.
  *
  * Published so the SDK can check agreement on them before comparing derived
- * values; a mismatch here accounts for every downstream mismatch.
+ * values; a mismatch here explains every downstream mismatch.
  */
 export function sharedConstants(P: Poseidon, J: Jubjub) {
     const tree = new MerkleTree(P, DEPTH);

@@ -27,27 +27,27 @@ namespace Lelantos
 /-- `DeriveIvk` — `src/lib/note.circom:14`. -/
 def deriveIvk (nsk : F) : F := poseidon [TAG_IVK, nsk]
 
-/-- `DeriveNk` — `src/lib/note.circom:25`. -/
+/-- `DeriveNk` — `src/lib/note.circom:24`. -/
 def deriveNk (nsk : F) : F := poseidon [TAG_NK, nsk]
 
-/-- `DerivePk` — `src/lib/note.circom:36`. -/
+/-- `DerivePk` — `src/lib/note.circom:35`. -/
 def derivePk (ivk : F) : F := poseidon [TAG_PK, ivk]
 
 /-- The full spend-key chain `nsk → ivk → pk`. -/
 def pkOfNsk (nsk : F) : F := derivePk (deriveIvk nsk)
 
-/-- `packed_av <== asset_id * 2^64 + value` — `src/lib/note.circom:60`. -/
+/-- `packed_av <== asset_id * 2^64 + value` — `src/lib/note.circom:59`. -/
 def packAV (assetId value : F) : F := assetId * POW_2_64 + value
 
-/-- `NoteCommitment` — `src/lib/note.circom:51`. Note there is no tag: domain separation
+/-- `NoteCommitment` — `src/lib/note.circom:50`. Note there is no tag: domain separation
 comes from `packed_av ≥ 2^64`, which holds because real notes have `asset_id ≠ 0`. -/
 def noteCommitment (assetId value pk rho rcm : F) : F :=
   poseidon [packAV assetId value, pk, rho, rcm]
 
-/-- `DeriveRho` — `src/lib/note.circom:75`. -/
+/-- `DeriveRho` — `src/lib/note.circom:76`. -/
 def deriveRho (nf0 index : F) : F := poseidon [TAG_RHO, nf0, index]
 
-/-- `Nullifier` — `src/lib/note.circom:96`. -/
+/-- `Nullifier` — `src/lib/note.circom:97`. -/
 def nullifierOf (nk rho cm : F) : F := poseidon [TAG_NF, nk, rho, cm]
 
 /-- `MerkleLevel4`'s node hash — `src/lib/merkle.circom:66`. -/
@@ -89,7 +89,7 @@ theorem packAV_inj {a v a' v' : F}
 
 /-- **The implicit domain separation of `NoteCommitment`.** A real note has
 `asset_id ≠ 0`, so its packed field is at least `2^64` and can never equal a small
-domain tag. This is the argument `src/lib/note.circom:48-50` makes in prose. -/
+domain tag. This is the argument `src/lib/note.circom:47-49` makes in prose. -/
 theorem packAV_val_ge {a v : F} (hnz : a ≠ 0) (ha : a.val < 2 ^ 64) (hv : v.val < 2 ^ 64) :
     2 ^ 64 ≤ (packAV a v).val := by
   rw [packAV_val ha hv]

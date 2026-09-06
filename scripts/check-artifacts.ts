@@ -11,7 +11,7 @@
 // `getRandomRng`), so the zkey and vkey SHA-256 differ on every rebuild and
 // cannot be pinned here.
 //
-// Instead the gate emits per-artifact SHA-256 to stdout (one `name=sha` line
+// The gate therefore emits per-artifact SHA-256 to stdout (one `name=sha` line
 // each) plus a `circuits-shas` line for GitHub Actions to pipe into
 // `$GITHUB_STEP_SUMMARY` and the release notes. It fails only on a missing
 // file, an out-of-range size, or a malformed vkey.
@@ -36,24 +36,13 @@ interface ArtifactCheck {
     json?: (value: unknown) => boolean;
 }
 
-/// Size bands are wide by design. The 2x2 circuit produces:
-///   - 2x2.wasm                ~3.9 MB  (deterministic from circom)
-///   - 2x2_final.zkey          ~22 MB   (tracks the 2^16 FFT domain)
-///   - verification_key.json   ~3 KB    (derived from the zkey)
-/// A size outside these bands indicates a broken build rather than a new
-/// ceremony output.
-///
-/// zkey size follows the FFT domain and the wire count, not the ceremony
-/// randomness, so these are re-measured whenever the circuits change size.
-/// Measured at the counts in budget.json: 2x2 / 3x3 / tree_update_batch on
-/// ptau-16, 4x4 on ptau-17.
+/// Size bands catch a truncated or missing artifact; they do not pin a byte
+/// count, since a re-ceremony changes the zkey size slightly on every run. zkey
+/// size follows the FFT domain and the wire count, so the bands are re-measured
+/// whenever the circuits change size.
 const FILES: ArtifactCheck[] = [
-    /// 4x6 = `Transact(11, 4, 6)`, the only published transact shape.
-    ///
-    /// On ptau-17 at 100,320 constraints — 76.5% of the 2^17 domain. The bands
-    /// below are wide because a re-ceremony changes the zkey size a little on
-    /// every run; they are there to catch a truncated or missing artifact, not
-    /// to pin a byte count.
+    /// 4x6 = `Transact(11, 4, 6)`, the only published transact shape, on ptau-17
+    /// at 100,320 constraints (76.5% of the 2^17 domain).
     {
         name: "4x6.wasm",
         path: resolve(BUILD, "4x6.wasm"),
@@ -80,15 +69,15 @@ function isGroth16Vkey(v: unknown): boolean {
     return isRecord(v) && v.protocol === "groth16" && v.curve === "bn128";
 }
 
-/// The golden vectors are the one artifact class here that IS byte-deterministic
-/// — `scripts/gen-vectors.ts` uses no randomness, no timestamps and no absolute
-/// paths, and `just vectors-check` proves it by regenerating and diffing. So
-/// unlike the zkey they get an exact SHA-256 pin, taken from `vectors/index.json`
-/// (which the generator writes). A mismatch means the committed vectors were
-/// hand-edited or a regeneration was not committed.
+/// The golden vectors are byte-deterministic: `scripts/gen-vectors.ts` uses no
+/// randomness, no timestamps and no absolute paths, and `just vectors-check`
+/// confirms it by regenerating and diffing. They therefore carry an exact
+/// SHA-256 pin, taken from the `vectors/index.json` the generator writes. A
+/// mismatch means the committed vectors were hand-edited or a regeneration was
+/// not committed.
 const VECTORS = resolve(ROOT, "vectors");
 
-/** Narrowing helper: everything read back from JSON starts life as `unknown`. */
+/** Narrowing helper for values parsed from JSON. */
 function isRecord(v: unknown): v is Record<string, unknown> {
     return typeof v === "object" && v !== null;
 }

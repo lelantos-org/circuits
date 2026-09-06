@@ -53,8 +53,7 @@ describe("FixedBaseMul (fixed-base scalar mul on Baby-Jubjub)", function () {
     });
 
     // The mux selects on 4 bits at a time and the accumulator adds once per
-    // window, so a carry out of any window is where an off-by-one in the table
-    // stride would show. Walk every boundary.
+    // window, so an off-by-one in the table stride shows at a window carry.
     it("agrees across every 4-bit window boundary", async () => {
         for (let w = 0; w < Number(WIDTH) / 4; w++) {
             const base = 1n << BigInt(4 * w);
@@ -234,9 +233,9 @@ describe("FixedBaseMul edge widths", function () {
     });
 });
 
-// FixedBaseMulBits is the unguarded interface. These tests demonstrate the
-// failure its DANGER comment describes: a non-boolean selector takes the output
-// off the curve, and only the Num2Bits that FixedBaseMul owns prevents it.
+// FixedBaseMulBits is the unguarded interface, and these cases pin the failure
+// its DANGER comment describes: a non-boolean selector takes the output off the
+// curve, and only the Num2Bits that FixedBaseMul owns prevents it.
 describe("FixedBaseMulBits (raw, caller-constrained bits)", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 

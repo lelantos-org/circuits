@@ -10,14 +10,12 @@
 # `lean/expected/layout-4x6.txt` is additionally consumed by
 # `test/formal/layout_parity.test.ts`, which checks it against `test/ref/compress.ts`
 # — the same implementation the published `vectors/` are generated from, which is how this
-# order reaches the SDK without either repo importing the other. That link exists for the
-# 2x2 shape only. For the other shapes this script pins Lean against its own expectation,
-# and `layout_parity.test.ts` checks each published vector carries that dump verbatim.
+# order reaches the SDK without either repo importing the other.
 #
-# 4x6 is the shape being moved to. Its 69-slot dump is what the `PubInputs.sol` compress
-# overload must be written against — in particular the calldata prefix grows from 40 words
-# to 50, moving the uint64 and address words that `compress` re-masks in assembly. Until
-# that overload exists, nothing cross-checks the contract for any shape.
+# The 69-slot dump is what the `PubInputs.sol` compress overload must be written
+# against; its calldata prefix is 50 words, which fixes the offsets of the uint64
+# and address words `compress` re-masks in assembly. Until that overload exists,
+# nothing cross-checks the contract.
 #
 # Regenerate after an intentional layout change:  lean/scripts/dump-layout.sh --update
 set -euo pipefail

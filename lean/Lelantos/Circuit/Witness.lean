@@ -16,7 +16,7 @@ and it should be reviewable without reading the soundness proofs.
 namespace Lelantos
 
 /-- Number of `PolyEval` coefficients: `9 + 3·N_IN + 8·N_OUT`
-(`src/lib/poly_eval.circom:43-44`). For `(2, 2)` this is 31. -/
+(`src/lib/poly_eval.circom:41-42`). For `(2, 2)` this is 31. -/
 def piCount (nIn nOut : ℕ) : ℕ := 9 + 3 * nIn + 8 * nOut
 
 example : piCount 2 2 = 31 := by norm_num [piCount]
@@ -123,7 +123,7 @@ inductive PISlot where
   | auxDigest
 deriving Repr, DecidableEq, Inhabited
 
-/-- The layout of `TransactCompressN(nIn, nOut)` — `src/lib/poly_eval.circom:68-109`.
+/-- The layout of `TransactCompressN(nIn, nOut)` — `src/lib/poly_eval.circom:66-107`.
 Single source of truth. -/
 def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   let oNf := 1

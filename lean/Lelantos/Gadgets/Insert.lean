@@ -23,7 +23,7 @@ reading is a theorem about the arithmetic rather than a comment.
 The frontier update is the second half: `frontier_out[k] = (k == digit) ? cur : f[k]` for
 the three stored slots, which is `frontierUpd`. Note it is *not* the same mux as the child
 arithmetic — slot 1 needs `(1-s1)·f[1]` where child 1 needs `(s2+s3)·f[1]` — and the circom
-comment at `:81-87` flags exactly that. Both are proved here, so a future edit that
+comment at `:80-86` flags exactly that. Both are proved here, so a future edit that
 collapses them is caught.
 
 As in `MerkleLevel4`, one-hotness of the selector is a prerequisite and not a convenience:
@@ -42,7 +42,7 @@ Mirrors `src/lib/insert.circom:20`. -/
 def frontierUpd (t : ℕ) (cur : F) (fr : ℕ → F) : ℕ → F := fun k =>
   if k = t then cur else fr k
 
-/-- The constraint system of `QuaternaryInsertLevel` — `src/lib/insert.circom:24-96`. -/
+/-- The constraint system of `QuaternaryInsertLevel` — `src/lib/insert.circom:24-95`. -/
 structure QuaternaryInsertLevelSat (cur : F) (fr : ℕ → F) (zero idx : F)
     (b s c : ℕ → F) (curNext : F) (fout : ℕ → F) : Prop where
   /-- `:34-35` — the one-hot selector, which also range-checks the digit. -/
@@ -55,13 +55,13 @@ structure QuaternaryInsertLevelSat (cur : F) (fr : ℕ → F) (zero idx : F)
   c2_def : c 2 = (s 0 + s 1) * zero + s 2 * cur + s 3 * fr 2
   /-- `:69-71` — `c3 = (s0+s1+s2)·z + s3·cur`. -/
   c3_def : c 3 = (s 0 + s 1 + s 2) * zero + s 3 * cur
-  /-- `:73-79` — `cur_next = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
+  /-- `:73-78` — `cur_next = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
   out_def : curNext = merkleNode c
-  /-- `:93` — `frontier_out[0] = s0·cur + (1-s0)·f[0]`. -/
+  /-- `:92` — `frontier_out[0] = s0·cur + (1-s0)·f[0]`. -/
   fout0_def : fout 0 = s 0 * cur + (1 - s 0) * fr 0
-  /-- `:94` — `frontier_out[1] = s1·cur + (1-s1)·f[1]`. -/
+  /-- `:93` — `frontier_out[1] = s1·cur + (1-s1)·f[1]`. -/
   fout1_def : fout 1 = s 1 * cur + (1 - s 1) * fr 1
-  /-- `:95` — `frontier_out[2] = s2·cur + (1-s2)·f[2]`. -/
+  /-- `:94` — `frontier_out[2] = s2·cur + (1-s2)·f[2]`. -/
   fout2_def : fout 2 = s 2 * cur + (1 - s 2) * fr 2
 
 /-- **Soundness of `QuaternaryInsertLevel`.** The digit is quaternary, the parent hashes
@@ -93,18 +93,18 @@ theorem quaternaryInsertLevel_sound {cur zero idx curNext : F} {fr b s c fout : 
       rw [h0] at hf0 <;> rw [h1] at hf1 <;> rw [h2] at hf2 <;>
       interval_cases k <;> simp only [frontierUpd, hf0, hf1, hf2] <;> norm_num
 
-/-- The constraint system of `QuaternaryInsert(depth)` — `src/lib/insert.circom:98-127`.
+/-- The constraint system of `QuaternaryInsert(depth)` — `src/lib/insert.circom:97-126`.
 `cur` is the chain of running nodes, `frIn`/`frOut` the per-level frontier arrays. -/
 structure QuaternaryInsertSat (depth : ℕ) (leaf : F) (dig : ℕ → F)
     (frIn : ℕ → ℕ → F) (zeros : ℕ → F) (b s c : ℕ → ℕ → F)
     (cur : ℕ → F) (frOut : ℕ → ℕ → F) (root : F) : Prop where
-  /-- `:111` — the chain starts at the leaf. -/
+  /-- `:110` — the chain starts at the leaf. -/
   base : cur 0 = leaf
-  /-- `:113-125` — one `QuaternaryInsertLevel` per level. -/
+  /-- `:112-124` — one `QuaternaryInsertLevel` per level. -/
   level : ∀ d, d < depth →
     QuaternaryInsertLevelSat (cur d) (frIn d) (zeros d) (dig d) (b d) (s d) (c d)
       (cur (d + 1)) (frOut d)
-  /-- `:127` — the root is the top of the chain. -/
+  /-- `:126` — the root is the top of the chain. -/
   top : root = cur depth
 
 /-- What an insert *means*, with no reference to selector or intermediate signals: a hash
@@ -186,7 +186,7 @@ noncomputable def insChildren (t : ℕ) (cur fill : F) (fr : ℕ → F) : ℕ �
   else if k = 2 then (selAt t 0 + selAt t 1) * fill + selAt t 2 * cur + selAt t 3 * fr 2
   else (selAt t 0 + selAt t 1 + selAt t 2) * fill + selAt t 3 * cur
 
-/-- The frontier this level hands upward, at digit `t` — `:93-95`, which are the same
+/-- The frontier this level hands upward, at digit `t` — `:92-94`, which are the same
 expression at each of the three slots. -/
 noncomputable def insFrontierOut (t : ℕ) (cur : F) (fr : ℕ → F) : ℕ → F := fun k =>
   selAt t k * cur + (1 - selAt t k) * fr k

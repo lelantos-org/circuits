@@ -28,7 +28,6 @@ describe("quaternary merkle tree", function () {
 
     it("empty tree root matches manual zero-subtree fold", async () => {
         const tree = new MerkleTree(P, DEPTH);
-        // Manually compute: level1 nodes all = Poseidon(5,0,0,0,0); root = Poseidon(5, n,n,n,n)
         const lvl1 = P.hash([TAG_MERKLE, 0n, 0n, 0n, 0n]);
         const expected = P.hash([TAG_MERKLE, lvl1, lvl1, lvl1, lvl1]);
         expect(tree.root()).to.equal(expected);
@@ -46,7 +45,6 @@ describe("quaternary merkle tree", function () {
     });
 
     it("circuit-computed root equals tree.root() at every quaternary slot (all 16 leaves)", async () => {
-        // Insert 16 distinct leaves so every position in the depth-2 tree is exercised.
         const tree = new MerkleTree(P, DEPTH);
         const leaves: Field[] = [];
         for (let i = 0; i < 16; i++) {
@@ -68,9 +66,8 @@ describe("quaternary merkle tree", function () {
     });
 
     it("MerkleLevel4 places `cur` at every path_index slot correctly", async () => {
-        // Single-level check via the depth-2 wrapper: pin the second level to
-        // isolate level-0 placement behaviour. Use distinct sibling values to
-        // detect any off-by-one in the slot-routing logic.
+        // The second level is held fixed to isolate level-0 placement; distinct
+        // sibling values expose an off-by-one in the slot routing.
         const leaf = 42n;
         const sibs0: Field[] = [111n, 222n, 333n];
         const lvl1Sibs: Field[] = [1n, 2n, 3n];
@@ -152,17 +149,8 @@ describe("quaternary merkle tree", function () {
 describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
     this.timeout(TIMEOUT_FAST);
 
-    // Genesis root for DEPTH = 11, which CommitmentTree.EMPTY_ROOT must become.
-    //
-    // PENDING: the contract still carries the depth-10 root
-    // (0x1308eb79d37ed29a9a2d34861692ea8c3e4fed3f555f53a8776c1256738e40a7) and
-    // MAX_LEAVES = 4^10. Updating it in isolation would leave the pool with a
-    // depth-11 tree behind a depth-10 verifier and a 4-output ABI, so it lands
-    // with the rest of the contract work — the compress overload at 69 slots,
-    // Output[6], MAX_L_BATCH = 8 and the regenerated verifiers.
-    //
-    // This constant is the value it must take. It is asserted against the
-    // circuit's own table below, so the two cannot drift while they wait.
+    // Genesis root for DEPTH = 11, the value CommitmentTree.EMPTY_ROOT carries.
+    // Asserted against the circuit's own table below, so the two cannot drift.
     const CONTRACT_EMPTY_ROOT =
         0x1cf92e62b512433b35f0064d537576b0184cad5fa7ab64201cd8084ee2dc171fn;
     const TABLE_DEPTH = 11;
@@ -200,10 +188,10 @@ describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
     });
 
     it("EMPTY_SUBTREE(TABLE_DEPTH) equals CommitmentTree.EMPTY_ROOT", () => {
-        // The cross-repo pin: the circuit's empty-subtree chain and the
-        // contract's genesis root are the same value reached two ways, so a
-        // depth change touching only one side fails here rather than at a root
-        // mismatch on the first insert.
+        // Cross-repo pin: the circuit's empty-subtree chain and the contract's
+        // genesis root are the same value reached two ways, so a depth change
+        // touching only one side fails here rather than at a root mismatch on
+        // the first insert.
         expect(table[TABLE_DEPTH]).to.equal(CONTRACT_EMPTY_ROOT);
     });
 });

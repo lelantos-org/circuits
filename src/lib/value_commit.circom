@@ -21,13 +21,9 @@ function H_BASE_Y() {
 
 // Width of the `rcv` / `rcv_dep` blinding scalars.
 //
-// 252 rather than the 251 the subgroup order admits: `ceil(252/4) ==
-// ceil(251/4)`, so both cost 63 windows and 252 is one constraint dearer.
-// Narrowing to 251 would also require regenerating every committed vector,
-// since `deterministicDummyBlinders` (`BLINDER_MASK` in test/ref/witness.ts)
-// masks to 252.
-//
-// Must satisfy 2^RCV_BITS < p for the Num2Bits decomposition to be alias-free
+// 252 rather than the 251 the subgroup order admits: ceil(252/4) == ceil(251/4),
+// so both cost 63 windows. Must satisfy 2^RCV_BITS < p for the Num2Bits
+// decomposition to be alias-free
 // (`lean/Lelantos/Model/Field.lean :: two_pow_252_lt_p`).
 function RCV_BITS() { return 252; }
 
@@ -50,8 +46,8 @@ template ValueScalarMul() {
 }
 
 // Fixed-base scalar multiplication rcv·H, 748 constraints; see
-// fixed_base_mul.circom. FixedBaseMul owns its Num2Bits, so the window
-// selectors cannot lose booleanity.
+// fixed_base_mul.circom. FixedBaseMul owns its Num2Bits, so the window selectors
+// cannot lose booleanity.
 template MulH() {
     signal input scalar;
     signal output out[2];
@@ -72,14 +68,11 @@ template MulH() {
 //   cv     = value·gen + rcv·H
 //   cv_dep = value·gen + rcv_dep·H
 //
-// Every note needs both: `cv` is the per-spend re-randomisation published in
-// the transaction, `cv_dep` the note's permanent blinding that reproduces its
-// committed leaf. The blinders must stay independent: at rcv == rcv_dep the
-// in_cv published at spend time equals the leaf's cv_dep, revealing which leaf
-// was spent.
-//
-// The value·gen term is computed once and each blinder added to it, saving one
-// EscalarMulAny(64) per note slot.
+// Every note needs both: `cv` is the per-spend re-randomisation published in the
+// transaction, `cv_dep` the note's permanent blinding that reproduces its
+// committed leaf. The blinders must be independent. At rcv == rcv_dep the in_cv
+// published at spend time equals the leaf's cv_dep, revealing which leaf was
+// spent.
 //
 // rH / rH_dep are exposed for PerAssetPointBalance.
 template ValueCommitPair() {

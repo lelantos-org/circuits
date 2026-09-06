@@ -13,7 +13,7 @@ import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 const CIRCUIT = srcPath("4x6.circom");
 const fcParams = fcParamsFor("TRANSACT");
 
-// Pin balanced-split edge cases worth seeding into every fc.assert.
+// Balanced-split edge cases seeded into every fc.assert.
 // Note: MAX_VALUE = 2^64 - 1 is odd, so 2 * (MAX_VALUE / 2n) = MAX_VALUE - 1.
 // Each tuple must satisfy o1 + o2 === v1 + v2 (circuit rejects otherwise).
 const BALANCED_EXAMPLES = [
@@ -147,8 +147,8 @@ describe("transact_4x6 [fuzz]", function () {
     });
 
     it("input value > 2^64 always fails (range check)", async () => {
-        // Slow path — each run runs the SDK + circuit. Default to half via
-        // FUZZ_RUNS_TRANSACT_OVERFLOW; capped lower if env unset.
+        // Each run exercises the SDK and the circuit; the run count is scaled
+        // down by default and overridable via FUZZ_RUNS_TRANSACT_OVERFLOW.
         await fc.assert(fc.asyncProperty(
             fc.bigInt(1n, 1n << 200n),
             async (overflowSeed) => {

@@ -1,6 +1,6 @@
 // Heavy variant coverage for `4x6.circom`.
 //
-// [src/test/fuzz/transact.fuzz.test.ts](./transact.fuzz.test.ts) covers
+// [test/fuzz/transact.fuzz.test.ts](./transact.fuzz.test.ts) covers
 // balanced random witnesses, unbalanced mutations, ghost-note asset, wrong-nsk
 // and value overflow. This file adds:
 //   - role symmetry: which real note occupies which slot is free, so an honest
@@ -12,7 +12,7 @@
 //     authentication path must reject, since the Poseidon image no longer
 //     matches `merkle_root`.
 //
-// Slow: each property builds one or two depth-10 witnesses per trial, so the
+// Each property builds one or two production-depth witnesses per trial, so the
 // run count is halved against the shared `fcParams`.
 
 import * as fc from "fast-check";
@@ -25,8 +25,8 @@ import { arbBalancedSplit, arbNsk, MAX_VALUE, fcParamsFor } from "./arbitraries"
 import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 
 const CIRCUIT = srcPath("4x6.circom");
-// `TRANSACT_VARIANTS` is slow (≥1 depth-10 witness per trial); SUITE_SCALE
-// halves vs NUM_RUNS by default. Override: FUZZ_RUNS_TRANSACT_VARIANTS=N.
+// `TRANSACT_VARIANTS` builds at least one production-depth witness per trial, so
+// SUITE_SCALE halves NUM_RUNS. Override: FUZZ_RUNS_TRANSACT_VARIANTS=N.
 const fcParams = fcParamsFor("TRANSACT_VARIANTS");
 
 // Construct an honest balanced 2-in-2-out witness (same asset, same

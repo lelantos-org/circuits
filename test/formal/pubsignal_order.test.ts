@@ -11,10 +11,8 @@ import { TIMEOUT_HEAVY } from "../lib/constants";
 //
 // The exported Solidity verifier takes `_pubSignals` as a flat `uint[2]`, so a
 // transposition is not a type error anywhere: it is two field elements handed
-// over in the wrong order, and every proof fails to verify. That is a
-// silent, total integration break, and the failure mode looks identical to a
-// bad zkey or a stale ceremony — which is exactly why it deserves a pin rather
-// than a sentence in a README.
+// over in the wrong order, and every proof fails to verify. The failure mode is
+// indistinguishable from a bad zkey or a stale ceremony.
 //
 // circom orders the main component's signals as:
 //
@@ -34,11 +32,8 @@ import { TIMEOUT_HEAVY } from "../lib/constants";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
 
-// Every shape that ships a published vector. `4x6` is the target shape; the
-// others are retained as further instantiations of `Transact` and pin that the
-// ordering is a property of the template, not of one arity. `4x6` is also the
-// only one with `nIn ≠ nOut`, so it is what would catch an ordering that
-// happened to work only when the two agree.
+// Every shape that ships a published vector. `4x6` has `nIn ≠ nOut`, so it
+// catches an ordering that only holds when the two arities agree.
 const SHIPPED_SHAPES = ["4x6"] as const;
 
 interface PublishedVector {

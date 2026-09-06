@@ -1,8 +1,8 @@
 // Merkle path recomputation: the verification counterpart to MerkleTree.proof().
 //
 // An independent implementation of the same quaternary node hashing as
-// merkle.ts. The two are kept separate so one constructs and the other checks;
-// reference.test.ts cross-validates them.
+// merkle.ts: one module constructs paths, the other checks them.
+// reference.test.ts cross-validates the two.
 
 import type { Field } from "./field.js";
 import type { Poseidon } from "./poseidon.js";

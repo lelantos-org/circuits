@@ -7,8 +7,9 @@
 // rather than a type error. Conversion goes through `F.e()` and `F.toObject()`,
 // and the public API accepts and returns only `bigint` and `[bigint, bigint]`.
 //
-// Scalars are not reduced, matching the circuit: `MulH` is Num2Bits(253) +
-// EscalarMulFix and `ValueScalarMul` is EscalarMulAny(64) over raw bits.
+// Scalars are not reduced, matching the circuit: `MulH` is Num2Bits(252) +
+// FixedBaseMul (not circomlib's EscalarMulFix; see src/lib/fixed_base_mul.circom)
+// and `ValueScalarMul` is EscalarMulAny(64) over raw bits.
 // Reduction would diverge for points outside the prime-order subgroup. The
 // bit widths those Num2Bits calls enforce are asserted instead.
 
@@ -133,7 +134,7 @@ export class Jubjub {
      * cv = value·gen + rcv·H.
      *
      * Bounds mirror the circuit: `value` goes through EscalarMulAny(64) and
-     * `rcv` through Num2Bits(253), so anything wider would be a witness the
+     * `rcv` through Num2Bits(252), so anything wider would be a witness the
      * circuit cannot represent.
      */
     valueCommit(value: Field, assetGen: Point, rcv: Field): Point {

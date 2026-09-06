@@ -50,9 +50,8 @@ describe("reference / merkle path recomputation", function () {
         P = await Poseidon.build();
     });
 
-    // `rootFromPath` is a second implementation of the same quaternary node
-    // hashing as `MerkleTree`. Its value is that the two are independent, which
-    // only holds if something checks they agree.
+    // `rootFromPath` is an independent implementation of the same quaternary
+    // node hashing as `MerkleTree`; this pins the two to the same result.
     for (const depth of [2, 10]) {
         it(`rootFromPath reproduces MerkleTree.root() at every leaf (depth ${depth})`, () => {
             const tree = new MerkleTree(P, depth);
@@ -129,9 +128,8 @@ describe("reference / merkle path recomputation", function () {
         }
     });
 
-    // Depth 10 is the production shape and the one the frontier fuzz suite
-    // prefills near capacity; a naive fill there is ~350k hashes, so this
-    // checks the boundary values rather than every n.
+    // A naive fill at this depth is ~350k hashes, so this checks the boundary
+    // counts rather than every n.
     it("fillConstant agrees with a naive fill at depth 10 boundary counts", () => {
         const C = 0xdeadn;
         for (const n of [0, 1, 3, 4, 5, 15, 16, 17, 63, 64, 21, 1023, 1024, 4097]) {
@@ -187,8 +185,8 @@ describe("reference / fuzzy message detection", function () {
         [P, J] = await Promise.all([Poseidon.build(), Jubjub.build()]);
     });
 
-    // The clue signals have no in-circuit constraints, so the scheme's own
-    // correctness is not covered anywhere else.
+    // The clue signals carry no in-circuit constraints, so the scheme's own
+    // correctness is covered nowhere else.
     it("a detection key detects every clue flagged for its flag key", () => {
         const gen = deterministicClueGen(P, J);
         for (let i = 0; i < 32; i++) {
@@ -280,7 +278,7 @@ describe("reference / snark compression", () => {
         }
     });
 
-    // Regression pin. Independently reproducible with
+    // Independently reproducible with
     //   cast keccak $(cast abi-encode 'f(uint256[])' '[1,2,3]')
     // reduced mod the BN254 scalar field.
     it("fiatShamirZ([1,2,3]) is unchanged", () => {

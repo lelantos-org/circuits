@@ -14,18 +14,15 @@ import type { Field } from "../helpers";
  */
 export const DEPTH = 11;
 
-/**
- * Alias kept so the batch suites read against their own circuit's first
- * argument rather than a constant named for the transact side.
- */
+/** Alias naming the first argument of `TreeUpdateBatch` for the batch suites. */
 export const BATCH_DEPTH = DEPTH;
 
 /**
  * Shielded input slots — `N_IN` in `Transact(11, 4, 6)`, `src/4x6.circom`.
  *
- * The circuit takes exactly this many; a witness short of it fails witness
+ * The circuit takes exactly this many; a shorter witness fails witness
  * calculation with "Not enough values for input signal". `TxBuilder.build`
- * pads with dummies rather than making every suite spell out the padding.
+ * pads with dummies.
  */
 export const N_IN = 4;
 

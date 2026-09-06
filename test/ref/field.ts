@@ -26,8 +26,8 @@ export const POW_2_64 = 1n << 64n;
 /**
  * Least non-negative residue of `a` mod `p`.
  *
- * JS `%` keeps the sign of the dividend, so a negative intermediate — which
- * Horner evaluation produces — comes back out of range.
+ * JS `%` keeps the sign of the dividend, so the negative intermediates Horner
+ * evaluation produces would otherwise fall out of range.
  */
 export function mod(a: bigint, p: bigint = BN254_FR): bigint {
     const r = a % p;

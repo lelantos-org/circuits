@@ -231,8 +231,8 @@ noncomputable def chainFrom (leaf : F) : ℕ → F
 
 /-- The root a leaf is opened against, at tree depth `d`.
 
-Indexed by depth because the deployed pair is `Transact(11, 4, 6)` while the concrete 2x2
-witnesses below stay at depth 10. Only the padding slot needs the generality — its path is
+Indexed by depth because the shipped shape is `Transact(11, 4, 6)` while the small concrete
+witnesses below sit at depth 10. Only the padding slot needs the generality: its path is
 all-zero, so the chain is the only thing depth touches. -/
 noncomputable def rootFrom (d : ℕ) (leaf : F) : F := chainFrom leaf d
 
@@ -447,9 +447,9 @@ forty-odd fields of boilerplate.
 
 /-- The parts of a witness that differ between transactions.
 
-Indexed by `depth` as well as the shape: the deployed pair is `Transact(11, 4, 6)`, while
-the concrete 2x2 witnesses below stay at depth 10. Nothing here depends on the value —
-`ofParts` only forwards it — but the two cannot share one index. -/
+Indexed by `depth` as well as the shape: the shipped shape is `Transact(11, 4, 6)` while
+the small concrete witnesses below sit at depth 10. Nothing here depends on the value,
+since `ofParts` only forwards it, but the two cannot share one index. -/
 structure Parts (depth nIn nOut : ℕ) where
   /-- The two spent-note slots. -/
   spent : ℕ → SpentSlot depth
@@ -818,9 +818,8 @@ two things it proves are different: this file's *concrete* witnesses (`spendTx`,
 below) move real value through real Merkle openings, and building them at the smallest
 shape keeps them readable. `Transact(11, 4, 6)` gets its own witness further down.
 
-There is no `src/2x2.circom` any more — the narrow shapes were removed once 4x6 landed.
-The type is still perfectly well formed: every result here is proved for the generic
-`Transact(depth, nIn, nOut)`, and a shape needs no compiled circuit to instantiate it. -/
+No compiled circuit is needed to instantiate the type: every result here is proved for the
+generic `Transact(depth, nIn, nOut)`. -/
 theorem transactSat_satisfiable : ∃ w : TxWitness 10 2 2, TransactSat w :=
   ⟨Witness.padTx 10 2 2, Witness.padTx_sat 10 2 2⟩
 

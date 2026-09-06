@@ -15,8 +15,7 @@ template DeriveIvk() {
     signal output ivk;
 
     component h = Poseidon(2);
-    // Hoisted through a `var` rather than assigned straight from the call; see
-    // tags.circom.
+    // Hoisted through a `var`; see tags.circom.
     var tag = TAG_IVK();
     h.inputs[0] <== tag;
     h.inputs[1] <== nsk;
@@ -71,9 +70,9 @@ template NoteCommitment() {
 
 // rho = Poseidon(TAG_RHO, nf0, index) for output notes.
 //
-// nf0 = nullifier[0] is chain-unique (the contract reverts on double spend) and
-// index disambiguates the outputs of one transaction, so no two committed output
-// notes can share a rho.
+// nf0 = nullifier[0] is chain-unique, since the contract reverts on double
+// spend, and index disambiguates the outputs of one transaction, so no two
+// committed output notes share a rho.
 template DeriveRho() {
     signal input nf0;
     signal input index;
@@ -90,12 +89,11 @@ template DeriveRho() {
 // nf = Poseidon(TAG_NF, nk, rho, cm)
 //
 // cm is in the preimage so the nullifier identifies one exact note rather than
-// the pair (nk, rho). Without it, two notes sharing a rho share a nullifier and
-// spending either permanently locks the other. DeriveRho rules that out for
-// transact outputs, but the deposit path (tree_update_batch's cms[]) constrains
-// no rho, and output rho is publicly derivable from nullifier[0], so a minimal
-// deposit could plant a rho-colliding note in a victim's wallet. Binding cm
-// closes this for every inserter.
+// the pair (nk, rho). Without it two notes sharing a rho share a nullifier, and
+// spending either permanently locks the other. DeriveRho rules that out on the
+// transact path, but the deposit path constrains no rho and output rho is
+// publicly derivable from nullifier[0], so a dust deposit could plant a
+// rho-colliding note in a victim's wallet. Binding cm covers every inserter.
 template Nullifier() {
     signal input nk;
     signal input rho;

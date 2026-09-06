@@ -1,7 +1,5 @@
-// Shared wiring for the transact suites.
-//
-// Each suite needs the same builder and the same compiled circuit.
-// `loadCircuit` memoizes, so all of them together cost one compile.
+// Shared wiring for the transact suites: the same builder and the same compiled
+// circuit. `loadCircuit` memoizes, so all suites together cost one compile.
 
 import { loadCircuit, srcPath, type CircuitTester } from "../lib/circuit";
 import { buildTxBuilder, TxBuilder } from "../lib/transact";

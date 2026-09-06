@@ -10,15 +10,15 @@ import { N_IN, N_OUT } from "../lib/constants";
 
 // Public-input layout parity between the Lean model and `ref/compress.ts`.
 //
-// The 31-slot ordering exists in four places: `TransactCompressN`
+// The slot ordering exists in four places: `TransactCompressN`
 // (src/lib/poly_eval.circom), `PubInputs.sol :: compress(Transact, aux)`,
-// `src/test/ref/compress.ts :: flatten`, and `Lelantos.piSlot`
+// `test/ref/compress.ts :: flatten`, and `Lelantos.piSlot`
 // (lean/Lelantos/Circuit/Witness.lean). A transposition between any two breaks
 // proof verification silently, and PolyEval binding is stated about this
 // layout, so a wrong layout in Lean would empty `transact_sound`'s compression
 // clause.
 //
-// `lean/expected/layout-2x2.txt` is generated from the Lean definition by
+// `lean/expected/layout-4x6.txt` is generated from the Lean definition by
 // `lean/scripts/dump-layout.sh`, which also guards it against drift on the Lean side.
 // This test closes the other side: it checks that file against `ref/compress.ts`.
 //
@@ -26,13 +26,13 @@ import { N_IN, N_OUT } from "../lib/constants";
 // produce `vectors/`, which the SDK consumes. The final case below pins the
 // published vector's layout to the same Lean file, giving the chain:
 //
-//   Lelantos.piSlot -> layout-2x2.txt -> ref/flatten -> vectors/*.json -> SDK
+//   Lelantos.piSlot -> layout-4x6.txt -> ref/flatten -> vectors/*.json -> SDK
 //
 // A Lean layout change therefore fails here, before a vector can be published.
 //
 // The circuit-to-ref link is covered by the PolyEval binding cases in
-// transact.test.ts, and by gen-vectors.ts refusing to write when the compiled
-// circuit's `y` disagrees with the reference Horner evaluation.
+// test/transact/binding.test.ts, and by gen-vectors.ts refusing to write when
+// the compiled circuit's `y` disagrees with the reference Horner evaluation.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
@@ -46,12 +46,10 @@ const COEFF_COUNT = 9 + 3 * N_IN + 8 * N_OUT;
 // Distinct sentinel per logical field, so any transposition shows up as a
 // mismatch rather than coincidentally agreeing.
 //
-// Generated from the Lean layout's slot NAMES rather than hand-written, which is
-// what lets this scale past the 31 slots of the old 2x2 shape to 4x6's 69. The
-// independence the test needs is not in where the numbers come from — it is in
-// `SENTINEL_INPUT` below, which assigns each sentinel to a field by name. That
-// assignment is the transcription under test; `flatten` has to reproduce Lean's
-// order from it.
+// Generated from the Lean layout's slot NAMES rather than hand-written. The
+// independence the test needs is in `SENTINEL_INPUT` below, which assigns each
+// sentinel to a field by name: that assignment is the transcription under test,
+// and `flatten` has to reproduce Lean's order from it.
 const SENTINEL: Record<string, bigint> = Object.fromEntries(
     readLayout(LAYOUT_FILE).map((name, i) => [name, BigInt(1000 + i)]),
 );

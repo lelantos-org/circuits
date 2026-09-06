@@ -66,7 +66,7 @@ describe("transact_4x6 / value balance", function () {
         await expectAccepts(circuit, tx.build({
             publicAssetId: 0n,
             inputs,
-            outputs: [dummyOutput(), dummyOutput()],
+            outputs: [dummyOutput(tx.P, 0), dummyOutput(tx.P, 1)],
             merkleRoot: root,
         }));
     });
@@ -220,7 +220,7 @@ describe("transact_4x6 / value balance", function () {
         const inA = tx.finalize(tree, planted[17]);
         const inB = tx.finalize(tree, planted[20]);
 
-        // 17 and 20 were picked so the path digits differ at both low levels.
+        // 17 and 20 differ in their path digits at both low levels.
         expect(inA.pathIndices[0]).to.equal(1);
         expect(inB.pathIndices[1]).to.equal(1);
 

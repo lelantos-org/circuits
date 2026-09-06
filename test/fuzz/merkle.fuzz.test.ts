@@ -13,7 +13,7 @@ const N_LEAVES = ARITY ** DEPTH;
 const WRAPPER = fixturePath("test_merkle_d2.circom");
 const fcParams = fcParamsFor("MERKLE");
 
-// Boundary leaf vectors worth pinning.
+// Boundary leaf vectors.
 const ALL_ZERO = Array<bigint>(N_LEAVES).fill(0n);
 const ALL_ONE = Array<bigint>(N_LEAVES).fill(1n);
 const ALL_MAX = Array<bigint>(N_LEAVES).fill(R - 1n);
@@ -71,9 +71,8 @@ describe("quaternary merkle [fuzz]", function () {
                 const { pathElements, pathIndices } = tree.proof(queryIdx);
 
                 const swapped: Field[][] = pathElements.map(lvl => lvl.slice());
-                // If siblings at (a, b) happen to share the same value the
-                // swap is a no-op; root will match honest and assertion below
-                // expects rejection — skip in that degenerate case.
+                // Equal siblings make the swap a no-op, so the root would match
+                // the honest one; skip that degenerate draw.
                 if (swapped[swapLevel][a] === swapped[swapLevel][b]) return;
                 [swapped[swapLevel][a], swapped[swapLevel][b]] = [swapped[swapLevel][b], swapped[swapLevel][a]];
 

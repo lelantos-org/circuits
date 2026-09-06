@@ -96,16 +96,14 @@ export function seededLeaf(P: Poseidon, J: Jubjub, seed: number, isDeposit: 0 | 
 /**
  * Throwaway value for every pre-batch leaf.
  *
- * One constant rather than a distinct leaf per slot, so `fillConstant` can build
- * the prefill in O(depth) hashes. A distinct fill costs ~350k Poseidon calls at
- * depth 10 (~40s), which the frontier fuzz suite pays once per trial over
- * `start_index` values near 4^10 — that is what pushed it past its 900s mocha
- * timeout at FUZZ=heavy.
+ * A single constant rather than a distinct leaf per slot, so `fillConstant`
+ * builds the prefill in O(depth) hashes instead of one per leaf; a
+ * production-depth prefill is otherwise too slow for the fuzz suites.
  *
- * The trade-off: all filled frontier slots at one level come out equal here, so
- * an intra-level permutation of the frontier is invisible to a witness built
- * from this tree. `frontier_root.test.ts` covers permutation at depth 3 over a
- * distinct-leaf tree, where the full fill is cheap.
+ * All filled frontier slots at one level are equal under this fill, so an
+ * intra-level permutation of the frontier is invisible to a witness built from
+ * this tree. `frontier_root.test.ts` covers permutation at depth 3 over a
+ * distinct-leaf tree.
  */
 const PREFILL_LEAF: Field = 0xdeadn;
 

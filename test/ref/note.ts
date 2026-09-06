@@ -40,8 +40,8 @@ export interface NoteCommitInput {
  *
  * Arity-4 and untagged: the arity plus the (asset, value) packing provide the
  * domain separation. Mirrors NoteCommitment in src/lib/note.circom. Soundness
- * needs asset < 2^64 and value < 2^64 — the circuit range-checks both, so the
- * throws here keep the off-circuit path honest.
+ * requires asset < 2^64 and value < 2^64; the circuit range-checks both, and
+ * the throws here enforce the same bounds off-circuit.
  */
 export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
     if (n.asset >= POW_2_64) throw new Error("asset must fit in 64 bits");

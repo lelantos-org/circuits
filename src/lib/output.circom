@@ -51,8 +51,8 @@ template OutputNote() {
     asset_nz.out === 0;
 
     // 4. Bind cv to (asset_id, value, rcv) and cv_dep to (asset_id, value,
-    //    rcv_dep). Same value and generator, so the two commitments differ only
-    //    in their blinding and share one scalar mul; see ValueCommitPair.
+    //    rcv_dep). Same value and generator, so the two differ only in their
+    //    blinding and share one scalar mul; see ValueCommitPair.
     component gen = HashToAssetGen();
     gen.asset_id <== asset_id;
 

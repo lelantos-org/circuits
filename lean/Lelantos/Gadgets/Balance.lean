@@ -14,7 +14,7 @@ every asset id in the field, which is what conservation has to mean.
 `perAssetValueBalance_nat` then lifts the field equality to `ℕ`. That step is where the
 64-bit range checks are consumed: with at most `n + 1` summands below `2^64` per side and
 `n ≤ 7`, both sides stay under `8 · 2^64 = 2^67 < p`, so the field equality is an exact
-integer equality and cannot be forged by wrapping. This is the precondition stated at `src/lib/balance.circom:75-80`;
+integer equality and cannot be forged by wrapping. This is the precondition stated at `src/lib/balance.circom:76-80`;
 removing a `RangeCheck64` upstream removes the hypothesis of this theorem.
 
 `PerAssetPointBalance` is deliberately not treated as a conservation check — see

@@ -1,11 +1,9 @@
 # Fidelity: does the Lean model match the circuit?
 
 The proofs in `lean/` are about `Lelantos.TransactSat`, a hand-written Lean model. They
-are only worth something if that model faithfully mirrors the circuit — `Transact` and its
-transitive closure, instantiated by `src/2x2.circom` and `src/3x3.circom` (`3x3` is the
-deployed shape).
-This file is the argument that it does, and — just as importantly — the honest list of where
-the argument is still thin.
+are only worth something if that model mirrors the circuit: `Transact` and its transitive
+closure, instantiated by `src/4x6.circom`. This file is the argument that it does, and the
+list of where that argument is still thin.
 
 ## Which direction of error is dangerous
 
@@ -18,11 +16,10 @@ the argument is still thin.
 A fourth failure mode is worse than any of these and has its own check: if the model were
 **unsatisfiable**, `transact_sound` would be vacuously true and every table below would be
 irrelevant. `Lelantos.transactSat_satisfiable` (`Completeness.lean`) rules that out by
-constructing a satisfying assignment for `Transact(10, 2, 2)` that exercises the full
-10-level Merkle chain, both value commitments, all five balance candidates and the
-30-coefficient Horner evaluation. `Lelantos.transact3x3Sat_satisfiable` does the same at
-`Transact(10, 3, 3)` and `Transact(11, 4, 6)`, so the target shape is covered too, and
-`Lelantos.batchSat_satisfiable` (`BatchCompleteness.lean`) covers `TreeUpdateBatch(10, 4)`.
+constructing a satisfying assignment at a small shape that exercises a full Merkle chain,
+both value commitments, every balance candidate and the Horner evaluation.
+`Lelantos.transact4x6Sat_satisfiable` does the same at the shipped `Transact(11, 4, 6)`, and
+`Lelantos.batchSat_satisfiable` (`BatchCompleteness.lean`) covers `TreeUpdateBatch`.
 
 Known deliberate omissions, all in the safe direction:
 
@@ -37,12 +34,12 @@ Known deliberate omissions, all in the safe direction:
   matching the circuit. Whether the digest is the true hash of the aux calldata is checked
   on-chain and recorded in `ContractObligations.aux_digest_recomputed`.
 * `Num2Bits`' `<--` witness hints are not modelled, only the `===` constraints beneath
-  them. That is exactly right: the hints carry no soundness weight.
+  them. The hints carry no soundness weight.
 
 ## Defence 1 — constraint-by-constraint table
 
-Every `===` / `<==` written in `src/lib/*.circom` — the transitive closure of `src/2x2.circom`,
-`src/3x3.circom` and `src/tree_update_batch.circom`, minus `node_modules/circomlib` — appears
+Every `===` / `<==` written in `src/lib/*.circom` — the transitive closure of `src/4x6.circom`
+and `src/tree_update_batch.circom`, minus `node_modules/circomlib` — appears
 in the tables below, with **three** stated exceptions, all of them repo-owned code that is
 collapsed rather than transcribed:
 
@@ -75,9 +72,11 @@ The correspondence is one row to one Lean field, with three documented exception
 * **`HashToAssetGen`'s Pedersen is collapsed** into `assetGen` — see its own section below.
 
 Line citations in the Lean sources are the same correspondence at finer grain: every `…Sat`
-field's doc comment names the circom lines it mirrors. They are maintained by hand and are
-**not** checked by CI, so a source-line drift shows up here as a stale citation rather than a
-failing build. Verify them when the circom files move.
+field's doc comment names the circom lines it mirrors. `scripts/check-citations.py` (run by
+`check-all.sh`) resolves each one, so a citation into a deleted file or past the end of a
+surviving one is a build failure. What it cannot check is whether the cited lines *say* what
+the doc comment claims, so a drift of a few lines inside a surviving file still passes.
+Verify the contents by hand when the circom files move.
 
 ### `src/lib/balance.circom`
 
@@ -161,36 +160,45 @@ append results reach no curve axiom.
 
 | circom | Lean |
 |---|---|
-| `:79-80` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchChainSat.count_bits` |
-| `:85-90` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchChainSat.active_def` |
-| `:95` `(1-active)*cms === 0` | `BatchChainSat.pad_cm` |
-| `:96-97` `(1-active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
-| `:98-101` `(1-active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
-| `:108` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
-| `:109-110` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
-| `:117-122` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
-| `:131-133` `BabyCheck(cv_dep.x, cv_dep.y + (1-active))` | **absent** — no curve equation in the model |
-| `:145` `active_dep <== active * is_deposit` | `BatchDepositSat.active_dep_def` |
-| `:147-148` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
-| `:151-154` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
-| `:157-158` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
-| `:160-164` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
-| `:166-167` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
-| `:172-184` `FrontierRoot` and `old_root === frontier_root.root` | **absent** — see README |
-| `:211-212` `Num2Bits(2·DEPTH)(start_index + k)` | `BatchChainSat.idx_bits` |
-| `:214-216` `idx_dig` from the bit pairs | `BatchChainSat.idx_dig` |
-| `:219-226` `QuaternaryInsert(DEPTH)` per leaf | `BatchChainSat.insert` |
-| `:197-201` `fr[0] <== frontier_in` | `BatchChainSat.fr_base` |
-| `:202` `running_root[0] <== old_root` | `BatchChainSat.root_base` |
-| `:231-233` frontier mux | `BatchChainSat.fr_mux` |
-| `:237-239` root mux | `BatchChainSat.root_mux` |
-| `:243` `new_root === running_root[MAX_L]` | `BatchChainSat.new_root_def` |
-| `:246-259` `BatchCompress(MAX_L)` | **absent** — `PolyEval` is proved generically; the slot order is pinned by `test/tree_update_batch.test.ts` |
+| `:128-129` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchChainSat.count_bits` |
+| `:134-138` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchChainSat.active_def` |
+| `:144` `(1-active)*cms === 0` | `BatchChainSat.pad_cm` |
+| `:145-146` `(1-active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
+| `:147-150` `(1-active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
+| `:157` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
+| `:158-159` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
+| `:170-174` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
+| `:184-185` `BabyCheck(cv_dep.x, cv_dep.y + (1-active))` | **absent** — no curve equation in the model |
+| `:198` `active_dep <== active * is_deposit` | `BatchDepositSat.active_dep_def` |
+| `:206` `IsZero(leaf_asset)` | `BatchDepositSat.asset_isZero` |
+| `:207` `active_dep * IsZero(leaf_asset).out === 0` | `BatchDepositSat.asset_nonzero` |
+| `:210` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
+| `:214-216` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
+| `:220` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
+| `:223-226` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
+| `:228-229` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
+| `:235-246` `FrontierRoot` and `old_root === frontier_root.root` | **absent** — see README |
+| `:282` `idx_in <== active * (start_index + k)` | `BatchChainSat.idx_in_def` |
+| `:284` `Num2Bits(2·DEPTH)(idx_in)` | `BatchChainSat.idx_bits` |
+| `:287` `idx_dig` from the bit pairs | `BatchChainSat.idx_dig` |
+| `:290-296` `QuaternaryInsert(DEPTH)` per leaf | `BatchChainSat.insert` |
+| `:262` `fr[0] <== frontier_in` | `BatchChainSat.fr_base` |
+| `:265` `running_root[0] <== old_root` | `BatchChainSat.root_base` |
+| `:303-305` frontier mux | `BatchChainSat.fr_mux` |
+| `:309-311` root mux | `BatchChainSat.root_mux` |
+| `:315` `new_root === running_root[MAX_L]` | `BatchChainSat.new_root_def` |
+| `:319-332` `BatchCompress(MAX_L)` | **absent** — `PolyEval` is proved generically; the slot order is pinned by `test/tree_update_batch.test.ts` |
 
 Three rows are deliberately empty. `BabyCheck` and `FrontierRoot` are genuine gaps, not
 simplifications, and both are listed in the README. `BatchCompress` is covered generically by
 `polyEval_sound` / `polyEval_binding`; what Lean does not pin is the *order* of the 52
 coefficients, which the TypeScript suite asserts against the circuit's own `y` output.
+
+Note the shape of the `idx_bits` row. The circuit range-checks `active[k] · (start_index + k)`,
+so the model must too: stating it over `start_index + k` for every slot would put a
+constraint in the model that the circuit does not impose — the dangerous direction of the
+table at the top of this file — and would additionally be false of a batch whose last active
+leaf sits at the final index of the tree, which the circuit accepts.
 
 ### `src/lib/note.circom`
 
@@ -236,11 +244,11 @@ mirrors. They can be read side by side with the originals and checked a row at a
 
 ## Defence 2 — witness parity harness
 
-**Not built.** The plan called for a `modelcheck` executable that loads a real circom
-witness plus `build/2x2.sym`, checks `TransactSat` evaluates to `true` on it, and compares
-every modelled intermediate signal against the circom-computed value at the matching
-label; plus a negative pass replaying the ~65 rejecting cases from
-[test/transact/](../test/transact/) and asserting the model rejects them too.
+**Not built.** It would be a `modelcheck` executable loading a real circom witness plus
+`build/4x6.sym`, checking `TransactSat` evaluates to `true` on it and comparing every
+modelled intermediate signal against the circom-computed value at the matching label, plus a
+negative pass replaying the rejecting cases from [test/transact/](../test/transact/) and
+asserting the model rejects them too.
 
 This is the defence that would catch a model *stronger* than the circuit — the dangerous
 direction in the table above. Until it exists, the table and the layout check are the only
@@ -249,7 +257,7 @@ unverified in that direction.
 
 ## Defence 3 — public-input layout parity
 
-Built and running. The 31-slot ordering exists in four implementations:
+Built and running. The 69-slot ordering exists in four implementations:
 
 1. `src/lib/poly_eval.circom :: TransactCompressN`
 2. `contracts/src/lib/PubInputs.sol :: compress(Transact, aux)`
@@ -260,14 +268,13 @@ Checks, each mechanical:
 
 | Link | Check |
 |---|---|
-| Lean → `expected/layout-{2x2,3x3}.txt` | `lean/scripts/dump-layout.sh`, one dump per instantiated shape |
+| Lean → `expected/layout-4x6.txt` | `lean/scripts/dump-layout.sh` |
 | `expected/layout-4x6.txt` → SDK | `test/formal/layout_parity.test.ts`, sentinel-per-field so any transposition fails |
 | SDK → circuit | existing PolyEval binding cases, `test/transact/binding.test.ts` |
 
-The sentinel-per-field table in the second row is hand-written and exists for the **2x2
-shape only**; it is what catches a transposition between two slots of the same type. For
-`3x3` — the deployed shape — the vector-carries-Lean check in the same test file does apply,
-but that weaker link is all there is, and the third row does not cover it at all.
+The sentinel-per-field table in the second row is hand-written and is what catches a
+transposition between two slots of the same type. `PubInputs.sol` has no 69-slot `compress`
+overload, so the chain currently ends at the published vector rather than at the contract.
 
 The layout is defined once in Lean (`piSlot`) and the value lookup (`slotValue`) is
 separate, so the dumped names are derived from the same definition the proofs use rather

@@ -2,8 +2,8 @@
 // to `old_root` inside `tree_update_batch`.
 //
 // Uses a depth-3 wrapper (4^3 = 64 leaves) so every per-level digit slot (0..3)
-// at every level (0..2) can be exercised cheaply; soundness extends to depth 10
-// by induction.
+// at every level (0..2) can be exercised cheaply; soundness extends to the
+// production depth by induction.
 
 import { expect } from "chai";
 
@@ -51,11 +51,9 @@ describe("FrontierRoot (depth 3, lazy-root rebuild)", function () {
         await circuit.assertOut(w, { root: root.toString() });
     });
 
-    /// Every digit slot at every level: N spans 1, 4, 16 (single-slot at
-    /// each level), plus 5, 9, 22, 63 (multi-level partials) and 64
-    /// (full — handled separately since start_index=64 overflows 2*DEPTH=6
-    /// bits). The selector spread guarantees pre/eq/post are each touched
-    /// at every level across the table.
+    /// N spans 1, 4, 16 (a single slot at each level) and 5, 9, 22, 63
+    /// (multi-level partials); 64 is covered separately, since start_index=64
+    /// overflows 2*DEPTH=6 bits. The spread touches pre/eq/post at every level.
     const checkpoints = [0, 1, 2, 3, 4, 5, 7, 13, 16, 17, 22, 33, 47, 60, 63];
     for (const n of checkpoints) {
         it(`honest N=${n} (digits ${digitsOf(n, DEPTH)}) matches SDK root`, async () => {
@@ -66,10 +64,9 @@ describe("FrontierRoot (depth 3, lazy-root rebuild)", function () {
         });
     }
 
-    // Seeded rather than random: this runs in `test:unit`, where a failure must
-    // be reproducible. Broad random search over this circuit belongs to
-    // `fuzz/frontier_root_fuzz.test.ts`; this adds 20 values of N beyond the
-    // checkpoint list above.
+    // Seeded rather than random, so a failure in `test:unit` is reproducible.
+    // Broad random search over this circuit lives in
+    // `fuzz/frontier_root_fuzz.test.ts`.
     it(`seeded: 20 pseudorandom N ∈ [0, ${CAPACITY}) match SDK root`, async () => {
         for (const n of seededInts(0x5eed, 20, CAPACITY)) {
             const { root, frontier } = honestState(P, n);
@@ -82,20 +79,18 @@ describe("FrontierRoot (depth 3, lazy-root rebuild)", function () {
 
     it("rejects tampered frontier sibling (mid-level)", async () => {
         const { frontier } = honestState(P, 22);
-        // 22 ⇒ digits [2,1,1]; frontier[0][0] and [0][1] are real filled
-        // siblings. Bump one ⇒ rebuild root diverges.
+        // 22 ⇒ digits [2,1,1], so frontier[0][0] and [0][1] are filled siblings.
         frontier[0][1] = frontier[0][1] + 1n;
-        const { root } = honestState(P, 22);  // honest expected root
+        const { root } = honestState(P, 22);
         const w = await circuit.calculateWitness(frontierInputJson(22, frontier), true);
         const out = readOutput(w);
         expect(out).to.not.equal(root, "rebuild should diverge under tamper");
     });
 
     it("blank frontier with non-zero N diverges from real root", async () => {
-        // Forge attempt: relayer claims start_index = 16 but supplies an
-        // all-zero frontier. Rebuild yields a root unrelated to the real
-        // 16-leaf state, so the downstream `old_root === frontier_root.root`
-        // equality in tree_update_batch rejects the proof.
+        // start_index = 16 with an all-zero frontier: the rebuild yields a root
+        // unrelated to the real 16-leaf state, so the downstream
+        // `old_root === frontier_root.root` equality rejects the proof.
         const blank: Field[][] = [];
         for (let d = 0; d < DEPTH; d++) blank.push([0n, 0n, 0n]);
         const { root: realRoot } = honestState(P, 16);

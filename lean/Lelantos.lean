@@ -33,7 +33,7 @@ import Lelantos.Proofs.BatchCompleteness
 import Lelantos.Proofs.Rejection
 
 /-!
-# `Lelantos` — a machine-checked soundness proof for `src/2x2.circom`
+# `Lelantos` — a machine-checked soundness proof for the transact circuit
 
 Importing this module brings in the whole development. The layers are strictly ordered:
 `Model` depends on nothing else here, `Gadgets` on `Model`, `Circuit` on both, and `Proofs`

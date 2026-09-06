@@ -2,29 +2,21 @@ pragma circom 2.2.3;
 
 include "lib/transact.circom";
 
-// 4-input × 6-output transact circuit. Logic is in Transact (lib/transact.circom).
-//
-// Six output slots so that change lands on the withdrawal denomination ladder
-// in one spend. A withdrawal's publicOut must be a denomination to blend with
-// other users'; change is decomposed greedily onto the ladder, and four slots
-// hold at most three ladder pieces plus a dust note, so a remainder needing
-// five pieces (4900 = 2000+2000+500+200+200) leaves 400 off-ladder and requires
-// a follow-up transfer. Five change slots cover the great majority of
-// decompositions outright.
-//
-// Inputs stay at four. An input slot carries a DEPTH-level Merkle path with its
-// key derivation and nullifier — roughly 16.8k constraints against an output
-// slot's 4.9k — so widening that side costs about 3.4x per slot for reach that
-// is not the bottleneck.
+// Transact at 4 shielded inputs x 6 shielded outputs. Logic is in Transact
+// (lib/transact.circom).
 //
 // DEPTH = 11 matches the on-chain CommitmentTree: 4^11 = 4,194,304 leaves. An
-// unused output slot is a real value-0 note with a real Poseidon insertion, not
-// a sentinel, so every spend consumes N_OUT leaves whether it fills them or
-// not: at six outputs a depth-10 tree holds 174,762 spends. The eleventh level
-// restores that fourfold for roughly 870 constraints per input.
+// unused output slot is a real value-0 note with a real Poseidon insertion, so
+// a spend consumes N_OUT leaves whether it fills them or not.
 //
-// PolyEval coefficient slots, which must match the PubInputs.sol :: compress
-// overload for this shape:
+// Six output slots let a withdrawal's change land on the denomination ladder in
+// one spend: the publicOut must itself be a denomination, and five change slots
+// cover most decompositions. Inputs stay at four because an input slot carries a
+// DEPTH-level Merkle path with its key derivation and nullifier, roughly 16.8k
+// constraints against an output slot's 4.9k.
+//
+// PolyEval coefficient slots. Must match the PubInputs.sol :: compress overload
+// for this shape:
 //     [ 0]      merkle_root
 //     [ 1.. 4]  nullifier[0..3]
 //     [ 5..10]  out_cm[0..5]
@@ -40,18 +32,17 @@ include "lib/transact.circom";
 //     [38..49]  out_cv_dep[0..5][0..1]
 //     [50..67]  (clue_Rx, clue_Ry, clue_bits) per output
 //     [68]      out_aux_digest           (contract recomputes; never read from calldata)
-// Total = 9 + 3·N_IN + 8·N_OUT = 69.
+// Total = 9 + 3*N_IN + 8*N_OUT = 69.
 //
 // The struct's calldata prefix is 50 words (1 + 4 + 6 + 3 + 8 + 12 + 4 + 12).
 // PubInputs.compress re-masks the uint64 and address words at offsets hardcoded
 // in assembly; derive them from this table.
 //
-// Budget: this shape does not fit the 2^16 FFT domain. It is budgeted against
-// 2^17, so setup fetches ptau_17. tree_update_batch(11, 8) is the tighter of
-// the two circuits.
+// Budget: 2^17 FFT domain, so setup fetches ptau_17. tree_update_batch(11, 8) is
+// the tighter of the two circuits.
 //
-// Not established for this shape: a phase-2 ceremony beyond the
-// single-contributor prototype.
+// The phase-2 setup for this shape is a single-contributor prototype and is not
+// production-safe.
 //
 // Consumer-side checks indexed by input or output must range over the whole
 // shape: pairwise nullifier distinctness over all six pairs, and the out_cm and

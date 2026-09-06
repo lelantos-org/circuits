@@ -36,7 +36,7 @@ is never an input to the other.
 
 ## Tags
 
-Mirrors `src/lib/tags.circom:19-32`. These must stay byte-identical to
+Mirrors `src/lib/tags.circom:19-31`. These must stay byte-identical to
 `sdk/src/crypto/tags.ts`; changing any value invalidates every previously issued proof.
 -/
 

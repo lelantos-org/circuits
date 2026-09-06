@@ -1,6 +1,6 @@
 // Property-based coverage for `lib/fixed_base_mul.circom`.
 //
-// The unit suite [src/test/fixed_base_mul.test.ts](../fixed_base_mul.test.ts)
+// The unit suite [test/fixed_base_mul.test.ts](../fixed_base_mul.test.ts)
 // enumerates the small widths exhaustively and sweeps the window boundaries at
 // full width. This file covers what enumeration cannot reach: the 252-bit
 // scalar space, where 63 windows interact and a carry-shaped bug shows only for
@@ -103,8 +103,8 @@ describe("fuzz: FixedBaseMul", function () {
         );
     });
 
-    // FixedBaseMul is FixedBaseMulBits plus a Num2Bits it owns. If the two ever
-    // disagreed, the safe wrapper would not be wrapping the thing it claims to.
+    // FixedBaseMul is FixedBaseMulBits plus a Num2Bits it owns, so the two must
+    // agree on every boolean bit array.
     it("agrees with the raw bit interface", async () => {
         await fc.assert(
             fc.asyncProperty(arbBlinder(), async (s) => {

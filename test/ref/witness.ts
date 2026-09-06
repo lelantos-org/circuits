@@ -95,8 +95,8 @@ export interface BuildOpts {
 /**
  * Build the circom input object for Transact(DEPTH, N_IN, N_OUT).
  *
- * Arity is taken from the argument lengths rather than hardcoded, so this
- * serves every instantiated shape alike, including 4x6's `nIn ≠ nOut`.
+ * Arity is taken from the argument lengths rather than hardcoded, so `nIn` and
+ * `nOut` may differ.
  */
 export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): CircomTransactInput {
     const { inputs, outputs, publicAssetId, publicIn, publicOut, merkleRoot } = opts;
@@ -209,10 +209,10 @@ export function deterministicDummyBlinders(P: Poseidon, rho: Field): DummyBlinde
  * circuit feeds it into the nullifier, so a placeholder 0 would fail.
  *
  * `blinders` defaults to a derivation from `rho`. Blinders must differ between
- * dummies, since `cv = 0·gen + rcv·H` with a shared `rcv` is the same point in
- * every transaction and identifies the slot as a dummy; they must also be
- * reproducible, since the published vectors contain them. Deriving from `rho`
- * satisfies both. Not suitable for production key material.
+ * dummies: `cv = 0·gen + rcv·H` with a shared `rcv` is the same point in every
+ * transaction and identifies the slot as a dummy. They must also be
+ * reproducible, since the published vectors contain them. Not suitable for
+ * production key material.
  */
 export function dummyInputAt(
     P: Poseidon,
@@ -246,7 +246,34 @@ export function dummyInputAt(
     };
 }
 
-/** Zero-value output slot. Padding for bundles that produce fewer notes than N_OUT. */
-export function dummyOutput(asset: Field = 1n): Note {
-    return { asset, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv: 0n, rcvDep: 0n };
+// Domain separator for padding-output blinders, alongside the dummy-input pair
+// above. Distinct from both, so a padding output at slot k and a dummy input at
+// rho = k never derive the same blinder.
+const PAD_OUT_DOMAIN = 0x706f75n; // "pou"
+
+/**
+ * Zero-value output slot, padding a bundle that produces fewer notes than N_OUT.
+ *
+ * `slot` is the output index the note occupies and seeds the blinders, which
+ * must be non-zero and pairwise distinct:
+ *
+ *   - `cv = value·gen + rcv·H` and `cv_dep = value·gen + rcv_dep·H` are both
+ *     published, `cv` per spend and `cv_dep` inside the Merkle leaf. At
+ *     value = 0 and rcv = 0 both collapse to the Edwards identity (0, 1), the
+ *     sentinel `src/4x6.circom` requires a padding slot not to publish; it
+ *     reveals the transaction's true output count.
+ *   - `rcv == rcv_dep` equates the spend-time `cv` with the leaf's `cv_dep`,
+ *     which identifies the spent leaf
+ *     (`src/lib/value_commit.circom :: ValueCommitPair`).
+ *
+ * Deterministic so the published vectors reproduce. Not suitable for production
+ * key material; a wallet samples these uniformly.
+ *
+ * `pk = 0`: a padding output is unspendable by construction, and the value is
+ * hashed into `cm` rather than published.
+ */
+export function dummyOutput(P: Poseidon, slot: number, asset: Field = 1n): Note {
+    const seed = P.hash([PAD_OUT_DOMAIN, BigInt(slot)]);
+    const { rcv, rcvDep } = deterministicDummyBlinders(P, seed);
+    return { asset, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv, rcvDep };
 }

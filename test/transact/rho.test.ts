@@ -39,7 +39,7 @@ describe("transact_4x6 / rho and nullifier binding", function () {
     it("FAILS when the nullifier omits cm from the preimage", async () => {
         const { tx, circuit } = ctx;
         const { root, inputs } = tx.twoRealInputs([100n, 50n], ALICE_NSK);
-        // The pre-fix derivation: Poseidon(TAG_NF, nk, rho), no cm.
+        // Derivation without cm: Poseidon(TAG_NF, nk, rho).
         inputs[0].nf = tx.P.hash([TAG_NF, deriveNk(tx.P, ALICE_NSK), inputs[0].rho]);
 
         await expectWitnessFails(circuit, tx.build({

@@ -25,7 +25,7 @@ Two results:
 * `polyEval_sound` — the accumulator chain really computes `y = Σ_k coeffs[k] · z^k`.
 * `polyEval_binding` — two *distinct* coefficient vectors agree on at most `N - 1` points
   of the field. With `N = 31` and `|F| = p ≈ 2^253.6` that is the `≤ 30/p ≈ 2^-249`
-  collision bound quoted in `src/README.md § 2 "SnarkCompression"`.
+  collision bound quoted in `src/README.md § 2a "Public-input compression"`.
 
 `polyEval_binding` is a statement about the number of bad challenges, not about the
 prover. Turning it into a security claim needs `z` to be fixed *after* the coefficients —

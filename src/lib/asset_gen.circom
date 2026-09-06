@@ -5,9 +5,12 @@ include "../../node_modules/circomlib/circuits/pedersen.circom";
 include "tags.circom";
 
 // Per-asset generator V^t = Pedersen(TAG_ASSET || asset_id_LE_64) on Baby-Jubjub.
-// Bits are LSB-first: [0..7] = TAG_ASSET, [8..71] = asset_id. Uses BASE[0], while
-// the blinding base H uses BASE[2], so their images are disjoint.
-// Equivalent to circomlibjs pedersen.hash([TAG_ASSET, ...assetId_LE_8]).
+// Bits are LSB-first: [0..7] = TAG_ASSET, [8..71] = asset_id. Uses BASE[0] while
+// the blinding base H uses BASE[2], so their images are disjoint. Equivalent to
+// circomlibjs pedersen.hash([TAG_ASSET, ...assetId_LE_8]).
+//
+// The 72-bit message fits one Pedersen segment, so V^a is a publicly computable
+// multiple of BASE[0]. See PerAssetValueBalance in balance.circom.
 template HashToAssetGen() {
     signal input asset_id;
     signal output gen[2];

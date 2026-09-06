@@ -12,7 +12,6 @@
 import * as fc from "fast-check";
 import { BN254_FR } from "../helpers";
 
-// FUZZ env: light=5, medium=20 (default), heavy=100.
 const FUZZ = (process.env.FUZZ || "medium").toLowerCase();
 export const NUM_RUNS =
     FUZZ === "heavy" ? 100 :
@@ -35,9 +34,9 @@ export { mod } from "../helpers";
 export const arbField = (max: bigint = MAX_VALUE): fc.Arbitrary<bigint> =>
     fc.bigInt(0n, max);
 
-// Blinding scalars as `MulH` admits them: `Num2Bits(RCV_BITS = 252)`. Boundary
-// biased, because the interesting failures live at the window edges — the top
-// partial window, an all-ones scalar, and the subgroup order itself.
+// Blinding scalars as `MulH` admits them: `Num2Bits(RCV_BITS = 252)`. Biased
+// toward the window edges: the top partial window, an all-ones scalar, and the
+// subgroup order.
 export const MAX_BLINDER = (1n << 252n) - 1n;
 
 export const arbBlinder = (): fc.Arbitrary<bigint> =>

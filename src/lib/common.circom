@@ -26,19 +26,18 @@ template PathIndexSelectors() {
     s[3] <== bb;
 }
 
-// Empty-subtree hashes: zeros[0] = 0, zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] × 4).
+// Empty-subtree hashes: zeros[0] = 0, zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] x 4).
 // TAG_MERKLE must match MerkleLevel4.
 //
-// Compile-time constants, tabulated because circom does not constant-fold
-// Poseidon: computing the chain in-circuit costs DEPTH × Poseidon(5)
-// constraints per instantiation, and `tree_update_batch` instantiates
-// EmptySubtreeHashes MAX_L + 1 times (one per QuaternaryInsert, plus
-// FrontierRoot) for the same fixed table.
+// Tabulated because circom does not constant-fold Poseidon: computing the chain
+// in-circuit costs DEPTH x Poseidon(5) constraints per instantiation, and
+// `tree_update_batch` instantiates EmptySubtreeHashes MAX_L + 1 times for the
+// same fixed table.
 //
 // `test/merkle.test.ts` pins the table two ways: it recomputes the chain with
 // circomlibjs and asserts every entry, and it asserts EMPTY_SUBTREE(DEPTH)
 // against CommitmentTree.EMPTY_ROOT in the contracts repo. Read that root from
-// this table rather than writing out a second copy that can drift.
+// this table rather than writing a second copy that can drift.
 //
 // Extending the tree beyond DEPTH = 11 requires appending entries here.
 function EMPTY_SUBTREE(d) {
@@ -63,8 +62,7 @@ function EMPTY_SUBTREE(d) {
 template EmptySubtreeHashes(DEPTH) {
     signal output zeros[DEPTH + 1];
 
-    // Hoisted through a `var` rather than assigned straight from the call; see
-    // tags.circom.
+    // Hoisted through a `var`; see tags.circom.
     for (var i = 0; i <= DEPTH; i++) {
         var zero = EMPTY_SUBTREE(i);
         zeros[i] <== zero;

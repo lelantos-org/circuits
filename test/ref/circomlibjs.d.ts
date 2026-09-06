@@ -1,9 +1,9 @@
 // circomlibjs ships no type declarations.
 //
-// These are intentionally untyped. Field elements are Uint8Array in Montgomery
-// form and are structurally indistinguishable from plain little-endian byte
-// arrays, so a richer signature here would imply a static guarantee that does
-// not exist. `ref/jubjub.ts` is the sole consumer and validates at runtime.
+// Field elements are Uint8Array in Montgomery form, structurally
+// indistinguishable from plain little-endian byte arrays, so a richer signature
+// would imply a static guarantee that does not exist. `ref/jubjub.ts` is the
+// sole consumer and validates at runtime.
 
 declare module "circomlibjs" {
     export function buildBabyjub(): Promise<any>;

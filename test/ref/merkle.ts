@@ -17,13 +17,9 @@ const MAX_DEPTH = 25;
  * the tree can reach.
  *
  * At level L a cached index is < 4^(depth-L), so the widest level is L=1 with
- * indices < 4^(depth-1) = 2^(2·depth-2). Anything smaller aliases one level
- * into the next.
- *
- * The stride must scale with depth: a fixed 2^18 holds only at depth 10, and
- * at any greater depth a level-1 index runs past it and collides with a
- * level-2 key. `reference.test.ts` checks injectivity across every supported
- * depth, since the circuit tests exercise only depths 2 and 10.
+ * indices < 4^(depth-1) = 2^(2·depth-2). Any smaller stride aliases one level
+ * into the next, so it must scale with depth. `reference.test.ts` checks
+ * injectivity across every supported depth.
  */
 export function cacheKeyStride(depth: number): number {
     return 2 ** (2 * depth - 2);
@@ -87,23 +83,20 @@ export class MerkleTree {
 
     /**
      * Replace the leaf array with `n` copies of `c`, seeding the node cache so
-     * the following `root()` / `frontier()` / handful of `insert`s cost
+     * a subsequent `root()` / `frontier()` / small number of `insert`s costs
      * O(depth · ARITY) hashes rather than the ~(4^depth − 1)/3 a distinct-leaf
-     * fill of the same size costs. At depth 10 that is ~40 hashes instead of
-     * ~350k, which is what makes a production-depth prefill viable inside a
-     * property test (see `test/lib/batch.ts::buildHonest`).
+     * fill of the same size costs.
      *
-     * A full subtree whose every leaf is `c` depends only on its level, so
-     * `constChain` here plays the role `zeros` plays for the empty subtree.
-     * `nodeAt` descends from the root through exactly one *partial* node per
-     * level; the only other nodes it reads are that node's lower-indexed
-     * siblings — full, and seeded below — and its higher-indexed ones, which
-     * `nodeAt` short-circuits to `zeros`. `frontier()` reads the same seeded
+     * A full subtree of `c` depends only on its level, so `constChain` here
+     * plays the role `zeros` plays for the empty subtree. `nodeAt` descends
+     * through exactly one partial node per level; the other nodes it reads are
+     * that node's lower-indexed siblings, seeded below, and its higher-indexed
+     * ones, which short-circuit to `zeros`. `frontier()` reads the same seeded
      * siblings, so both agree with a naive fill (`reference.test.ts` checks it).
      *
-     * Every filled frontier slot at a given level comes out equal under this
-     * fill, so a caller that needs the siblings at one level to differ must use
-     * `insert` / `setLeaves` and pay the full cost.
+     * Every filled frontier slot at a given level is equal under this fill, so
+     * a caller needing the siblings at one level to differ must use `insert` or
+     * `setLeaves` and pay the full cost.
      */
     fillConstant(n: number, c: Field): void {
         if (!Number.isInteger(n) || n < 0 || n > ARITY ** this.depth) {

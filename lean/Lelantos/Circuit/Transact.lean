@@ -3,7 +3,7 @@ import Lelantos.Gadgets.PointBalance
 import Lelantos.Gadgets.PolyEval
 
 /-!
-# `src/2x2.circom` — the whole transact circuit
+# `src/lib/transact.circom` — the whole transact circuit
 
 `Transact(DEPTH, N_IN, N_OUT)` is wiring: the per-slot logic lives in `SpentNote` and
 `OutputNote`, and this file composes it with the public bucket, the two balance checks and
@@ -54,7 +54,7 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
   /-- `src/lib/transact.circom:97-122` — each spent slot, bound to the shared root. -/
   spent_sat : ∀ i, i < nIn → SpentNoteSat (w.spent i)
   spent_root : ∀ i, i < nIn → (w.spent i).root = w.merkleRoot
-  /-- `:95, 120-121` — `DummyZeroValue(N_IN)`. -/
+  /-- `:95-120-121` — `DummyZeroValue(N_IN)`. -/
   dummy_zero : DummyZeroValueSat nIn (fun i => (w.spent i).isDummy) (inValue w)
   /-- `:133-136` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
   rho_derived : ∀ j, j < nOut → (w.out j).rho = deriveRho (w.spent 0).nullifier (j : F)
@@ -66,7 +66,7 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
   `RangeCheck64` plus a `ValueScalarMul`, `src/lib/balance.circom:24-40`). -/
   pub_gen : w.pubGen = coords (assetGen w.publicAssetId)
   /-- `HashToAssetGen` decomposes its argument with `Num2Bits(64)`
-  (`src/lib/asset_gen.circom:15-16`), so the public bucket's asset id is range-checked
+  (`src/lib/asset_gen.circom:18-19`), so the public bucket's asset id is range-checked
   too. Modelled so that every `===` in the transitive closure is accounted for. -/
   pub_asset_range : Num2BitsSat 64 w.publicAssetId w.pubAssetBits
   pub_in_range : RangeCheck64Sat w.publicIn w.pubInBits
@@ -256,7 +256,7 @@ theorem no_asset_creation {w : TxWitness depth nIn nOut}
 
 /-- **Public-input binding at the transaction level.** If two transactions with *different*
 public inputs are accepted against the same `(z, y)`, then `z` is one of at most
-`piCount - 1` field elements — 30 out of `p ≈ 2^253.6` at the `2x2` instance.
+`piCount - 1` field elements, 68 out of `p ≈ 2^253.6` at `Transact(11, 4, 6)`.
 
 The security reading needs `ContractObligations.challenge_is_fiat_shamir`: the prover must
 not be able to pick `z` after fixing the coefficients. The circuit cannot enforce that, so
@@ -303,11 +303,7 @@ theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
 `transact_sound` is stated for `nIn ≤ 7`, `nOut ≤ 7` — the bound comes from
 `perAssetValueBalance_nat`, where it is what keeps each side of the balance equation below
 `p`. Seven is where that argument's rounding to `8 · 2^64` runs out, not where any shape
-sits; every shape below is comfortably inside it.
-
-Note the depths differ. `Transact(11, 4, 6)` is paired with `TreeUpdateBatch(11, 8)`, while
-2x2 / 3x3 / 4x4 remain at depth 10 and cannot share a tree with it. They are modeled here
-as further instantiations of the same generic result, not as usable shapes. -/
+sits; the shipped shape is comfortably inside it. -/
 
 /-- `Transact(11, 4, 6)` — `src/4x6.circom`. **The target shape.**
 

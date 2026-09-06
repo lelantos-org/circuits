@@ -64,8 +64,7 @@ template MerkleLevel4() {
     c3 <== c3_cur + c3_sib;
 
     component h = Poseidon(5);
-    // Hoisted through a `var` rather than assigned straight from the call; see
-    // tags.circom.
+    // Hoisted through a `var`; see tags.circom.
     var tag = TAG_MERKLE();
     h.inputs[0] <== tag;
     h.inputs[1] <== c0;

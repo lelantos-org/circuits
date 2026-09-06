@@ -8,11 +8,10 @@
 //
 //   1. Every `y` is read out of a witness produced by the compiled circuit and
 //      compared against the TypeScript Horner evaluation. On disagreement the
-//      generator refuses to write. A recorded TS value alone would not detect a
-//      circuit change.
-//   2. The slot-name layout is read from `lean/expected/layout-<shape>.txt`,
-//      the Lean model's dump, rather than regenerated here. The vector file
-//      carries Lean's ordering to the SDK.
+//      generator refuses to write.
+//   2. The slot-name layout is read from the Lean model's dump at
+//      `lean/expected/layout-<shape>.txt` rather than regenerated here, so the
+//      vector file carries Lean's ordering to the SDK.
 //
 // Determinism is required, since `just vectors-check` diffs a regeneration
 // against the committed files: no randomness, no timestamps, no absolute paths.
@@ -57,7 +56,7 @@ async function main() {
         };
     }
 
-    // The generator version lives here and NOT in the per-file bodies, so a
+    // The generator version lives here and not in the per-file bodies, so a
     // patch bump does not invalidate every file digest.
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
     writeJson(path.join(outDir, "index.json"), {

@@ -6,8 +6,7 @@ import { TIMEOUT_CIRCUIT } from "./lib/constants";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
 // Must match `PolyEval(N)` in the fixture. The gadget is arity-generic, so this
-// is a size the wrapper picked, not one any production circuit uses — 2x2
-// compresses to 31 slots and tree_update_batch to 4 + 6·MAX_L.
+// is a size the wrapper picked rather than one a production circuit uses.
 const N = 26;
 
 describe("PolyEval (Horner-form binding gadget)", function () {
@@ -74,7 +73,7 @@ describe("PolyEval (Horner-form binding gadget)", function () {
         const z = 9876543210n;
         const yBase = hornerEval(coeffs, z);
         const swapped = [...coeffs];
-        // swap two non-equal entries; coefficient ordering is load-bearing
+        // Swap two distinct entries: y depends on coefficient order.
         [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
         const yPerm = hornerEval(swapped, z);
         expect(yBase).to.not.equal(yPerm);

@@ -13,6 +13,8 @@ import {
     buildLeaf,
     dummyInputAt,
     dummyOutput,
+    fiatShamirZ,
+    flatten,
     type CircomTransactInput,
     type ClueInputs,
     type Field,
@@ -41,6 +43,11 @@ export interface TxBuildArgs {
     publicOut?: bigint;
     outputClues?: ClueInputs[];
     outputAuxDigest?: Field;
+    /**
+     * Overrides the Fiat-Shamir derivation. For tests that need a chosen
+     * challenge; leave unset so `build` derives it from the coefficients.
+     */
+    z?: Field;
 }
 
 export class TxBuilder {
@@ -61,10 +68,10 @@ export class TxBuilder {
         };
     }
 
-    // Insert a note into `tree`, returning a SpentNote with an empty proof.
-    // Call `finalize` once the root is frozen to populate path and indices.
-    // Leaf format: Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y), the deposit
-    // anchor pinning (asset, value) to the leaf.
+    // Insert a note into `tree`, returning a SpentNote with an empty proof;
+    // `finalize` populates path and indices once the root is frozen. Leaf
+    // format: Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y), the deposit anchor
+    // pinning (asset, value) to the leaf.
     insert(tree: MerkleTree, n: Note, nsk: Field): SpentNote {
         const cm = commit(this.P, n);
         const assetGen = this.J.hashToAssetGen(n.asset);
@@ -91,22 +98,18 @@ export class TxBuilder {
     // the caller supplied. Matches the SDK bundle builders.
     build(args: TxBuildArgs): CircomTransactInput {
         const nf0 = args.inputs[0].nf;
-        // Pad to the circuit's arity here rather than in every suite. `Transact`
-        // takes exactly N_IN inputs and N_OUT outputs; a short witness fails
-        // witness calculation outright, and spelling the padding out at each
-        // call site would bury what each scenario is actually testing.
-        //
-        // The padding is what the circuit itself expects of unused slots: dummy
-        // inputs (`is_dummy = 1`, bypassing pk / Merkle / asset checks) and
+        // `Transact` takes exactly N_IN inputs and N_OUT outputs; a short
+        // witness fails witness calculation. Unused slots take dummy inputs
+        // (`is_dummy = 1`, bypassing the pk, Merkle and asset checks) and
         // value-0 output notes, which are real leaves and hash as such.
         const inputs = padInputs(this.P, this.depth, args.inputs);
-        const padded = padOutputs(args.outputs);
+        const padded = padOutputs(this.P, args.outputs);
         const outputs = padded.map((o, j) => ({ ...o, rho: buildRho(this.P, nf0, j) }));
         const outputClues = args.outputClues
             ? padClues(args.outputClues, outputs.length, this.clues)
             : outputs.map(() => this.clues.next());
         const outputAuxDigest = args.outputAuxDigest ?? TEST_AUX_DIGEST;
-        return toCircomInput(this.P, this.J, {
+        const input = toCircomInput(this.P, this.J, {
             ...args,
             inputs,
             publicAssetId: args.publicAssetId ?? DEFAULT_ASSET,
@@ -116,6 +119,14 @@ export class TxBuilder {
             outputClues,
             outputAuxDigest,
         });
+        // Derive the challenge from the coefficients, as the contract does.
+        // `toCircomInput` defaults z to 1, at which PolyEval collapses to a
+        // plain sum and y is permutation-invariant, so a TransactCompressN that
+        // transposed two slots would still satisfy the suite. An explicit
+        // `args.z` takes precedence.
+        if (args.z !== undefined) input.z = args.z.toString();
+        else rebindFiatShamir(input);
+        return input;
     }
 
     newTree(): MerkleTree {
@@ -124,9 +135,8 @@ export class TxBuilder {
 
     // ===== scenario factories =====
     //
-    // Each builds a tree, freezes its root, and finalizes the proofs, in that
-    // order — the root must be frozen before proofs are taken. Between them they
-    // cover every input shape the suite uses.
+    // Each builds a tree, freezes its root, then finalizes the proofs; the root
+    // must be frozen before proofs are taken.
 
     /** Two real inputs from one owner. */
     twoRealInputs(values: [bigint, bigint], nsk: Field, asset: Field = DEFAULT_ASSET): Scenario {
@@ -160,11 +170,11 @@ export class TxBuilder {
     }
 
     /**
-     * A balanced 2-in-2-out witness: 100 + 50 in, 75 + 75 out, one owner, one
-     * asset, nothing public.
+     * A balanced witness with two real inputs and two real outputs: 100 + 50 in,
+     * 75 + 75 out, one owner, one asset, nothing public.
      *
      * The base for the tamper tests, which mutate a single field and expect
-     * rejection, so it must be honest in every respect but the field under test.
+     * rejection, so it is honest in every respect but the field under test.
      */
     balanced(nsk: Field = ALICE_NSK): CircomTransactInput {
         const { root, inputs } = this.twoRealInputs([100n, 50n], nsk);
@@ -177,9 +187,27 @@ export class TxBuilder {
 }
 
 /**
+ * Re-derive the Fiat-Shamir challenge `z` from the witness in its current state.
+ *
+ * Mirrors `lib/batch.ts :: rebindFiatShamir`. Call after mutating a
+ * PolyEval-bound field when the test needs the challenge to describe the
+ * witness it is evaluating; a tamper test expecting a constraint to fire does
+ * not, since `z` carries no constraint of its own and a stale one only moves
+ * the `y` the circuit outputs.
+ */
+export function rebindFiatShamir(input: CircomTransactInput): CircomTransactInput {
+    input.z = fiatShamirZ(flatten(input)).toString();
+    return input;
+}
+
+/**
  * Top up `inputs` to `N_IN` with dummies, distinct by `rho` so their nullifiers
- * differ — the circuit requires pairwise-distinct nullifiers across all slots,
- * including dummy ones.
+ * differ.
+ *
+ * Pairwise distinctness is a consumer obligation, not a circuit constraint:
+ * `Transact` places no relation between nullifier slots, and `src/4x6.circom`
+ * assigns the pairwise check to the consumer (`MASP.sol`). Dummies are kept
+ * distinct here so a witness matches what the SDK emits.
  */
 function padInputs(P: Poseidon, depth: number, inputs: SpentNote[]): SpentNote[] {
     if (inputs.length > N_IN) {
@@ -191,13 +219,18 @@ function padInputs(P: Poseidon, depth: number, inputs: SpentNote[]): SpentNote[]
     return out;
 }
 
-/** Top up `outputs` to `N_OUT` with value-0 notes. */
-function padOutputs(outputs: Note[]): Note[] {
+/**
+ * Top up `outputs` to `N_OUT` with value-0 notes.
+ *
+ * Each padding note is seeded by the slot it lands in, so no two share a
+ * blinder and none commits to the identity point; see `dummyOutput`.
+ */
+function padOutputs(P: Poseidon, outputs: Note[]): Note[] {
     if (outputs.length > N_OUT) {
         throw new Error(`padOutputs: ${outputs.length} outputs exceeds N_OUT = ${N_OUT}`);
     }
     const out = [...outputs];
-    while (out.length < N_OUT) out.push(dummyOutput());
+    while (out.length < N_OUT) out.push(dummyOutput(P, out.length));
     return out;
 }
 

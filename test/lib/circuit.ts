@@ -57,10 +57,9 @@ export function fixturePath(name: string): string {
     return path.join(FIXTURES, name);
 }
 
-// `wasmTester` compiles the circuit into a fresh tmpdir on every call, so the
-// cache reduces the cost to one compile per circuit rather than one per suite.
-// Mocha does not run with --parallel (see package.json), so all spec files
-// share one process and one cache.
+// `wasmTester` compiles the circuit into a fresh tmpdir on every call; the
+// cache reduces that to one compile per circuit. Mocha runs without --parallel
+// (see package.json), so all spec files share one process and one cache.
 //
 // Keyed on the absolute path and holding the promise, so concurrent `before`
 // hooks for one circuit await a single compile.
