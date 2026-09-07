@@ -64,12 +64,16 @@ jobs:
 
       # Both circuits are past the 2^16 domain — Transact(11,4,6) at 100,320
       # constraints and TreeUpdateBatch(11,8) at 113,502 — so 2^17 is the only
-      # ptau either ceremony needs.
+      # ptau either ceremony needs. `just` fetches it from
+      # lelantos-org/ptau and checks the digest on every run, cache hits
+      # included; the key carries that digest so a cache entry holding anything
+      # else misses and refetches instead of failing the build until someone
+      # purges it by hand.
       - name: Cache ptau-17
         uses: actions/cache@v4
         with:
           path: ptau/powersOfTau28_hez_final_17.ptau
-          key: ptau-17
+          key: ptau-17-6b662a324867139fb1a20a324d90b6ff61856dfb23f59326909f14b0e2483ae0
 
       - name: Install npm dependencies
         run: npm ci

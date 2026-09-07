@@ -4,7 +4,12 @@ set shell := ["bash", "-ceuo", "pipefail"]
 ROOT := justfile_directory()
 BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
-PTAU_URL_BASE := "https://storage.googleapis.com/zkevm/ptau"
+# The Hermez files were served from `https://storage.googleapis.com/zkevm/ptau`
+# until that bucket started refusing anonymous reads (403 on every object); the
+# hermez and PSE S3 mirrors are gone the same way. `lelantos-org/ptau` holds
+# byte-identical copies as release assets, which are unauthenticated and not
+# metered against any bandwidth quota.
+PTAU_URL_BASE := "https://github.com/lelantos-org/ptau/releases/download/hermez"
 # Both circuits are on the 2^17 ceremony: Transact(11,4,6) is 100,320 constraints
 # and TreeUpdateBatch(11,8) is 113,502, so neither fits 2^16. snarkjs picks the
 # domain from `nConstraints + nPubInputs + nOutputs`, which caps a 2^16 ceremony
@@ -14,6 +19,12 @@ PTAU_URL_BASE := "https://storage.googleapis.com/zkevm/ptau"
 # circuit and is not referenced by any recipe.
 PTAU16 := "powersOfTau28_hez_final_16.ptau"
 PTAU17 := "powersOfTau28_hez_final_17.ptau"
+
+# Checked on every fetch, including on a cache hit. A truncated or substituted
+# ptau is not self-describing: snarkjs reports it as `Invalid File format` from
+# somewhere deep in the setup, long after the bad bytes landed.
+PTAU16_SHA := "1c401abb57c9ce531370f3015c3e75c0892e0f32b8b1e94ace0f6682d9695922"
+PTAU17_SHA := "6b662a324867139fb1a20a324d90b6ff61856dfb23f59326909f14b0e2483ae0"
 
 # Pinned revision of iden3/circom-witnesscalc, which supplies the relayer's
 # native witness calculator. `build-circuit` is not published to crates.io; it
@@ -425,10 +436,31 @@ _compile circuit:
     npx snarkjs r1cs info "{{BUILD}}/{{circuit}}.r1cs"
 
 _fetch-ptau file:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{file}}" in
+        "{{PTAU16}}") want="{{PTAU16_SHA}}" ;;
+        "{{PTAU17}}") want="{{PTAU17_SHA}}" ;;
+        *) echo "no pinned digest for {{file}}" >&2; exit 1 ;;
+    esac
     mkdir -p "{{PTAU_DIR}}"
-    @if [ ! -f "{{PTAU_DIR}}/{{file}}" ]; then \
-        echo "==> Downloading {{file}}"; \
-        curl -L "{{PTAU_URL_BASE}}/{{file}}" -o "{{PTAU_DIR}}/{{file}}"; \
+    dest="{{PTAU_DIR}}/{{file}}"
+    if [ ! -f "$dest" ]; then
+        echo "==> Downloading {{file}}"
+        # -f matters: without it curl writes the HTTP error body into the file
+        # and exits 0, so a dead mirror looks like a corrupt ceremony.
+        # Downloads to .part so an interrupted fetch is not mistaken for a
+        # complete file on the next run.
+        curl -fL --retry 3 --retry-all-errors "{{PTAU_URL_BASE}}/{{file}}" -o "$dest.part"
+        mv "$dest.part" "$dest"
+    fi
+    got=$({ sha256sum "$dest" 2>/dev/null || shasum -a 256 "$dest"; } | cut -d' ' -f1)
+    if [ "$got" != "$want" ]; then
+        echo "==> ptau digest mismatch for {{file}}" >&2
+        echo "    got  $got" >&2
+        echo "    want $want" >&2
+        echo "    remove $dest and re-run to refetch" >&2
+        exit 1
     fi
 
 _rebuild-report name r1cs wasm zkey vk verifier:
