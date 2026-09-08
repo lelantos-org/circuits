@@ -23,6 +23,23 @@ REPO = os.path.abspath(os.path.join(LEAN, ".."))
 SRC = os.path.join(REPO, "src")
 SEARCH_ROOTS = [REPO, os.path.dirname(REPO)]
 
+# Repositories beside this one. `contracts/` and `sdk/` are siblings of the circuits
+# root rather than children, so a citation into them resolves only in a workspace that
+# has checked both out. CI checks out this repository alone, where such a citation is
+# UNVERIFIABLE rather than wrong — the same situation `just vectors-consumers-check`
+# skips on. Failing there would make the check pass or fail on how the workspace was
+# cloned, which is not a property of the development.
+EXTERNAL_ROOTS = ("contracts", "sdk")
+
+
+def outside_checkout(path: str) -> bool:
+    """Whether `path` names a sibling repository that is not checked out here."""
+    root = path.split("/", 1)[0]
+    if root not in EXTERNAL_ROOTS:
+        return False
+    return not any(os.path.isdir(os.path.join(r, root)) for r in SEARCH_ROOTS)
+
+
 # The prose under check: Lean sources and the two markdown files beside them. Doc
 # comments and tables make the same kinds of claim and are checked the same way.
 SCANNED_SUFFIXES = (".lean", ".md")
@@ -41,15 +58,19 @@ def scanned_files() -> Iterator[str]:
 
 
 def report(failures: list[str], total: int, noun: str, verb: str = "resolve",
-           hint: tuple[str, ...] = ()) -> int:
+           hint: tuple[str, ...] = (), note: str = "") -> int:
     """The `OK:` / `FAIL:` convention these checks share, and their exit status.
 
     One line per failure, then a count, then what to do about it — the shape
     `check-all.sh` prints in sequence and CI greps. Returns the exit status so a
     caller's `main` is `return report(...)`.
+
+    `note` carries what was NOT checked. A skip that prints nothing is a check that
+    quietly stops checking, so the count of skipped items rides on the OK line.
     """
+    tail = f" ({note})" if note else ""
     if not failures:
-        print(f"OK: {total} {noun} {verb}.")
+        print(f"OK: {total} {noun} {verb}{tail}.")
         return 0
     for reason in failures:
         print(f"  {reason}")

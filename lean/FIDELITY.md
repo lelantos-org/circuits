@@ -142,10 +142,16 @@ inside the file's length used to pass even when every number was wrong, which is
 rotted twice: `src/tree_update_batch.circom` had drifted by 15 to 23 lines, was corrected,
 and had drifted again by 25 lines in the chain half and 72 in the insert half, while
 `src/lib/transact.circom` had gone 18 out and `src/lib/poly_eval.circom` 13 to 19. Every
-one of those now fails the check; `--suggest` prints where the anchors have moved to.
+one of those now fails the check, which also prints where the anchors have moved to.
 
-What still cannot be checked is a citation that quotes nothing from its file. Those get
-existence and range only, and `--list` marks them.
+Two things it still cannot check. A citation that quotes nothing from its file gets
+existence and range only. And a citation into `contracts/` or `sdk/` — sibling
+repositories rather than directories of this one — is verifiable only in a workspace that
+has checked both out; CI checks out this repository alone, so it counts those as skipped
+and says how many rather than failing on how the tree was cloned. The four that exist
+today are checked locally, which is where a `PubInputs.sol` citation aimed at `src/lib/`
+rather than `src/libs/` was caught. (Naming the wrong path in full here would itself be a
+citation, and this check would fail on the sentence describing it.)
 
 The companion check is `lean/scripts/check-names.py`, which resolves the `Lelantos` names
 the prose claims exist. Comments hold no identifiers the compiler resolves, so a renamed

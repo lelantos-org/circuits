@@ -41,7 +41,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from checks import SEARCH_ROOTS, report, scanned_files
+from checks import SEARCH_ROOTS, outside_checkout, report, scanned_files
 from citations import Citation, citations_in, strip_comment
 
 # Identifiers that appear in nearly every circom line, so finding one inside a span
@@ -173,6 +173,7 @@ def main() -> int:
     source_cache: dict[str, list[str]] = {}
     failures: list[str] = []
     total = 0
+    skipped = 0
 
     for path in scanned_files():
         found = list(citations_in(path))
@@ -183,6 +184,9 @@ def main() -> int:
                 groups.setdefault((citation.line, citation.path), []).append(
                     (citation.lo, citation.hi))
         for citation in found:
+            if outside_checkout(citation.path):
+                skipped += 1
+                continue
             total += 1
             if args.list:
                 print(f"  {citation.describe()}")
@@ -191,7 +195,9 @@ def main() -> int:
             if reason is not None:
                 failures.append(reason)
 
-    return report(failures, total, "citations")
+    note = (f"{skipped} into sibling repositories not checked out here"
+            if skipped else "")
+    return report(failures, total, "citations", note=note)
 
 
 if __name__ == "__main__":
