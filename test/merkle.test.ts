@@ -5,10 +5,11 @@ import { fileURLToPath } from "url";
 import { expect } from "chai";
 
 import { Poseidon, MerkleTree, TAG_MERKLE, Field } from "./helpers";
-import { fixturePath, loadCircuit, type CircuitTester } from "./lib/circuit";
+import { fixturePath } from "./lib/circuit";
 import { merkleInputJson } from "./lib/inputs";
 import { expectWitnessFails, witnessMatchesRoot } from "./lib/expect";
 import { ARITY, TIMEOUT_CIRCUIT, TIMEOUT_FAST } from "./lib/constants";
+import { useCircuit } from "./lib/harness";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,34 +19,28 @@ const WRAPPER = fixturePath("test_merkle_d2.circom");
 describe("quaternary merkle tree", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
-    let circuit: CircuitTester;
-    let P: Poseidon;
-
-    before(async () => {
-        P = await Poseidon.build();
-        circuit = await loadCircuit(WRAPPER);
-    });
+    const ctx = useCircuit(WRAPPER);
 
     it("empty tree root matches manual zero-subtree fold", async () => {
-        const tree = new MerkleTree(P, DEPTH);
-        const lvl1 = P.hash([TAG_MERKLE, 0n, 0n, 0n, 0n]);
-        const expected = P.hash([TAG_MERKLE, lvl1, lvl1, lvl1, lvl1]);
+        const tree = new MerkleTree(ctx.P, DEPTH);
+        const lvl1 = ctx.P.hash([TAG_MERKLE, 0n, 0n, 0n, 0n]);
+        const expected = ctx.P.hash([TAG_MERKLE, lvl1, lvl1, lvl1, lvl1]);
         expect(tree.root()).to.equal(expected);
     });
 
     it("single-leaf root matches direct Poseidon evaluation", async () => {
-        const tree = new MerkleTree(P, DEPTH);
+        const tree = new MerkleTree(ctx.P, DEPTH);
         const leaf = 0xabcdn;
         tree.insert(leaf);
         // Leaf at index 0 → bottom group = (leaf, 0, 0, 0); other 3 bottom groups all-zero.
-        const bottom0 = P.hash([TAG_MERKLE, leaf, 0n, 0n, 0n]);
-        const bottomZ = P.hash([TAG_MERKLE, 0n, 0n, 0n, 0n]);
-        const expected = P.hash([TAG_MERKLE, bottom0, bottomZ, bottomZ, bottomZ]);
+        const bottom0 = ctx.P.hash([TAG_MERKLE, leaf, 0n, 0n, 0n]);
+        const bottomZ = ctx.P.hash([TAG_MERKLE, 0n, 0n, 0n, 0n]);
+        const expected = ctx.P.hash([TAG_MERKLE, bottom0, bottomZ, bottomZ, bottomZ]);
         expect(tree.root()).to.equal(expected);
     });
 
     it("circuit-computed root equals tree.root() at every quaternary slot (all 16 leaves)", async () => {
-        const tree = new MerkleTree(P, DEPTH);
+        const tree = new MerkleTree(ctx.P, DEPTH);
         const leaves: Field[] = [];
         for (let i = 0; i < 16; i++) {
             const leaf = BigInt(0x100 + i);
@@ -59,9 +54,9 @@ describe("quaternary merkle tree", function () {
             expect(pathIndices[0]).to.equal(i % ARITY);
             expect(pathIndices[1]).to.equal(Math.floor(i / ARITY) % ARITY);
 
-            const w = await circuit.calculateWitness(merkleInputJson(leaves[i], pathElements, pathIndices), true);
-            await circuit.checkConstraints(w);
-            await circuit.assertOut(w, { root: expectedRoot.toString() });
+            const w = await ctx.circuit.calculateWitness(merkleInputJson(leaves[i], pathElements, pathIndices), true);
+            await ctx.circuit.checkConstraints(w);
+            await ctx.circuit.assertOut(w, { root: expectedRoot.toString() });
         }
     });
 
@@ -80,41 +75,41 @@ describe("quaternary merkle tree", function () {
                 if (k === pos) group.push(leaf);
                 else group.push(sibs0[s++]);
             }
-            const lvl0Out = P.hash([TAG_MERKLE, group[0], group[1], group[2], group[3]]);
+            const lvl0Out = ctx.P.hash([TAG_MERKLE, group[0], group[1], group[2], group[3]]);
             const grp1: Field[] = [];
             let t = 0;
             for (let k = 0; k < ARITY; k++) {
                 if (k === lvl1Idx) grp1.push(lvl0Out);
                 else grp1.push(lvl1Sibs[t++]);
             }
-            const expectedRoot = P.hash([TAG_MERKLE, grp1[0], grp1[1], grp1[2], grp1[3]]);
+            const expectedRoot = ctx.P.hash([TAG_MERKLE, grp1[0], grp1[1], grp1[2], grp1[3]]);
 
-            const w = await circuit.calculateWitness(
+            const w = await ctx.circuit.calculateWitness(
                 merkleInputJson(leaf, [sibs0, lvl1Sibs], [pos, lvl1Idx]),
                 true,
             );
-            await circuit.assertOut(w, { root: expectedRoot.toString() });
+            await ctx.circuit.assertOut(w, { root: expectedRoot.toString() });
         }
     });
 
     it("FAILS when path_index >= 4 (Num2Bits(2) range check)", async () => {
-        const tree = new MerkleTree(P, DEPTH);
+        const tree = new MerkleTree(ctx.P, DEPTH);
         tree.insert(7n);
         const { pathElements, pathIndices } = tree.proof(0);
         pathIndices[0] = 4;
-        await expectWitnessFails(circuit, merkleInputJson(7n, pathElements, pathIndices));
+        await expectWitnessFails(ctx.circuit, merkleInputJson(7n, pathElements, pathIndices));
     });
 
     it("FAILS when path_index is large garbage (e.g. 2^32)", async () => {
-        const tree = new MerkleTree(P, DEPTH);
+        const tree = new MerkleTree(ctx.P, DEPTH);
         tree.insert(7n);
         const { pathElements, pathIndices } = tree.proof(0);
         pathIndices[1] = 1 << 30;
-        await expectWitnessFails(circuit, merkleInputJson(7n, pathElements, pathIndices));
+        await expectWitnessFails(ctx.circuit, merkleInputJson(7n, pathElements, pathIndices));
     });
 
     it("permuting siblings within a level changes the root (order matters)", async () => {
-        const tree = new MerkleTree(P, DEPTH);
+        const tree = new MerkleTree(ctx.P, DEPTH);
         for (let i = 0; i < 5; i++) tree.insert(BigInt(0x900 + i));
         const expected = tree.root();
 
@@ -125,17 +120,17 @@ describe("quaternary merkle tree", function () {
         const swapped: Field[][] = pathElements.map((lvl: Field[]) => lvl.slice());
         [swapped[0][0], swapped[0][2]] = [swapped[0][2], swapped[0][0]];
 
-        const w = await circuit.calculateWitness(merkleInputJson(tree.leaves[1], swapped, pathIndices), true);
-        expect(await witnessMatchesRoot(circuit, w, expected)).to.equal(false);
+        const w = await ctx.circuit.calculateWitness(merkleInputJson(tree.leaves[1], swapped, pathIndices), true);
+        expect(await witnessMatchesRoot(ctx.circuit, w, expected)).to.equal(false);
     });
 
     it("dummy zeros[i] cache equals iterated Poseidon(5, z,z,z,z)", async () => {
         let z: Field = 0n;
-        const tree = new MerkleTree(P, DEPTH);
+        const tree = new MerkleTree(ctx.P, DEPTH);
         const zeros = (tree as unknown as { zeros: Field[] }).zeros;
         for (let i = 0; i < DEPTH; i++) {
             expect(zeros[i]).to.equal(z);
-            z = P.hash([TAG_MERKLE, z, z, z, z]);
+            z = ctx.P.hash([TAG_MERKLE, z, z, z, z]);
         }
         expect(zeros[DEPTH]).to.equal(z);
     });

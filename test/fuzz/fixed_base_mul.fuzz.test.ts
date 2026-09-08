@@ -17,6 +17,7 @@ import { Jubjub, H_BASE, BABYJUB_SUBGROUP_ORDER, type Field } from "../helpers";
 import { fixturePath, loadCircuit } from "../lib/circuit";
 import { fcParamsFor, arbBlinder, MAX_BLINDER } from "./arbitraries";
 import { RCV_BITS as WIDTH, TIMEOUT_HEAVY } from "../lib/constants";
+import { buildJubjub } from "../lib/harness";
 
 const WRAPPER = fixturePath("test_fixed_base_mul.circom");
 const REFERENCE = fixturePath("test_fixed_base_mul_reference.circom");
@@ -36,7 +37,7 @@ describe("fuzz: FixedBaseMul", function () {
             loadCircuit(WRAPPER),
             loadCircuit(REFERENCE),
             loadCircuit(RAW_BITS),
-            Jubjub.build(),
+            buildJubjub(),
         ]);
     });
 

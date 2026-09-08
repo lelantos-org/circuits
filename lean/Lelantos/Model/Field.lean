@@ -5,7 +5,7 @@ import Mathlib.Tactic.NormNum
 /-!
 # The circom scalar field
 
-`src/2x2.circom` is compiled for the BN254 curve, so every signal ranges over
+`src/4x6.circom` is compiled for the BN254 curve, so every signal ranges over
 `F = ZMod p` with `p` the BN254 scalar-field modulus (circom's default prime `r`).
 
 The only fact about `p` we cannot machine-check here is its primality — see `p_prime`
@@ -16,7 +16,7 @@ below and `lean/scripts/check-prime.py` for the external check. Everything else 
 namespace Lelantos
 
 /-- BN254 scalar-field modulus, i.e. circom's default prime `r`.
-Must equal the `p` reported by `snarkjs r1cs info build/2x2.r1cs` (curve `bn-128`). -/
+Must equal the `p` reported by `snarkjs r1cs info build/4x6.r1cs` (curve `bn-128`). -/
 def p : ℕ :=
   21888242871839275222246405745257275088548364400416034343698204186575808495617
 
@@ -28,9 +28,10 @@ theorem one_lt_p : 1 < p := by unfold p; norm_num
 
 theorem two_lt_p : 2 < p := by unfold p; norm_num
 
-/-- `3 < p`: the largest output-slot index over the deployed shapes (`N_OUT = 3` in
-`src/3x3.circom`) still injects into `F`, which is what makes `DeriveRho`'s `index`
-argument separate output slots. -/
+/-- `3 < p`: retained as the bound the small completeness shapes are stated at. The
+shipped shape needs `seven_lt_p` below — what the bound is for is `DeriveRho`'s `index`
+argument, which separates output slots only while distinct slot indices stay distinct
+in `F`. -/
 theorem three_lt_p : 3 < p := by unfold p; norm_num
 
 /-- `4 < p`: retained as the smallest bound several older results were stated at.
@@ -51,9 +52,9 @@ statement modulo `p`. See `src/lib/balance.circom:11`. -/
 theorem two_pow_64_lt_p : 2 ^ 64 < p := by unfold p; norm_num
 
 /-- `2 ^ 66 < p`: `PerAssetValueBalance` sums at most `N_IN + 1` terms of size `< 2 ^ 64`
-per side. The largest deployed shape is `Transact(10, 3, 3)` (`src/3x3.circom`), giving four
-terms and a bound of `4 · 2^64 = 2^66`, so neither side can wrap. See
-`src/lib/balance.circom:76-80`. -/
+per side, so a three-slot side is bounded by `4 · 2^64 = 2^66`. Retained for the small
+completeness shapes; the shipped `Transact(11, 4, 6)` needs `two_pow_67_lt_p` below. See
+`src/lib/balance.circom:75-81`. -/
 theorem two_pow_66_lt_p : 2 ^ 66 < p := by unfold p; norm_num
 
 /-- `2 ^ 67 < p`: the same sum at the widest shape the repository instantiates,

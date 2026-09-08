@@ -47,3 +47,12 @@ jobs:
       # 2^16 FFT domain by 13 constraints, so the count needs its own gate.
       - name: Constraint budget
         run: just budget
+
+      # Every field of the Lean witness structures claims to BE a signal of the
+      # compiled circuit. This is where that is checked, because it is the only
+      # job that produces `build/*.sym` — the mocha suite compiles through
+      # circom_tester, which writes elsewhere, so the same test skips in the
+      # `test` workflow. `REQUIRE_ARTIFACTS=1` makes a missing artifact a failure
+      # here rather than a silent pass.
+      - name: Model signal parity
+        run: just signal-parity

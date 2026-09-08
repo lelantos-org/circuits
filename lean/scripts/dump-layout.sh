@@ -5,17 +5,29 @@
 # The layout is the highest-risk piece of hand transcription in the whole development:
 # it must agree with `src/lib/poly_eval.circom :: TransactCompressN`,
 # `contracts/src/lib/PubInputs.sol :: compress(Transact, aux)` and
-# `test/ref/compress.ts :: flatten`. Four implementations, one order.
+# `test/ref/compress.ts :: coeffs`. Four implementations, one order.
 #
 # `lean/expected/layout-4x6.txt` is additionally consumed by
 # `test/formal/layout_parity.test.ts`, which checks it against `test/ref/compress.ts`
 # — the same implementation the published `vectors/` are generated from, which is how this
 # order reaches the SDK without either repo importing the other.
 #
-# The 69-slot dump is what the `PubInputs.sol` compress overload must be written
-# against; its calldata prefix is 50 words, which fixes the offsets of the uint64
-# and address words `compress` re-masks in assembly. Until that overload exists,
-# nothing cross-checks the contract.
+# Two layouts are dumped: the transact shapes and `BatchCompress(MAX_L)`. They are not
+# the same kind of object, and the difference is the point.
+#
+# The 46-slot transact dump is the POLYNOMIAL, not the challenge preimage. `PubInputs.sol`
+# hashes 69 words to derive `z` and evaluates only these 46 — the four address
+# words, the FMD clue triples and the payload digest are bound through the
+# challenge because the circuit constrains none of them, and an unconstrained
+# coefficient is a free variable a prover can solve `y = Σ c_k z^k` with. The
+# calldata prefix is still 50 words, which fixes the offsets of the uint64 and
+# address words `compress` re-masks in assembly.
+#
+# The batch dump has no such split: all `4 + 6*MAX_L` words are coefficients, because
+# every one of them is a signal of `tree_update_batch.circom`. There are no words that
+# could be bound through the challenge alone, so evaluating all 52 is the only sound
+# option. `test/formal/batch_layout_parity.test.ts` asserts the same thing against the
+# published vector; this file is the Lean anchor it asked for.
 #
 # Regenerate after an intentional layout change:  lean/scripts/dump-layout.sh --update
 set -euo pipefail
@@ -64,6 +76,42 @@ LEAN
     status=1
   else
     echo "OK: Lean layout matches $EXPECTED ($(wc -l < "$EXPECTED" | tr -d ' ') slots)."
+  fi
+done
+
+# `BatchCompress(MAX_L)`, matching `src/tree_update_batch.circom`'s instantiation.
+for maxL in 8; do
+  EXPECTED="expected/layout-batch-${maxL}.txt"
+
+  cat > "$SRC" <<LEAN
+import Lelantos
+open Lelantos
+def main : IO Unit := do
+  for name in batchLayoutNames ${maxL} do
+    IO.println (name.replace "Lelantos.BatchPISlot." "")
+#eval main
+LEAN
+
+  lake env lean "$SRC" 2>/dev/null > "$ACTUAL"
+
+  if [ ! -s "$ACTUAL" ]; then
+    echo "FAIL: Lean produced no batch layout output for MAX_L=${maxL}"
+    exit 1
+  fi
+
+  if [ "${1:-}" = "--update" ]; then
+    cp "$ACTUAL" "$EXPECTED"
+    echo "updated $EXPECTED ($(wc -l < "$EXPECTED" | tr -d ' ') slots)"
+    continue
+  fi
+
+  if ! diff -u "$EXPECTED" "$ACTUAL"; then
+    echo
+    echo "FAIL: the Lean batch layout changed for MAX_L=${maxL}."
+    echo "It must stay in lockstep with BatchCompress, PubInputs.sol and the SDK."
+    status=1
+  else
+    echo "OK: Lean batch layout matches $EXPECTED ($(wc -l < "$EXPECTED" | tr -d ' ') slots)."
   fi
 done
 

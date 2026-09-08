@@ -9,9 +9,10 @@
 
 import { expect } from "chai";
 
-import { Jubjub, BABYJUB_SUBGROUP_ORDER, POW_2_64 } from "./helpers";
+import { BABYJUB_SUBGROUP_ORDER, POW_2_64 } from "./helpers";
 import { TIMEOUT_FAST } from "./lib/constants";
 import { assetMultiplier, classifyPair } from "../scripts/check-asset-ids";
+import { useGadgets } from "./lib/harness";
 
 /**
  * A pair whose multipliers share a factor large enough that the minimal
@@ -22,10 +23,7 @@ const COLLIDING: [bigint, bigint] = [0x067f8028c470047cn, 0x067f8028c472818bn];
 describe("asset id separation", function () {
     this.timeout(TIMEOUT_FAST);
 
-    let J: Jubjub;
-    before(async () => {
-        J = await Jubjub.build();
-    });
+    const ctx = useGadgets();
 
     // The model is arithmetic over circomlib's signed 4-bit windows, so the
     // bounds the gate reports hold only while it tracks the compiled gadget.
@@ -43,11 +41,11 @@ describe("asset id separation", function () {
             [oldR, r] = [r, oldR - q * r];
             [oldS, s] = [s, oldS - q * s];
         }
-        const base0 = J.mulPointEscalar(J.hashToAssetGen(0n), ((oldS % ell) + ell) % ell);
+        const base0 = ctx.J.mulPointEscalar(ctx.J.hashToAssetGen(0n), ((oldS % ell) + ell) % ell);
 
         for (const id of [0n, 1n, 2n, 3n, 7n, 99n, 0xdeadbeefn, ...COLLIDING]) {
-            const modelled = J.mulPointEscalar(base0, mod(assetMultiplier(id)));
-            const actual = J.hashToAssetGen(id);
+            const modelled = ctx.J.mulPointEscalar(base0, mod(assetMultiplier(id)));
+            const actual = ctx.J.hashToAssetGen(id);
             expect(modelled[0], `x at id ${id}`).to.equal(actual[0]);
             expect(modelled[1], `y at id ${id}`).to.equal(actual[1]);
         }
@@ -66,8 +64,8 @@ describe("asset id separation", function () {
     it("the flagged pair really shares a value-commitment point", () => {
         const [a, b] = COLLIDING;
         const { va, vb } = classifyPair(a, b).values!;
-        const pa = J.mulPointEscalar(J.hashToAssetGen(a), va);
-        const pb = J.mulPointEscalar(J.hashToAssetGen(b), vb);
+        const pa = ctx.J.mulPointEscalar(ctx.J.hashToAssetGen(a), va);
+        const pb = ctx.J.mulPointEscalar(ctx.J.hashToAssetGen(b), vb);
         expect(pa[0]).to.equal(pb[0]);
         expect(pa[1]).to.equal(pb[1]);
     });

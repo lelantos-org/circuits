@@ -19,11 +19,11 @@
   ],
   "circuits": {
     "4x6": {
-      "constraints": 100320,
+      "constraints": 100304,
       "domain": 131072
     },
     "tree_update_batch": {
-      "constraints": 113527,
+      "constraints": 113566,
       "domain": 131072
     }
   }

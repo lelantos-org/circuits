@@ -11,7 +11,13 @@ import {
     type Field,
     type Point,
 } from "../helpers";
-import { treeUpdateBatchCoeffs, padToSlots, type TreeUpdateBatchArgs } from "./inputs";
+import {
+    treeUpdateBatchChallenge,
+    treeUpdateBatchCoeffs,
+    padToSlots,
+    type TreeUpdateBatchArgs,
+    type TreeUpdateBatchPublicArgs,
+} from "./inputs";
 import { BATCH_DEPTH, MAX_L } from "./constants";
 
 /** One leaf's contribution to a batch: the commitment plus its deposit anchor. */
@@ -79,12 +85,23 @@ export function simpleLeaf(opts: {
     });
 }
 
-/** A leaf derived entirely from `seed`, for property tests needing k distinct leaves. */
-export function seededLeaf(P: Poseidon, J: Jubjub, seed: number, isDeposit: 0 | 1): LeafWitness {
+/**
+ * A leaf derived entirely from `seed`, for property tests needing k distinct
+ * leaves. `val` and `asset` override the seeded ones where a shape needs
+ * specific values — a worthless fee note needs both at zero (step 7a).
+ */
+export function seededLeaf(
+    P: Poseidon,
+    J: Jubjub,
+    seed: number,
+    isDeposit: 0 | 1,
+    val?: Field,
+    asset?: Field,
+): LeafWitness {
     return buildLeafWitness({
         P, J,
-        asset: 7n,
-        val: BigInt(100 + seed),
+        asset: asset ?? 7n,
+        val: val ?? BigInt(100 + seed),
         pk: BigInt(0xb000 + seed),
         rho: BigInt(1 + 2 * seed),
         rcm: BigInt(3 + 2 * seed),
@@ -150,9 +167,91 @@ export function buildHonest(
  * Call after mutating any PolyEval-bound field, so the failure comes from the
  * constraint under test rather than a stale challenge. `rcv` and `frontier` are
  * outside the coefficient vector and do not require it.
+ *
+ * Defined in terms of `bindFiatShamir` rather than beside it: this is that
+ * function at the one calldata view that cannot disagree with the witness. Two
+ * copies of the derivation would need a test that they still agree.
  */
 export function rebindFiatShamir(w: BatchWitness): void {
-    const coeffs = treeUpdateBatchCoeffs(w);
-    w.z = fiatShamirZ(coeffs);
-    w.y = hornerEval(coeffs, w.z);
+    bindFiatShamir(w, calldataView(w));
 }
+
+/**
+ * Snapshot a witness's logical public inputs — the calldata view.
+ *
+ * A structural clone, not a field-by-field copy. The copy must be DEEP or the
+ * two views share arrays, a divergence case mutates both, and
+ * `expectNotForgeable` compares a view against itself and passes vacuously — so
+ * the one property this function must have is the one a hand-written projection
+ * silently loses when a field is added to `TreeUpdateBatchPublicArgs`.
+ *
+ * `BatchWitness` extends the public args with `rcv`, `frontier`, `z` and `y`;
+ * carrying them along is harmless, since the challenge and coefficient functions
+ * read only the public fields.
+ */
+export function calldataView(w: BatchWitness): TreeUpdateBatchPublicArgs {
+    return structuredClone(w);
+}
+
+/**
+ * Bind `(z, y)` to a CALLDATA view that may differ from the witness `w`.
+ *
+ * `rebindFiatShamir` fuses two roles a real deployment keeps apart: deriving the
+ * challenge, and choosing the witness. The contract derives `z` and `y` from
+ * calldata; the prover then picks any witness satisfying the R1CS at that `z`.
+ * Nothing in Groth16 forces the two to describe the same batch. Fusing them
+ * makes the divergence unrepresentable, so a signal that is hashed into `z` but
+ * pinned by no constraint reads as bound when it is free.
+ *
+ * Use this wherever the question is "can the prover lie to the contract", and
+ * `rebindFiatShamir` where it is "does constraint X fire".
+ */
+export function bindFiatShamir(w: BatchWitness, calldata: TreeUpdateBatchPublicArgs): void {
+    w.z = fiatShamirZ(treeUpdateBatchChallenge(calldata));
+    w.y = hornerEval(treeUpdateBatchCoeffs(calldata), w.z);
+}
+
+/**
+ * `count` leaves in the layout MASP's deposit path emits: slot 2i is a
+ * principal and slot 2i+1 its fee note. The circuit does not require this —
+ * step 7a is per-slot — but it is the shape a flush actually produces.
+ *
+ * Fee notes carry zero: that is the fbps = 0 flush, both the permitted shape
+ * (`_validateDeposit`: "The fee note's value may be zero") and the one that used
+ * to supply the free 64-bit dials, so it is the shape worth generating.
+ *
+ * Fee notes are at asset 0 as well as value 0, which is what step 7a requires
+ * of a leaf the binding cannot see.
+ */
+export function depositPairs(P: Poseidon, J: Jubjub, count: number): LeafWitness[] {
+    return Array.from({ length: count }, (_, i) =>
+        i % 2 === 0
+            ? seededLeaf(P, J, i, 1)
+            : seededLeaf(P, J, i, 1, 0n, 0n));
+}
+
+// ===== divergent-witness coverage =====
+
+/**
+ * One field a batch's calldata can declare differently from the witness proved
+ * against it.
+ *
+ * Every one is a coefficient today, so the circuit's own `y` is what catches
+ * the divergence. They are kept as tests rather than deleted because three of
+ * these fields were once challenge-only, where nothing caught it: the cases
+ * fail the moment a demotion reintroduces that state.
+ */
+export interface DivergenceCase {
+    /** The per-leaf field, as it reads in the circom and in the vector. */
+    field: string;
+    /** Rewrite the CALLDATA view; the witness is left honest and satisfiable. */
+    diverge: (c: TreeUpdateBatchPublicArgs) => void;
+}
+
+export const DIVERGENCE_CASES: readonly DivergenceCase[] = [
+    { field: "leaf_asset",     diverge: c => { c.leafAsset[0] = 42n; } },
+    { field: "leaf_public_in", diverge: c => { c.leafPublicIn[0] = 1n; } },
+    { field: "is_deposit",     diverge: c => { c.isDeposit[0] = 0; } },
+    { field: "cm",             diverge: c => { c.cms[0] = c.cms[0] + 1n; } },
+    { field: "cv_dep_x",       diverge: c => { c.cvDep[0] = [c.cvDep[0][0] + 1n, c.cvDep[0][1]]; } },
+];

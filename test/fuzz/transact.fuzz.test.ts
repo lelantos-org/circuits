@@ -1,21 +1,20 @@
 import * as fc from "fast-check";
 
 import { MerkleTree, SpentNote, Note, Field, commit } from "../helpers";
-import { loadCircuit, srcPath } from "../lib/circuit";
-import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "../lib/transact";
+import { DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { expectWitnessFails } from "../lib/expect";
+import { useTransactCircuit } from "../transact/setup";
 import {
     arbBalancedSplit, arbNsk, arbField, MAX_VALUE,
     fcParamsFor, arbDistinctBigInt,
 } from "./arbitraries";
-import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
+import { TIMEOUT_HEAVY } from "../lib/constants";
 
-const CIRCUIT = srcPath("4x6.circom");
 const fcParams = fcParamsFor("TRANSACT");
 
 // Balanced-split edge cases seeded into every fc.assert.
 // Note: MAX_VALUE = 2^64 - 1 is odd, so 2 * (MAX_VALUE / 2n) = MAX_VALUE - 1.
-// Each tuple must satisfy o1 + o2 === v1 + v2 (circuit rejects otherwise).
+// Each tuple must satisfy o1 + o2 === v1 + v2 (ctx.circuit rejects otherwise).
 const BALANCED_EXAMPLES = [
     { v1: 0n, v2: 0n, o1: 0n, o2: 0n },
     { v1: MAX_VALUE / 2n, v2: MAX_VALUE / 2n, o1: MAX_VALUE - 1n, o2: 0n },
@@ -25,13 +24,7 @@ const BALANCED_EXAMPLES = [
 describe("transact_4x6 [fuzz]", function () {
     this.timeout(TIMEOUT_HEAVY);
 
-    let circuit: any;
-    let tx: TxBuilder;
-
-    before(async () => {
-        tx = await buildTxBuilder(DEPTH);
-        circuit = await loadCircuit(CIRCUIT);
-    });
+    const ctx = useTransactCircuit();
 
     // Two real inputs from `aliceNsk`; two outputs (o1 to bob, o2 back to alice).
     async function runValid(
@@ -39,17 +32,17 @@ describe("transact_4x6 [fuzz]", function () {
         aliceNsk: bigint, bobNsk: bigint,
         rhoA: bigint, rhoB: bigint, rhoOA: bigint, rhoOB: bigint,
     ): Promise<{ input: any; tree: MerkleTree; root: Field }> {
-        const tree = tx.newTree();
-        let inA = tx.insert(tree, tx.note(v1, aliceNsk, rhoA), aliceNsk);
-        let inB = tx.insert(tree, tx.note(v2, aliceNsk, rhoB), aliceNsk);
+        const tree = ctx.tx.newTree();
+        let inA = ctx.tx.insert(tree, ctx.tx.note(v1, aliceNsk, rhoA), aliceNsk);
+        let inB = ctx.tx.insert(tree, ctx.tx.note(v2, aliceNsk, rhoB), aliceNsk);
         const root = tree.root();
-        inA = tx.finalize(tree, inA);
-        inB = tx.finalize(tree, inB);
+        inA = ctx.tx.finalize(tree, inA);
+        inB = ctx.tx.finalize(tree, inB);
 
-        const outA = tx.note(o1, bobNsk, rhoOA);
-        const outB = tx.note(o2, aliceNsk, rhoOB);
+        const outA = ctx.tx.note(o1, bobNsk, rhoOA);
+        const outB = ctx.tx.note(o2, aliceNsk, rhoOB);
 
-        const input = tx.build({
+        const input = ctx.tx.build({
             publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
             inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
         });
@@ -65,13 +58,13 @@ describe("transact_4x6 [fuzz]", function () {
             arbField(1n << 200n), arbField(1n << 200n),
             async ({ v1, v2, o1, o2 }, aliceNsk, bobNsk, [rhoA, rhoB], rhoOA, rhoOB) => {
                 const { input } = await runValid(v1, v2, o1, o2, aliceNsk, bobNsk, rhoA, rhoB, rhoOA, rhoOB);
-                const w = await circuit.calculateWitness(input, true);
-                await circuit.checkConstraints(w);
+                const w = await ctx.circuit.calculateWitness(input, true);
+                await ctx.circuit.checkConstraints(w);
             },
         ), fcParamsFor("TRANSACT", { examples: BALANCED_EXAMPLES.map(s => [s, 11n, 22n, [1n, 2n] as [bigint, bigint], 3n, 4n]) }));
     });
 
-    it("unbalanced random tx (output mutated by +delta) always fails", async () => {
+    it("unbalanced random ctx.tx (output mutated by +delta) always fails", async () => {
         // Generate (v1, v2, o1, o2, delta) so that delta > 0 and o2+delta ∈
         // (o1+o2, MAX_VALUE]. Result is always unbalanced AND in range — no
         // silent post-hoc skips.
@@ -90,7 +83,7 @@ describe("transact_4x6 [fuzz]", function () {
                     v1, v2, o1, o2 + delta, aliceNsk, bobNsk,
                     101n, 102n, 103n, 104n,
                 );
-                await expectWitnessFails(circuit, input, "expected unbalanced tx to fail");
+                await expectWitnessFails(ctx.circuit, input, "expected unbalanced ctx.tx to fail");
             },
         ), fcParams);
     });
@@ -113,21 +106,21 @@ describe("transact_4x6 [fuzz]", function () {
             async ({ v1, v2, o1, o2 }, badAssetSeed) => {
                 const badAsset = ASSET + 1n + badAssetSeed;
                 const aliceNsk = 11n, bobNsk = 22n;
-                const tree = tx.newTree();
-                let inA = tx.insert(tree, tx.note(v1, aliceNsk, 1n), aliceNsk);
-                let inB = tx.insert(tree, tx.note(v2, aliceNsk, 2n), aliceNsk);
+                const tree = ctx.tx.newTree();
+                let inA = ctx.tx.insert(tree, ctx.tx.note(v1, aliceNsk, 1n), aliceNsk);
+                let inB = ctx.tx.insert(tree, ctx.tx.note(v2, aliceNsk, 2n), aliceNsk);
                 const root = tree.root();
-                inA = tx.finalize(tree, inA);
-                inB = tx.finalize(tree, inB);
+                inA = ctx.tx.finalize(tree, inA);
+                inB = ctx.tx.finalize(tree, inB);
 
-                const outA: Note = { ...tx.note(o1, bobNsk, 100n), asset: badAsset };
-                const outB = tx.note(o2, aliceNsk, 200n);
+                const outA: Note = { ...ctx.tx.note(o1, bobNsk, 100n), asset: badAsset };
+                const outB = ctx.tx.note(o2, aliceNsk, 200n);
 
-                const input = tx.build({
+                const input = ctx.tx.build({
                     publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
                     inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
                 });
-                await expectWitnessFails(circuit, input, "expected ghost-note tx to fail");
+                await expectWitnessFails(ctx.circuit, input, "expected ghost-note ctx.tx to fail");
             },
         ), fcParams);
     });
@@ -139,39 +132,39 @@ describe("transact_4x6 [fuzz]", function () {
             arbField(1n << 200n), arbField(1n << 200n), arbField(1n << 200n),
             async ([assetA, assetB], pk, rho, rcm) => {
                 const base = { value: 0n, pk, rho, rcm } as const;
-                const cmA = commit(tx.P, { ...base, asset: assetA });
-                const cmB = commit(tx.P, { ...base, asset: assetB });
+                const cmA = commit(ctx.tx.P, { ...base, asset: assetA });
+                const cmB = commit(ctx.tx.P, { ...base, asset: assetB });
                 if (cmA === cmB) throw new Error("commitment collision across assets at value=0");
             },
         ), fcParams);
     });
 
     it("input value > 2^64 always fails (range check)", async () => {
-        // Each run exercises the SDK and the circuit; the run count is scaled
+        // Each run exercises the SDK and the ctx.circuit; the run count is scaled
         // down by default and overridable via FUZZ_RUNS_TRANSACT_OVERFLOW.
         await fc.assert(fc.asyncProperty(
             fc.bigInt(1n, 1n << 200n),
             async (overflowSeed) => {
                 const overflow = MAX_VALUE + 1n + (overflowSeed % (1n << 64n));
-                // Either SDK validation or circuit range check must reject.
+                // Either SDK validation or ctx.circuit range check must reject.
                 let threw = false;
                 try {
                     const nsk = 11n;
-                    const tree = tx.newTree();
-                    let inA = tx.insert(tree, tx.note(overflow, nsk, 1n), nsk);
-                    let inB = tx.insert(tree, tx.note(0n, nsk, 2n), nsk);
+                    const tree = ctx.tx.newTree();
+                    let inA = ctx.tx.insert(tree, ctx.tx.note(overflow, nsk, 1n), nsk);
+                    let inB = ctx.tx.insert(tree, ctx.tx.note(0n, nsk, 2n), nsk);
                     const root = tree.root();
-                    inA = tx.finalize(tree, inA);
-                    inB = tx.finalize(tree, inB);
-                    const outA = tx.note(overflow, nsk, 100n);
-                    const outB = tx.note(0n, nsk, 200n);
-                    const input = tx.build({
+                    inA = ctx.tx.finalize(tree, inA);
+                    inB = ctx.tx.finalize(tree, inB);
+                    const outA = ctx.tx.note(overflow, nsk, 100n);
+                    const outB = ctx.tx.note(0n, nsk, 200n);
+                    const input = ctx.tx.build({
                         publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
                         inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
                     });
-                    await circuit.calculateWitness(input, true);
+                    await ctx.circuit.calculateWitness(input, true);
                 } catch { threw = true; }
-                if (!threw) throw new Error("expected overflow value to fail (SDK or circuit)");
+                if (!threw) throw new Error("expected overflow value to fail (SDK or ctx.circuit)");
             },
         ), fcParamsFor("TRANSACT_OVERFLOW"));
     });
@@ -183,20 +176,20 @@ describe("transact_4x6 [fuzz]", function () {
             arbNsk().map(n => n === 11n ? n + 1n : n),
             async ({ v1, v2, o1, o2 }, wrongNsk) => {
                 const aliceNsk = 11n, bobNsk = 22n;
-                const tree = tx.newTree();
-                let inA = tx.insert(tree, tx.note(v1, aliceNsk, 1n), aliceNsk);
-                let inB = tx.insert(tree, tx.note(v2, aliceNsk, 2n), aliceNsk);
+                const tree = ctx.tx.newTree();
+                let inA = ctx.tx.insert(tree, ctx.tx.note(v1, aliceNsk, 1n), aliceNsk);
+                let inB = ctx.tx.insert(tree, ctx.tx.note(v2, aliceNsk, 2n), aliceNsk);
                 const root = tree.root();
-                inA = tx.finalize(tree, inA);
-                inB = tx.finalize(tree, inB);
+                inA = ctx.tx.finalize(tree, inA);
+                inB = ctx.tx.finalize(tree, inB);
                 const tamperedA: SpentNote = { ...inA, nsk: wrongNsk };
-                const outA = tx.note(o1, bobNsk, 100n);
-                const outB = tx.note(o2, aliceNsk, 200n);
-                const input = tx.build({
+                const outA = ctx.tx.note(o1, bobNsk, 100n);
+                const outB = ctx.tx.note(o2, aliceNsk, 200n);
+                const input = ctx.tx.build({
                     publicAssetId: ASSET, publicIn: 0n, publicOut: 0n,
                     inputs: [tamperedA, inB], outputs: [outA, outB], merkleRoot: root,
                 });
-                await expectWitnessFails(circuit, input, "expected wrong-nsk tx to fail");
+                await expectWitnessFails(ctx.circuit, input, "expected wrong-nsk ctx.tx to fail");
             },
         ), fcParams);
     });

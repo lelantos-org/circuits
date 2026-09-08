@@ -24,13 +24,13 @@
 
 import * as fc from "fast-check";
 
-import { Jubjub, Poseidon } from "../helpers";
-import { loadCircuit, srcPath, type CircuitTester } from "../lib/circuit";
+import { srcPath } from "../lib/circuit";
 import { treeUpdateBatchInputJson } from "../lib/inputs";
 import { expectAccepts, expectWitnessFails } from "../lib/expect";
 import { buildHonest, seededLeaf, type BatchWitness, type LeafWitness } from "../lib/batch";
 import { DEPTH, MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
 import { fcParamsFor } from "./arbitraries";
+import { useCircuit } from "../lib/harness";
 
 const CAPACITY = 4 ** DEPTH;
 const WRAPPER = srcPath("tree_update_batch.circom");
@@ -61,15 +61,7 @@ function tamperableLevels(digits: number[]): number[] {
 describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
     this.timeout(TIMEOUT_HEAVY);
 
-    let circuit: CircuitTester;
-    let P: Poseidon;
-    let J: Jubjub;
-
-    before(async () => {
-        P = await Poseidon.build();
-        J = await Jubjub.build();
-        circuit = await loadCircuit(WRAPPER);
-    });
+    const ctx = useCircuit(WRAPPER);
 
     it(`any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..${MAX_L} leaves)`, async () => {
         // Compose digits and k together so k always fits the remaining capacity,
@@ -104,19 +96,22 @@ describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
             // Which of the 3 filled slots at the chosen level to perturb.
             fc.integer({ min: 0, max: 2 }),
             // isDeposit per active leaf (Pedersen binding path vs spend skip).
+            // Per-leaf rather than per-batch: step 7a is a per-slot constraint
+            // with no reference to a neighbour, so any interleaving of deposit
+            // and spend leaves is satisfiable and worth generating.
             fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
             async ({ digits, k, level }, slotIdx, depositFlags) => {
                 const startIndex = startIndexFromEdgeDigits(digits);
 
                 const leaves: LeafWitness[] = [];
                 for (let i = 0; i < k; i++) {
-                    leaves.push(seededLeaf(P, J, i, depositFlags[i]));
+                    leaves.push(seededLeaf(ctx.P, ctx.J, i, depositFlags[i]));
                 }
-                const honest = buildHonest(P, startIndex, leaves);
+                const honest = buildHonest(ctx.P, startIndex, leaves);
 
                 // Sanity: honest witness must verify. Without this, a
                 // tamper-rejection assertion below would be vacuous.
-                await expectAccepts(circuit, treeUpdateBatchInputJson(honest));
+                await expectAccepts(ctx.circuit, treeUpdateBatchInputJson(honest));
 
                 // At digit == 3 every slot 0..2 holds a filled sibling
                 // (MerkleTree.frontier zeros only `k >= currentSlot`). A bump of
@@ -128,18 +123,21 @@ describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
                 };
                 tampered.frontier[level][slotIdx] = tampered.frontier[level][slotIdx] + 1n;
 
-                // No Fiat-Shamir rebind: the frontier is not in the PolyEval
-                // coefficient vector (see `treeUpdateBatchCoeffs`), so the only
-                // possible failure is FrontierRoot's `old_root === rebuilt`
-                // check rather than a (z, y) mismatch.
+                // No Fiat-Shamir rebind: the frontier is private, so it is in
+                // neither the challenge preimage nor the evaluated prefix (see
+                // `treeUpdateBatchChallenge` and `treeUpdateBatchCoeffs`), and
+                // the only possible failure is FrontierRoot's
+                // `old_root === rebuilt` check rather than a (z, y) mismatch.
                 await expectWitnessFails(
-                    circuit,
+                    ctx.circuit,
                     treeUpdateBatchInputJson(tampered),
                     `frontier perturbation at (level=${level}, slot=${slotIdx}) must reject`,
                 );
             },
         ), fcParamsFor("FRONTIER", { examples: [
-            // Boundary digit patterns + tamper at extremes.
+            // Boundary digit patterns + tamper at extremes. The third element
+            // must match the arbitrary above — an example of the wrong shape is
+            // fed to the property before any random draw, so it fails first.
             [{ digits: Array<number>(DEPTH).fill(3).map((_, i) => i === DEPTH - 1 ? 0 : 3), k: 1, level: 0 }, 0, Array<0 | 1>(MAX_L).fill(1)],
             [{ digits: [...Array<number>(DEPTH - 1).fill(0), 3], k: 3, level: DEPTH - 1 }, 2, Array<0 | 1>(MAX_L).fill(0)],
         ] }));

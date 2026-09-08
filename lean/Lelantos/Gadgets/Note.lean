@@ -24,33 +24,34 @@ provide:
 
 namespace Lelantos
 
-/-- `DeriveIvk` — `src/lib/note.circom:14`. -/
+/-- `DeriveIvk` — `src/lib/note.circom:13-22`. -/
 def deriveIvk (nsk : F) : F := poseidon [TAG_IVK, nsk]
 
-/-- `DeriveNk` — `src/lib/note.circom:24`. -/
+/-- `DeriveNk` — `src/lib/note.circom:25-33`. -/
 def deriveNk (nsk : F) : F := poseidon [TAG_NK, nsk]
 
-/-- `DerivePk` — `src/lib/note.circom:35`. -/
+/-- `DerivePk` — `src/lib/note.circom:36-44`. -/
 def derivePk (ivk : F) : F := poseidon [TAG_PK, ivk]
 
 /-- The full spend-key chain `nsk → ivk → pk`. -/
 def pkOfNsk (nsk : F) : F := derivePk (deriveIvk nsk)
 
-/-- `packed_av <== asset_id * 2^64 + value` — `src/lib/note.circom:59`. -/
+/-- `packed_av <== asset_id * 2^64 + value` — `src/lib/note.circom:61`. -/
 def packAV (assetId value : F) : F := assetId * POW_2_64 + value
 
-/-- `NoteCommitment` — `src/lib/note.circom:50`. Note there is no tag: domain separation
+/-- `NoteCommitment` — `src/lib/note.circom:52-68`. Note there is no tag: domain separation
 comes from `packed_av ≥ 2^64`, which holds because real notes have `asset_id ≠ 0`. -/
 def noteCommitment (assetId value pk rho rcm : F) : F :=
   poseidon [packAV assetId value, pk, rho, rcm]
 
-/-- `DeriveRho` — `src/lib/note.circom:76`. -/
+/-- `DeriveRho` — `src/lib/note.circom:76-86`. -/
 def deriveRho (nf0 index : F) : F := poseidon [TAG_RHO, nf0, index]
 
-/-- `Nullifier` — `src/lib/note.circom:97`. -/
+/-- `Nullifier` — `src/lib/note.circom:97-109`. -/
 def nullifierOf (nk rho cm : F) : F := poseidon [TAG_NF, nk, rho, cm]
 
-/-- `MerkleLevel4`'s node hash — `src/lib/merkle.circom:66`. -/
+/-- The node hash of `MerkleLevel4`, `Poseidon(TAG_MERKLE, c0, c1, c2, c3)` —
+`src/lib/merkle.circom:66-74`. -/
 def merkleNode (c : ℕ → F) : F := poseidon [TAG_MERKLE, c 0, c 1, c 2, c 3]
 
 /-- The leaf hash binding a commitment to its deposit value commitment —
@@ -89,7 +90,7 @@ theorem packAV_inj {a v a' v' : F}
 
 /-- **The implicit domain separation of `NoteCommitment`.** A real note has
 `asset_id ≠ 0`, so its packed field is at least `2^64` and can never equal a small
-domain tag. This is the argument `src/lib/note.circom:47-49` makes in prose. -/
+domain tag. This is the argument `src/lib/note.circom:47-51` makes in prose. -/
 theorem packAV_val_ge {a v : F} (hnz : a ≠ 0) (ha : a.val < 2 ^ 64) (hv : v.val < 2 ^ 64) :
     2 ^ 64 ≤ (packAV a v).val := by
   rw [packAV_val ha hv]

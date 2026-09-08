@@ -19,6 +19,8 @@ import {
     deterministicClueGen,
     dummyInputAt,
     abiEncodeCoeffs,
+    circuitSignals,
+    coeffs,
     fiatShamirZ,
     flatten,
     hornerEval,
@@ -252,9 +254,13 @@ function fillSlots(P: Poseidon, depth: number, c: TransactCase, finalizedReal: S
 }
 
 /**
- * Two-pass Fiat-Shamir: build the witness at z = 0, flatten it, hash the
- * coefficients into the real z, then rebuild. `z` is a public input, so it
- * cannot be part of what derives it.
+ * Two-pass Fiat-Shamir: build the witness at z = 0, flatten it into the
+ * challenge preimage, hash that into the real z, then rebuild. `z` is a public
+ * input, so it cannot be part of what derives it.
+ *
+ * `flatten` and `coeffs` are different vectors — 69 words hashed, 46 evaluated —
+ * and the split is a soundness requirement, not a saving. See `coeffs` in
+ * test/ref/compress.ts.
  */
 function buildWitness(
     P: Poseidon,
@@ -276,15 +282,28 @@ function buildWitness(
         outputAuxDigest: TEST_AUX_DIGEST,
         z: 0n,
     });
-    const coeffs = flatten(base);
-    const z = fiatShamirZ(coeffs);
-    return { witnessInput: { ...base, z: s(z) }, coeffs, z, y: hornerEval(coeffs, z) };
+    const challenge = flatten(base);
+    const z = fiatShamirZ(challenge);
+    const polyCoeffs = coeffs(base);
+    return {
+        witnessInput: { ...base, z: s(z) },
+        challenge,
+        coeffs: polyCoeffs,
+        z,
+        y: hornerEval(polyCoeffs, z),
+    };
 }
 
-function compressionOf(coeffs: Field[], z: Field, y: Field): Compression {
+function compressionOf(
+    challenge: Field[],
+    polyCoeffs: Field[],
+    z: Field,
+    y: Field,
+): Compression {
     return {
-        coeffs: coeffs.map(s),
-        abiEncodedCoeffs: hex(abiEncodeCoeffs(coeffs)),
+        challenge: challenge.map(s),
+        abiEncodedChallenge: hex(abiEncodeCoeffs(challenge)),
+        coeffs: polyCoeffs.map(s),
         zDerivation: "fiat-shamir",
         z: s(z),
         y: s(y),
@@ -320,12 +339,14 @@ export async function buildTransactVectors(shape: TransactShape) {
         }));
         const clueList = outputs.map(() => clues.next());
 
-        const { witnessInput, coeffs, z, y } =
+        const { witnessInput, challenge, coeffs: polyCoeffs, z, y } =
             buildWitness(P, J, c, inputs, outputs, clueList, merkleRoot);
 
         // The compiled circuit is the oracle for `y`, not the TypeScript Horner
-        // evaluation.
-        const w = await circuit.calculateWitness(witnessInput, true);
+        // evaluation. `circuitSignals` drops the challenge-only fields: they are
+        // logical public inputs but not signals, and the witness calculator
+        // rejects a key the circuit does not declare.
+        const w = await circuit.calculateWitness(circuitSignals(witnessInput), true);
         await circuit.checkConstraints(w);
         const circuitY = readOutput(w);
         if (circuitY !== y) {
@@ -334,9 +355,10 @@ export async function buildTransactVectors(shape: TransactShape) {
                     `The layout in test/ref/compress.ts disagrees with TransactCompressN.`,
             );
         }
-        if (coeffs.length !== layout.length) {
+        if (polyCoeffs.length !== layout.length) {
             throw new Error(
-                `${c.name}: ${coeffs.length} coefficients but the Lean layout names ${layout.length}`,
+                `${c.name}: ${polyCoeffs.length} coefficients but the Lean layout names ` +
+                    `${layout.length}`,
             );
         }
 
@@ -415,7 +437,7 @@ export async function buildTransactVectors(shape: TransactShape) {
                 },
             },
             witness: witnessInput,
-            compression: compressionOf(coeffs, z, y),
+            compression: compressionOf(challenge, polyCoeffs, z, y),
             circuitOutput: { y: s(circuitY) },
         });
     }
@@ -427,13 +449,24 @@ export async function buildTransactVectors(shape: TransactShape) {
             template: `Transact(${shape.depth}, ${shape.nIn}, ${shape.nOut})`,
             source: shape.source,
             shape: { depth: shape.depth, nIn: shape.nIn, nOut: shape.nOut },
-            coeffCount: 9 + 3 * shape.nIn + 8 * shape.nOut,
+            coeffCount: 4 + 3 * shape.nIn + 5 * shape.nOut,
+            challengeWords: 9 + 3 * shape.nIn + 8 * shape.nOut,
             layout,
             layoutDigest: layoutDigest(layout),
-            // No in-circuit constraint binds these; PolyEval is their only tie.
-            // The SDK derives out_aux_digest from its own abi-hash module, so
-            // only the slot is contractual, not the value.
-            unconstrained: ["out_clue_Rx", "out_clue_Ry", "out_clue_bits", "out_aux_digest"],
+            // No in-circuit constraint binds these, so they are not signals and
+            // not coefficients: they enter the challenge preimage and bind
+            // through `z`. As coefficients they were free variables a prover
+            // could solve `y = Σ c_k z^k` with after reading `z`.
+            challengeOnly: [
+                "recipient_address",
+                "chain_id",
+                "payer_address",
+                "relayer_address",
+                "out_clue_Rx",
+                "out_clue_Ry",
+                "out_clue_bits",
+                "out_aux_digest",
+            ],
         },
         constants: sharedConstants(P, J),
         vectors,

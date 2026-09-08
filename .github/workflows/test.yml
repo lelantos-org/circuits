@@ -32,3 +32,12 @@ jobs:
       # shipping a stale contract to the SDK.
       - name: Check golden vectors are up to date
         run: just vectors-check
+
+      # `contracts/` keeps its own copy of the batch and transact vectors,
+      # because forge cannot read across a repository boundary. A copy is a
+      # second source of truth, so this fails when the two disagree. Skips
+      # itself when ../contracts is not checked out, which is the case on this
+      # runner today — it is here so a workspace CI that does check out both
+      # gets the gate for free.
+      - name: Check consumer vector copies are up to date
+        run: just vectors-consumers-check

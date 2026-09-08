@@ -3,10 +3,11 @@
 #
 # `lake build` is the proof check: compiling a Lean module elaborates and kernel-checks
 # every proof in it, and it also runs the environment-wide axiom scan in
-# `Lelantos.Meta.AxiomGuard`. The remaining four compare the development against artefacts
-# outside it — the primality of the field modulus, the recorded trusted base, the
-# public-input layout the SDK and the contract also implement, and the source citations the
-# doc comments carry.
+# `Lelantos.Meta.AxiomGuard`. The rest compare the development against artefacts outside
+# it — the primality of the field modulus, the recorded trusted base, the public-input
+# layout the SDK and the contract also implement, the source citations the doc comments
+# carry, the constraints those citations reach, and the Lean names the prose claims
+# exist.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -34,5 +35,11 @@ step "Public-input layout"
 
 step "Source citations"
 python3 scripts/check-citations.py
+
+step "Constraint coverage"
+python3 scripts/check-coverage.py
+
+step "Names the prose claims"
+python3 scripts/check-names.py
 
 printf '\n\033[1mAll checks passed.\033[0m\n'

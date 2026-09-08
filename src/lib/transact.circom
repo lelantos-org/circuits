@@ -31,8 +31,15 @@ include "poly_eval.circom";
 // are all < 2^64.
 //
 // Left to the contract: chain_id == block.chainid, recipient_address < 2^160,
-// each nullifier[i] unspent, each out_cm[j] inserted into the commitment tree,
-// and out_aux_digest recomputed from the aux calldata rather than taken from it.
+// each nullifier[i] unspent, and each out_cm[j] inserted into the commitment
+// tree.
+//
+// NOT a circuit signal: recipient_address, chain_id, payer_address,
+// relayer_address, the per-output FMD clue fields and the encrypted-payload
+// digest. The circuit constrains none of them, so they are not PolyEval
+// coefficients — see TransactCompressN in poly_eval.circom. They bind to the
+// proof through the challenge instead: PubInputs.sol hashes them into z, so
+// altering any of them changes z and therefore y.
 template Transact(DEPTH, N_IN, N_OUT) {
     // ===== PUBLIC (verifier-visible) =====
     signal input  z;   // Fiat-Shamir challenge.
@@ -47,25 +54,9 @@ template Transact(DEPTH, N_IN, N_OUT) {
     signal input public_out;
     signal input in_cv[N_IN][2];
     signal input out_cv[N_OUT][2];
-    signal input recipient_address;
-    signal input chain_id;
-    signal input payer_address;
-    signal input relayer_address;
 
     // Pins (asset, value) into the inserted leaf; forwarded to tree_update_batch.
     signal input out_cv_dep[N_OUT][2];
-
-    // FMD clue. Computed off-circuit and constrained only by PolyEval. GAMMA is a
-    // subscription-time parameter, not a circuit parameter.
-    signal input out_clue_bits[N_OUT];
-    signal input out_clue_Rx[N_OUT];
-    signal input out_clue_Ry[N_OUT];
-
-    // Digest of the encrypted-note payload (ephPub + ciphertext, per output),
-    // computed off-circuit and constrained only by PolyEval, as the clue fields
-    // are. Binds the payload against relayer tampering; see
-    // poly_eval.circom :: TransactCompressN.
-    signal input out_aux_digest;
 
     // ===== PRIVATE: spent notes =====
     signal input in_asset[N_IN];
@@ -121,6 +112,32 @@ template Transact(DEPTH, N_IN, N_OUT) {
         in_dz.dummy[i] <== in_is_dummy[i];
         in_dz.value[i] <== in_value[i];
     }
+
+    // At least one input slot must be real.
+    //
+    // MerkleProofOrDummy skips the root comparison on a dummy slot, so with
+    // every slot dummy nothing reads merkle_root and it becomes a free signal —
+    // the one remaining PolyEval coefficient a prover could set to an arbitrary
+    // field element and solve the compression equation with. With one real slot
+    // the root is the output of a Poseidon chain, so hitting a chosen value
+    // needs a second preimage rather than arithmetic.
+    //
+    // No flow loses anything: MASP.withdraw and MASP.transfer both require
+    // publicIn == 0, and shielding goes through the deposit escrow and
+    // tree_update_batch, so an all-dummy transact could only ever have been a
+    // no-op with every output at value 0.
+    //
+    // is_dummy is booleanized by DummyZeroValue above, so the sum is in
+    // [0, N_IN] and this is a single equality.
+    signal dummy_acc[N_IN + 1];
+    dummy_acc[0] <== 0;
+    for (var i = 0; i < N_IN; i++) {
+        dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i];
+    }
+    component all_dummy = IsEqual();
+    all_dummy.in[0] <== dummy_acc[N_IN];
+    all_dummy.in[1] <== N_IN;
+    all_dummy.out === 0;
 
     // -------------------------------------------------------------------------
     // Output-note slots
@@ -219,17 +236,9 @@ template Transact(DEPTH, N_IN, N_OUT) {
         pe.out_cv[j][1]     <== out_cv[j][1];
         pe.out_cv_dep[j][0] <== out_cv_dep[j][0];
         pe.out_cv_dep[j][1] <== out_cv_dep[j][1];
-        pe.out_clue_Rx[j]   <== out_clue_Rx[j];
-        pe.out_clue_Ry[j]   <== out_clue_Ry[j];
-        pe.out_clue_bits[j] <== out_clue_bits[j];
     }
-    pe.public_asset_id   <== public_asset_id;
-    pe.public_in         <== public_in;
-    pe.public_out        <== public_out;
-    pe.recipient_address <== recipient_address;
-    pe.chain_id          <== chain_id;
-    pe.payer_address     <== payer_address;
-    pe.relayer_address   <== relayer_address;
-    pe.out_aux_digest    <== out_aux_digest;
+    pe.public_asset_id <== public_asset_id;
+    pe.public_in       <== public_in;
+    pe.public_out      <== public_out;
     y <== pe.y;
 }

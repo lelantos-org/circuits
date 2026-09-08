@@ -10,6 +10,7 @@ import {
     MerkleTree,
     Poseidon,
     abiEncodeCoeffs,
+    batchCoeffs,
     batchLayoutNames,
     buildLeaf,
     fiatShamirZ,
@@ -140,7 +141,7 @@ export async function buildBatchVectors() {
             z: 0n,
         };
 
-        const coeffs = flattenBatch({
+        const publicSlots = {
             old_root: witnessArgs.oldRoot,
             new_root: witnessArgs.newRoot,
             start_index: witnessArgs.startIndex,
@@ -150,9 +151,11 @@ export async function buildBatchVectors() {
             leaf_asset: witnessArgs.leafAsset,
             leaf_public_in: witnessArgs.leafPublicIn,
             is_deposit: witnessArgs.isDeposit,
-        });
-        const z = fiatShamirZ(coeffs);
-        const y = hornerEval(coeffs, z);
+        };
+        // z over the preimage, y over the coefficients — the same 52 words.
+        const challenge = flattenBatch(publicSlots);
+        const z = fiatShamirZ(challenge);
+        const y = hornerEval(batchCoeffs(publicSlots), z);
         const witnessInput = treeUpdateBatchInputJson({ ...witnessArgs, z });
 
         const w = await circuit.calculateWitness(witnessInput, true);
@@ -166,8 +169,11 @@ export async function buildBatchVectors() {
         }
 
         const compression: Compression = {
-            coeffs: coeffs.map(s),
-            abiEncodedCoeffs: hex(abiEncodeCoeffs(coeffs)),
+            // Every preimage word, evaluated into y. `ref/compress.ts ::
+            // batchCoeffs` argues why none of them is demoted.
+            coeffs: batchCoeffs(publicSlots).map(s),
+            challenge: challenge.map(s),
+            abiEncodedChallenge: hex(abiEncodeCoeffs(challenge)),
             zDerivation: "fiat-shamir",
             z: s(z),
             y: s(y),
@@ -212,9 +218,22 @@ export async function buildBatchVectors() {
             source: "src/tree_update_batch.circom",
             shape: { depth: DEPTH, maxL: MAX_L },
             coeffCount: 4 + 6 * MAX_L,
+            challengeWords: 4 + 6 * MAX_L,
             layout,
             layoutDigest: layoutDigest(layout),
-            unconstrained: [],
+            // Empty, and that is the claim: every word of the batch preimage is
+            // evaluated into `y`, because every one is pinned by a constraint of
+            // its own. Publishing the field rather than omitting it keeps the
+            // check in `test/reference.test.ts` honest — a future demotion has
+            // to name the field here, and that check then demands a
+            // divergent-witness test for it.
+            //
+            // The deposit-binding fields were demoted once and it was unsound:
+            // they are signals of this circuit, and hashing a signal into `z`
+            // binds nothing, since the prover reads `z` before choosing the
+            // witness. Step 7a of `tree_update_batch.circom` is what pins them
+            // where the deposit binding degenerates.
+            challengeOnly: [] as string[],
         },
         constants: sharedConstants(P, J),
         vectors,

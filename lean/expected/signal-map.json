@@ -1,0 +1,178 @@
+{
+  "_note": [
+    "The model-to-circuit signal correspondence, checked from both ends.",
+    "",
+    "Every key names a field of a Lean model structure; every value names the circom",
+    "signal that field mirrors. `lean/scripts/check-names.py` checks the keys resolve",
+    "as Lean declarations; `test/formal/signal_parity.test.ts` checks the values exist",
+    "in the compiled `.sym`. Neither side can drift without one of them failing.",
+    "",
+    "`{i<N_IN}` expands over the shape: the signal must exist at every index below the",
+    "bound, and must NOT exist at the bound itself. That pins the arity as well as the",
+    "name, so `Transact(11, 4, 6)` is checked against the circuit rather than asserted",
+    "in `constants.ts`.",
+    "",
+    "`absent` is not a list of gaps. Each entry is a signal the optimizer removed",
+    "because a constraint pins it to a constant or merges it with another wire, and",
+    "the reason is the interesting part: `all_dummy.out` is gone because",
+    "`all_dummy.out === 0` holds it at zero, which is the constraint",
+    "`TransactSat.not_all_dummy` models. If one of these reappears, that constraint",
+    "went away."
+  ],
+  "4x6": {
+    "sym": "build/4x6.sym",
+    "shape": { "N_IN": 4, "N_OUT": 6, "DEPTH": 11, "N_CAND": 11, "BITS64": 64, "ARITY": 4,
+                "LHS_LEN": 5, "RHS_LEN": 6 },
+    "present": {
+      "TxWitness.z": "main.z",
+      "TxWitness.y": "main.y",
+      "TxWitness.merkleRoot": "main.merkle_root",
+      "TxWitness.publicAssetId": "main.public_asset_id",
+      "TxWitness.publicIn": "main.public_in",
+      "TxWitness.publicOut": "main.public_out",
+      "TxWitness.pubGen": "main.pub_gen.gen[0]",
+      "TxWitness.pubAssetBits": "main.pub_gen.bits.out[{b<BITS64}]",
+      "TxWitness.pubInBits": "main.pub_in_mul.mul.bits[{b<BITS64}]",
+      "TxWitness.pubOutBits": "main.pub_out_mul.mul.bits[{b<BITS64}]",
+      "TxWitness.pubInPt": "main.bal.pub_in_pt[0]",
+      "TxWitness.pubOutPt": "main.bal.pub_out_pt[0]",
+      "TxWitness.outCvDep": "main.out_cv_dep[{j<N_OUT}][0]",
+      "TxWitness.peAcc": "main.pe.pe.acc[1]",
+      "TxWitness.dummyAllInv": "main.all_dummy.isz.inv",
+      "TxWitness.vbPubEq": "main.vbal.pub_eq[{c<N_CAND}].out",
+      "TxWitness.vbPubInv": "main.vbal.pub_eq[{c<N_CAND}].isz.inv",
+      "TxWitness.vbInEq": "main.vbal.in_eq[{c<N_CAND}][{i<N_IN}].out",
+      "TxWitness.vbInInv": "main.vbal.in_eq[{c<N_CAND}][{i<N_IN}].isz.inv",
+      "TxWitness.vbOutEq": "main.vbal.out_eq[{c<N_CAND}][{j<N_OUT}].out",
+      "TxWitness.vbOutInv": "main.vbal.out_eq[{c<N_CAND}][{j<N_OUT}].isz.inv",
+      "TxWitness.vbInTerm": "main.vbal.in_term[{c<N_CAND}][{i<N_IN}]",
+      "TxWitness.vbOutTerm": "main.vbal.out_term[{c<N_CAND}][{j<N_OUT}]",
+      "TxWitness.vbLhs": "main.vbal.lhs[{c<N_CAND}][{i<LHS_LEN}]",
+      "TxWitness.vbRhs": "main.vbal.rhs[{c<N_CAND}][{j<RHS_LEN}]",
+
+      "SpentSlot.assetId": "main.in_asset[{i<N_IN}]",
+      "SpentSlot.value": "main.in_value[{i<N_IN}]",
+      "SpentSlot.pk": "main.in_pk[{i<N_IN}]",
+      "SpentSlot.rho": "main.in_rho[{i<N_IN}]",
+      "SpentSlot.rcm": "main.in_rcm[{i<N_IN}]",
+      "SpentSlot.nsk": "main.in_nsk[{i<N_IN}]",
+      "SpentSlot.rcv": "main.in_rcv[{i<N_IN}]",
+      "SpentSlot.rcvDep": "main.in_rcv_dep[{i<N_IN}]",
+      "SpentSlot.isDummy": "main.in_is_dummy[{i<N_IN}]",
+      "SpentSlot.root": "main.merkle_root",
+      "SpentSlot.nullifier": "main.nullifier[{i<N_IN}]",
+      "SpentSlot.cv": "main.in_cv[{i<N_IN}][0]",
+      "SpentSlot.rH": "main.bal.in_rH[{i<N_IN}][0]",
+      "SpentSlot.ivk": "main.spent[{i<N_IN}].ivk_d.ivk",
+      "SpentSlot.pkDerived": "main.spent[{i<N_IN}].pk_check.pk",
+      "SpentSlot.nk": "main.spent[{i<N_IN}].nf_h.nk",
+      "SpentSlot.cm": "main.spent[{i<N_IN}].cm.cm",
+      "SpentSlot.leaf": "main.spent[{i<N_IN}].leaf_h.out",
+      "SpentSlot.valueBits": "main.spent[{i<N_IN}].rng_in.bits[{b<BITS64}]",
+      "SpentSlot.assetBits": "main.spent[{i<N_IN}].gen_in.bits.out[{b<BITS64}]",
+      "SpentSlot.gen": "main.spent[{i<N_IN}].gen_in.gen[0]",
+      "SpentSlot.assetInv": "main.spent[{i<N_IN}].asset_nz.inv",
+      "SpentSlot.assetIsZero": "main.spent[{i<N_IN}].asset_nz.out",
+      "SpentSlot.pathElements": "main.in_path_elements[{i<N_IN}][{d<DEPTH}][0]",
+      "SpentSlot.pathIndices": "main.in_path_indices[{i<N_IN}][{d<DEPTH}]",
+      "SpentSlot.mpDiff": "main.spent[{i<N_IN}].mp.diff",
+      "SpentSlot.mpComputed": "main.spent[{i<N_IN}].mp.mr.root",
+      "SpentSlot.mpS": "main.spent[{i<N_IN}].mp.mr.levels[{d<DEPTH}].sel.s[{k<ARITY}]",
+      "SpentSlot.mpB": "main.spent[{i<N_IN}].mp.mr.levels[{d<DEPTH}].sel.bits[0]",
+      "SpentSlot.mpC": "main.spent[{i<N_IN}].mp.mr.levels[{d<DEPTH}].c0",
+
+      "OutputSlot.assetId": "main.out_asset[{j<N_OUT}]",
+      "OutputSlot.value": "main.out_value[{j<N_OUT}]",
+      "OutputSlot.pk": "main.out_pk[{j<N_OUT}]",
+      "OutputSlot.rho": "main.out_rho[{j<N_OUT}]",
+      "OutputSlot.rcm": "main.out_rcm[{j<N_OUT}]",
+      "OutputSlot.rcv": "main.out_rcv[{j<N_OUT}]",
+      "OutputSlot.rcvDep": "main.out_rcv_dep[{j<N_OUT}]",
+      "OutputSlot.cm": "main.out_cm[{j<N_OUT}]",
+      "OutputSlot.cv": "main.out_cv[{j<N_OUT}][0]",
+      "OutputSlot.cvDep": "main.out_cv_dep[{j<N_OUT}][0]",
+      "OutputSlot.rH": "main.bal.out_rH[{j<N_OUT}][0]",
+      "OutputSlot.valueBits": "main.out_note[{j<N_OUT}].rng.bits[{b<BITS64}]",
+      "OutputSlot.assetBits": "main.out_note[{j<N_OUT}].gen.bits.out[{b<BITS64}]",
+      "OutputSlot.gen": "main.out_note[{j<N_OUT}].gen.gen[0]",
+      "OutputSlot.assetInv": "main.out_note[{j<N_OUT}].asset_nz.inv"
+    },
+    "absent": {
+      "TxWitness.dummyAllOut": {
+        "was": "main.all_dummy.out",
+        "why": "`all_dummy.out === 0` (transact.circom:140) pins it, so the optimizer folds it to the constant. That constraint is `TransactSat.not_all_dummy`, and `TxWellFormed.someRealInput` is what it buys; if this signal comes back, the constraint is gone."
+      },
+      "OutputSlot.assetIsZero": {
+        "was": "main.out_note[0].asset_nz.out",
+        "why": "`asset_nz.out === 0` (output.circom:51) is unconditional on an output, unlike `SpentNote`'s `(1 - is_dummy) * asset_nz.out === 0`, which is why the spent counterpart survives and this does not. It is what keeps `packed_av >= 2^64`."
+      },
+      "TxWitness.dummyAcc": {
+        "was": "main.dummy_acc[0]",
+        "why": "`dummy_acc[0] <== 0` is the chain's base, folded to a constant. Later entries survive; the model's `dummy_acc_base` is this line."
+      },
+      "SpentSlot.cvDep": {
+        "was": "main.spent[0].vc.cv_dep[0]",
+        "why": "Merged into `main.spent[0].leaf_h.inputs[2]`, the only place a spent slot's `cv_dep` is read — it is hashed into the leaf and never published. The output side's `cv_dep` IS published and does survive, as `main.out_cv_dep`."
+      },
+      "TxWitness.vbRhs": {
+        "was": "main.vbal.rhs[0][6]",
+        "why": "The accumulator chains carry N_IN+1 and N_OUT+1 entries, and the top of the rhs chain is gone because `lhs[c][N_IN] === rhs[c][N_OUT]` (balance.circom:133) merges it with the top of the lhs chain. That equality is `PerAssetValueBalanceSat.balanced`, the constraint the whole conservation result rests on; if this signal reappears, the two sides are no longer equated."
+      },
+      "SpentSlot.mpChain": {
+        "was": "main.spent[0].mp.mr.cur[0]",
+        "why": "`cur[0] <== leaf` aliases the leaf hash, and the top `cur[DEPTH]` aliases `mp.mr.root`. Both ends of the chain are merged; the interior levels survive."
+      }
+    },
+    "aliases": {
+      "SpentSlot.cvDep": "main.spent[{i<N_IN}].leaf_h.inputs[2]",
+      "SpentSlot.mpChain": "main.spent[{i<N_IN}].mp.mr.cur[1]"
+    }
+  },
+  "tree_update_batch": {
+    "sym": "build/tree_update_batch.sym",
+    "shape": { "MAX_L": 8, "DEPTH": 11, "COUNT_BITS": 3, "IDX_BITS": 22, "BITS64": 64 },
+    "present": {
+      "BatchSignals.oldRoot": "main.old_root",
+      "BatchSignals.newRoot": "main.new_root",
+      "BatchSignals.startIndex": "main.start_index",
+      "BatchSignals.actualCount": "main.actual_count",
+      "BatchSignals.cms": "main.cms[{k<MAX_L}]",
+      "BatchSignals.cvDep": "main.cv_dep[{k<MAX_L}][0]",
+      "BatchSignals.leafAsset": "main.leaf_asset[{k<MAX_L}]",
+      "BatchSignals.leafPublicIn": "main.leaf_public_in[{k<MAX_L}]",
+      "BatchSignals.isDeposit": "main.is_deposit[{k<MAX_L}]",
+      "BatchSignals.frontierIn": "main.frontier_in[{d<DEPTH}][0]",
+      "BatchSignals.rcv": "main.rcv[{k<MAX_L}]",
+      "BatchSignals.cntBits": "main.cnt_bits.out[{b<COUNT_BITS}]",
+      "BatchSignals.ltBits": "main.lt[{k<MAX_L}].n2b.out[0]",
+      "BatchSignals.active": "main.active[{k<MAX_L}]",
+      "BatchSignals.leaves": "main.leaves[{k<MAX_L}]",
+      "BatchSignals.activeDep": "main.active_dep[{k<MAX_L}]",
+      "BatchSignals.gen": "main.asset_gen[{k<MAX_L}].gen[0]",
+      "BatchSignals.pubInBits": "main.pub_in_mul[{k<MAX_L}].mul.bits[{b<BITS64}]",
+      "BatchSignals.expected": "main.expected[{k<MAX_L}].xout",
+      "BatchSignals.assetIsZero": "main.leaf_asset_nz[{k<MAX_L}].out",
+      "BatchSignals.pubInIsZero": "main.pub_in_nz[{k<MAX_L}].out",
+      "BatchSignals.startIdxBits": "main.frontier_root.start_index_bits[{b<IDX_BITS}]",
+      "BatchSignals.idxIn": "main.idx_in[{k<MAX_L}]",
+      "BatchSignals.idxBits": "main.idx_bits[{k<MAX_L}].out[{b<IDX_BITS}]",
+      "BatchSignals.idxDig": "main.idx_dig[{k<MAX_L}][{d<DEPTH}]",
+      "BatchSignals.insRoot": "main.ins[{k<MAX_L}].root",
+      "BatchSignals.insCur": "main.ins[{k<MAX_L}].cur[1]"
+    },
+    "absent": {
+      "BatchSignals.runningRoot": {
+        "was": "main.running_root[0]",
+        "why": "`running_root[0] <== old_root` and `new_root === running_root[MAX_L]` merge both ends of the chain with the public inputs. The interior survives, which is what `batch_advances_by_count` walks."
+      },
+      "BatchSignals.fr": {
+        "was": "main.fr[0][0][0]",
+        "why": "`fr[0][lvl][s] <== frontier_in[lvl][s]` merges the base of the frontier chain with the input. `fr[1..MAX_L]` survive."
+      }
+    },
+    "aliases": {
+      "BatchSignals.runningRoot": "main.running_root[1]",
+      "BatchSignals.fr": "main.fr[1][{d<DEPTH}][0]"
+    }
+  }
+}

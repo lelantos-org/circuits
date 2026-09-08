@@ -13,6 +13,17 @@ include "common.circom";
 //   k == digit : cur[d]              (running rebuild)
 //   k >  digit : zeros[d]            (empty right subtree)
 // cur[0] = 0, cur[d+1] = Poseidon(TAG_MERKLE, c0..c3), root = cur[DEPTH].
+//
+// start_index_bits is booleanized here rather than assumed boolean. The
+// selectors are products of the two bits and s[d][0..3] sums to 1 for any field
+// values — b0 = 2, b1 = 0 gives (-1, 2, 0, 0) — so the one-hot shape alone
+// does not constrain them. Off the boolean cube each child slot becomes an
+// affine combination of cur[d], frontier_in[d][*] and zeros[d], which admits an
+// old_root for a frontier the tree does not hold.
+//
+// The caller decomposes start_index and passes the bits, rather than this
+// template taking start_index directly, because that same Num2Bits carries the
+// capacity bound start_index < 4^DEPTH at the call site that relies on it.
 template FrontierRoot(DEPTH) {
     signal input start_index_bits[2 * DEPTH];
     signal input frontier_in[DEPTH][3];
@@ -47,6 +58,8 @@ template FrontierRoot(DEPTH) {
     for (var d = 0; d < DEPTH; d++) {
         b0[d] <== start_index_bits[2 * d];
         b1[d] <== start_index_bits[2 * d + 1];
+        b0[d] * (b0[d] - 1) === 0;
+        b1[d] * (b1[d] - 1) === 0;
         bb[d] <== b0[d] * b1[d];
 
         s[d][0] <== 1 - b0[d] - b1[d] + bb[d];

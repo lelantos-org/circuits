@@ -57,11 +57,11 @@ structure QuaternaryInsertLevelSat (cur : F) (fr : ℕ → F) (zero idx : F)
   c3_def : c 3 = (s 0 + s 1 + s 2) * zero + s 3 * cur
   /-- `:73-78` — `cur_next = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
   out_def : curNext = merkleNode c
-  /-- `:92` — `frontier_out[0] = s0·cur + (1-s0)·f[0]`. -/
+  /-- `:94` — `frontier_out[0] = s0·cur + (1-s0)·f[0]`. -/
   fout0_def : fout 0 = s 0 * cur + (1 - s 0) * fr 0
-  /-- `:93` — `frontier_out[1] = s1·cur + (1-s1)·f[1]`. -/
+  /-- `:95` — `frontier_out[1] = s1·cur + (1-s1)·f[1]`. -/
   fout1_def : fout 1 = s 1 * cur + (1 - s 1) * fr 1
-  /-- `:94` — `frontier_out[2] = s2·cur + (1-s2)·f[2]`. -/
+  /-- `:96` — `frontier_out[2] = s2·cur + (1-s2)·f[2]`. -/
   fout2_def : fout 2 = s 2 * cur + (1 - s 2) * fr 2
 
 /-- **Soundness of `QuaternaryInsertLevel`.** The digit is quaternary, the parent hashes
@@ -93,18 +93,18 @@ theorem quaternaryInsertLevel_sound {cur zero idx curNext : F} {fr b s c fout : 
       rw [h0] at hf0 <;> rw [h1] at hf1 <;> rw [h2] at hf2 <;>
       interval_cases k <;> simp only [frontierUpd, hf0, hf1, hf2] <;> norm_num
 
-/-- The constraint system of `QuaternaryInsert(depth)` — `src/lib/insert.circom:97-126`.
+/-- The constraint system of `QuaternaryInsert(depth)` — `src/lib/insert.circom:100-129`.
 `cur` is the chain of running nodes, `frIn`/`frOut` the per-level frontier arrays. -/
 structure QuaternaryInsertSat (depth : ℕ) (leaf : F) (dig : ℕ → F)
     (frIn : ℕ → ℕ → F) (zeros : ℕ → F) (b s c : ℕ → ℕ → F)
     (cur : ℕ → F) (frOut : ℕ → ℕ → F) (root : F) : Prop where
-  /-- `:110` — the chain starts at the leaf. -/
+  /-- `:112` — the chain starts at the leaf. -/
   base : cur 0 = leaf
-  /-- `:112-124` — one `QuaternaryInsertLevel` per level. -/
+  /-- `:114-126` — one `QuaternaryInsertLevel` per level. -/
   level : ∀ d, d < depth →
     QuaternaryInsertLevelSat (cur d) (frIn d) (zeros d) (dig d) (b d) (s d) (c d)
       (cur (d + 1)) (frOut d)
-  /-- `:126` — the root is the top of the chain. -/
+  /-- `:128` — the root is the top of the chain. -/
   top : root = cur depth
 
 /-- What an insert *means*, with no reference to selector or intermediate signals: a hash
@@ -154,6 +154,19 @@ theorem InsertsTo.retarget {depth : ℕ} {leaf root root' : F} {dig zeros : ℕ 
   obtain ⟨chain, hbase, hstep, htop, hfrontier⟩ := h
   exact ⟨chain, hbase, hstep, hroot.trans htop,
     fun d hd j hj => (hfr d hd j hj).trans (hfrontier d hd j hj)⟩
+
+/-- `InsertsTo` reads the digit vector only below `depth`, so an equal-below-`depth` vector
+describes the same insert. Used to replace a circuit's private `idx_dig` signals with the
+digits of the tree position the batch claims to be writing at — see
+`Lelantos.batch_active_index`. -/
+theorem InsertsTo.digits_congr {depth : ℕ} {leaf root : F} {dig dig' zeros : ℕ → F}
+    {frIn frOut : ℕ → ℕ → F}
+    (h : InsertsTo depth leaf dig frIn zeros frOut root)
+    (hdig : ∀ d, d < depth → dig' d = dig d) :
+    InsertsTo depth leaf dig' frIn zeros frOut root := by
+  obtain ⟨chain, hbase, hstep, htop, hfrontier⟩ := h
+  exact ⟨chain, hbase, fun d hd => by rw [hdig d hd]; exact hstep d hd, htop,
+    fun d hd j hj => by rw [hdig d hd]; exact hfrontier d hd j hj⟩
 
 /-- **Soundness of `QuaternaryInsert`.** A satisfying assignment exhibits a genuine insert:
 every level hashes the fill table, every frontier slot is updated at exactly the insertion

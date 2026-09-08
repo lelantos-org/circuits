@@ -5,7 +5,7 @@ with Baby-Jubjub carrying the value commitments. Two Groth16 entry points:
 
 | Circuit | Instantiation | Purpose |
 |---|---|---|
-| [`4x6.circom`](4x6.circom) | `Transact(11, 4, 6)` | Spend 4 notes, create 6. 69-slot public-input layout ([§2a](#2a-public-input-compression)). |
+| [`4x6.circom`](4x6.circom) | `Transact(11, 4, 6)` | Spend 4 notes, create 6. 46-coefficient, 69-word public-input layout ([§2a](#2a-public-input-compression)). |
 | [`tree_update_batch.circom`](tree_update_batch.circom) | `TreeUpdateBatch(11, 8)` | Relayer proof that the tree advances `old_root → new_root` by up to 8 leaves, any count. |
 
 The two are **ceremony-paired**. A spend emits `N_OUT = 6` leaves that the batch
@@ -25,10 +25,10 @@ Per-asset conservation is enforced arithmetically over asset ids ([§6](#6-value
 **not** by the Edwards point balance, which is defence in depth only ([§5](#5-asset-generator)).
 
 Nothing verifies `4x6` on-chain yet. That needs a `PubInputs.compress` overload
-at 69 slots and a production ceremony.
+at 46 coefficients and a production ceremony.
 
 > **Machine-checked.** The candidate-set argument of §6, its no-wrap lift to the
-> naturals, the Schwartz-Zippel binding of §2a and the faerie-gold defence of §7
+> naturals, the coefficient-pinning argument of §2a and the faerie-gold defence of §7
 > are proved in Lean 4 under [`lean/`](../lean/README.md). The known-discrete-log
 > weakness of §5 is formalised as a *negative* result, `pointBalance_not_sound`,
 > so conservation cannot be re-derived from the point balance. `FrontierRoot` and
@@ -99,34 +99,38 @@ balance is enforced in-circuit.
 ## 2. I/O surface
 
 The verifier sees two field elements: `z`, the Fiat-Shamir challenge, and `y`,
-the Horner evaluation. The `9 + 3·N_IN + 8·N_OUT` logical public inputs are
-private witnesses bound into `(z, y)` by
-[`TransactCompressN`](lib/poly_eval.circom); see §2a.
+the Horner evaluation. The `9 + 3·N_IN + 8·N_OUT` logical public inputs are bound
+into `(z, y)`; see §2a for the split between the 46 the circuit evaluates and the
+23 it only hashes.
 
 | Signal | Kind | Purpose |
 |---|---|---|
-| `z` | public input | Fiat-Shamir challenge supplied by the contract |
-| `y` | public output | `Σ_k coeffs[k] · z^k`, binding every logical public input |
+| `z` | public input | Fiat-Shamir challenge supplied by the contract, over all 69 words |
+| `y` | public output | `Σ_k coeffs[k] · z^k` over the 46 pinned coefficients |
 
-Logical public inputs, with widths at `Transact(11, 4, 6)` totalling 69:
+Logical public inputs, with widths at `Transact(11, 4, 6)` totalling 69. The
+**bound by** column is the mechanism, and it is load-bearing: a coefficient the
+circuit does not constrain is a free variable a prover solves `y = Σ c_k z^k`
+with, since it reads `z` before choosing a witness. The bottom eight rows are
+therefore not circuit signals at all — they reach the proof through `z` only.
 
-| Signal | Width | Purpose |
-|---|---:|---|
-| `merkle_root` | 1 | Root of the on-chain commitment tree |
-| `nullifier[N_IN]` | 4 | One per spent slot |
-| `out_cm[N_OUT]` | 6 | One per output slot |
-| `public_asset_id` | 1 | Transparent-bucket asset. `V^pub` is derived in-circuit, not a public input |
-| `public_in`, `public_out` | 2 | Transparent deposit and withdrawal |
-| `in_cv[N_IN][2]` | 8 | Value commitments, input side |
-| `out_cv[N_OUT][2]` | 12 | Value commitments, output side |
-| `recipient_address` | 1 | Withdrawal target (`uint160`) |
-| `chain_id` | 1 | Replay protection |
-| `payer_address` | 1 | Transparent depositor (`uint160`); `0` when no deposit |
-| `relayer_address` | 1 | Relayer payout target (`uint160`); `0` when self-submitted |
-| `out_cv_dep[N_OUT][2]` | 12 | Deposit-anchored value commitment, exposed so `tree_update_batch` binds the same `cv_dep` baked into the leaf |
-| `out_clue_Rx`, `out_clue_Ry` | 12 | FMD clue point `R = r·G_8` per output |
-| `out_clue_bits[N_OUT]` | 6 | Packed FMD clue bits per output; the contract masks with `CLUE_BITS_MASK = 0x3FFF` |
-| `out_aux_digest` | 1 | `keccak256(abi.encode(aux)) mod r`; the contract MUST recompute it |
+| Signal | Width | Bound by | Purpose |
+|---|---:|---|---|
+| `merkle_root` | 1 | coefficient | Root of the on-chain commitment tree |
+| `nullifier[N_IN]` | 4 | coefficient | One per spent slot |
+| `out_cm[N_OUT]` | 6 | coefficient | One per output slot |
+| `public_asset_id` | 1 | coefficient | Transparent-bucket asset. `V^pub` is derived in-circuit, not a public input |
+| `public_in`, `public_out` | 2 | coefficient | Transparent deposit and withdrawal |
+| `in_cv[N_IN][2]` | 8 | coefficient | Value commitments, input side |
+| `out_cv[N_OUT][2]` | 12 | coefficient | Value commitments, output side |
+| `recipient_address` | 1 | challenge | Withdrawal target (`uint160`) |
+| `chain_id` | 1 | challenge | Replay protection |
+| `payer_address` | 1 | challenge | Transparent depositor (`uint160`); `0` when no deposit |
+| `relayer_address` | 1 | challenge | Relayer payout target (`uint160`); `0` when self-submitted |
+| `out_cv_dep[N_OUT][2]` | 12 | coefficient | Deposit-anchored value commitment, exposed so `tree_update_batch` binds the same `cv_dep` baked into the leaf |
+| `out_clue_Rx`, `out_clue_Ry` | 12 | challenge | FMD clue point `R = r·G_8` per output |
+| `out_clue_bits[N_OUT]` | 6 | challenge | Packed FMD clue bits per output; the contract masks with `CLUE_BITS_MASK = 0x3FFF` |
+| `out_aux_digest` | 1 | challenge | `keccak256(abi.encode(aux)) mod r`; the contract MUST recompute it |
 
 Private inputs per slot:
 
@@ -140,53 +144,213 @@ addressed to the relayer's key.
 
 ### 2a. Public-input compression
 
-Logical public inputs are packed in a fixed order and evaluated in Horner form:
+Two vectors, not one. The **challenge preimage** is every logical public input;
+the **coefficient vector** is the subset the circuit constrains.
 
 ```
-y = coeffs[0] + coeffs[1]·z + coeffs[2]·z^2 + … + coeffs[N-1]·z^(N-1)
+z = keccak256(abi.encode(challenge)) mod r        69 words at 4x6
+y = coeffs[0] + coeffs[1]·z + … + coeffs[M-1]·z^(M-1)   46 words at 4x6
 ```
 
-The order MUST match `contracts/src/libs/PubInputs.sol :: compress(Transact, aux)`
-byte for byte. Reordering is a soundness change for the contract.
+Both orders MUST match `contracts/src/libs/PubInputs.sol :: compress(Transact,
+aux)` word for word. Reordering either is a soundness change for the contract.
 
-| Block | Width | First slot |
-|---|---:|---|
-| `merkle_root` | 1 | `0` |
-| `nullifier` | `N_IN` | `1` |
-| `out_cm` | `N_OUT` | `1 + N_IN` |
-| `public_asset_id`, `public_in`, `public_out` | 3 | `1 + N_IN + N_OUT` |
-| `in_cv`, row-major | `2·N_IN` | `4 + N_IN + N_OUT` |
-| `out_cv`, row-major | `2·N_OUT` | `4 + 3·N_IN + N_OUT` |
-| `recipient`, `chain_id`, `payer`, `relayer` | 4 | `4 + 3·N_IN + 3·N_OUT` |
-| `out_cv_dep`, row-major | `2·N_OUT` | `8 + 3·N_IN + 3·N_OUT` |
-| `(clue_Rx, clue_Ry, clue_bits)` per output | `3·N_OUT` | `8 + 3·N_IN + 5·N_OUT` |
-| `out_aux_digest` | 1 | `8 + 3·N_IN + 8·N_OUT` |
+**Coefficients** — evaluated into `y`, and every one pinned by a constraint
+elsewhere in the circuit:
 
-Total `9 + 3·N_IN + 8·N_OUT`, which is 69 at `Transact(11, 4, 6)`, with the clue
-block starting at slot 50 and the digest last at slot 68. The header of
-[`4x6.circom`](4x6.circom) tabulates all 69 individually.
+| Block | Width | First slot | Pinned by |
+|---|---:|---|---|
+| `merkle_root` | 1 | `0` | Merkle membership of the real input slot(s) |
+| `nullifier` | `N_IN` | `1` | `nf === Poseidon(TAG_NF, nk, rho, cm)` |
+| `out_cm` | `N_OUT` | `1 + N_IN` | `NoteCommitment` |
+| `public_asset_id`, `public_in`, `public_out` | 3 | `1 + N_IN + N_OUT` | `Num2Bits(64)` and `PerAssetValueBalance` |
+| `in_cv`, row-major | `2·N_IN` | `4 + N_IN + N_OUT` | `ValueCommit` |
+| `out_cv`, row-major | `2·N_OUT` | `4 + 3·N_IN + N_OUT` | `ValueCommit` |
+| `out_cv_dep`, row-major | `2·N_OUT` | `4 + 3·N_IN + 3·N_OUT` | `OutputNote.cv_dep` |
+
+Total `4 + 3·N_IN + 5·N_OUT`, which is 46 at `Transact(11, 4, 6)`.
+
+**Challenge-only words** — hashed into `z`, never evaluated, and constrained
+nowhere in the circuit. They occupy the calldata block between `out_cv` and
+`out_cv_dep`, then follow the struct:
+
+| Block | Width |
+|---|---:|
+| `recipient`, `chain_id`, `payer`, `relayer` | 4 |
+| `(clue_Rx, clue_Ry, clue_bits)` per output | `3·N_OUT` |
+| `out_aux_digest` | 1 |
+
+Total `9 + 3·N_IN + 8·N_OUT` challenge words, 69 at this shape, of which 23 are
+hashed only.
 
 The layout is pinned twice. `scripts/gen-vectors.ts` refuses to publish
 [`vectors/transact-4x6.json`](../vectors/transact-4x6.json) unless the compiled
-circuit's `y` matches the reference evaluation over all 69 coefficients, and
+circuit's `y` matches the reference evaluation over the 46 coefficients, and
 `test/formal/layout_parity.test.ts` pins the published vector against the Lean
 dump `lean/expected/layout-4x6.txt`.
 
-**Soundness.** Tampering with any `coeffs[k]` changes `y` for all but at most
-`N - 1` values of `z`, by Schwartz-Zippel over the scalar field: a collision
-probability of at most `68 / r ≈ 2^-247` at this shape. The contract MUST derive
-`z` from a Fiat-Shamir transcript over the full flattened vector. Sampling `z`
-independently of the slots breaks the binding outright, since a prover free to
-choose `z` picks a forged vector and solves `forged(z) - real(z) = 0`.
+**Soundness, and why the split exists.** `z` is a circuit INPUT. The prover reads
+it before choosing a witness, because the contract derives it from calldata the
+prover authored. Schwartz-Zippel needs the coefficient vector fixed *before* the
+challenge, so it does not apply here and the `68/r` reading of it was wrong.
+
+What makes `y` binding is that `PolyEval` is affine in each coefficient with
+slope `z^k`, so a coefficient the rest of the circuit leaves free is one linear
+equation in one unknown. Solve it and `y` becomes whatever the contract asks for,
+for an unrelated transaction — no collision, no low-probability event.
+
+`recipient`, `chain_id`, `payer`, `relayer`, the clue triples and
+`out_aux_digest` carry no in-circuit constraint. As coefficients they were 23
+such unknowns, so they are not coefficients: they are hashed into `z` instead.
+That binds them completely and costs nothing — alter one and `z` moves, so `y`
+moves, so the proof fails — while needing no constraint at all.
+
+**Adding a public input is therefore a two-part change**: wire it in, and name
+the constraint that pins it. If there is none, it belongs in the challenge
+preimage.
+
+Two consequences elsewhere in the circuit:
+
+* **At least one input slot must be real.** `MerkleProofOrDummy` skips the root
+  comparison on a dummy slot, so with every slot dummy nothing reads
+  `merkle_root` and it becomes a free coefficient. `Transact` rejects the
+  all-dummy witness. Nothing legitimate is lost: `MASP.withdraw` and
+  `MASP.transfer` both require `publicIn == 0` and shielding goes through the
+  deposit escrow, so an all-dummy transact could only ever have been a no-op.
+* **`public_asset_id`, `public_in` and `public_out` are the residue.** They are
+  64-bit range-checked and only loosely tied to each other by conservation,
+  leaving roughly 128 bits of prover freedom against a 254-bit modulus: a
+  solution to the linear equation exists for about `2^-126` of challenges. The
+  range checks are what keep that number there rather than at 1.
 
 **`out_aux_digest`** covers the whole `AuxValidation.Output` array. The contract
 MUST recompute it from the aux calldata rather than accept it as an input; only
-recomputation ties the coefficient to the payload the recipient receives.
-Without it the three clue fields are the only per-output data bound, so a relayer
-can leave the clue intact, keeping the proof valid and the note still flagged,
-while corrupting `ephPub` and the ciphertext. The recipient then cannot derive
-the ECDH secret, cannot decrypt the opening, and cannot spend a note whose inputs
-are already nullified.
+recomputation ties the challenge to the payload the recipient receives. Without
+it the three clue fields are the only per-output data bound, so a relayer can
+leave the clue intact, keeping the proof valid and the note still flagged, while
+corrupting `ephPub` and the ciphertext. The recipient then cannot derive the
+ECDH secret, cannot decrypt the opening, and cannot spend a note whose inputs are
+already nullified.
+
+**The batch circuit does NOT split.** `tree_update_batch` hashes `4 + 6·MAX_L`
+words — 52 at `MAX_L = 8` — and evaluates all 52. The order MUST match
+`PubInputs.sol :: compress(TreeUpdateBatch)`.
+
+The reason it does not split is the reason the split is sound for transact.
+Transact excludes 23 words because they are **not signals of the circuit**:
+there is no witness copy of them, so there is nothing for a prover to disagree
+with, and `z` is the only thing that can bind them. Every one of the batch's 52
+words *is* a signal of `tree_update_batch`. Hashing a signal into `z` binds
+nothing — the prover reads `z` first and is free to choose a witness that
+disagrees with the calldata `z` was hashed from — so a batch word must be
+evaluated into `y` *and* pinned by a constraint.
+
+| Block | Width | First slot | Pinned by |
+|---|---:|---|---|
+| `old_root` | 1 | `0` | `old_root === FrontierRoot(frontier_in, start_index)` |
+| `new_root` | 1 | `1` | `new_root === running_root[MAX_L]` |
+| `start_index` | 1 | `2` | `Num2Bits(2·DEPTH)`, then the frontier digits |
+| `actual_count` | 1 | `3` | `Num2Bits(COUNT_BITS)`, then `active[k]` and the insert chain |
+| `cms` | `MAX_L` | `4` | `Poseidon(TAG_LEAF, …)` into `new_root` |
+| `cv_dep`, row-major | `2·MAX_L` | `4 + MAX_L` | `BabyCheck`, and the same leaf hash |
+| `leaf_asset` | `MAX_L` | `4 + 3·MAX_L` | the deposit binding, plus step 7a below |
+| `leaf_public_in` | `MAX_L` | `4 + 4·MAX_L` | `Num2Bits(64)` and the deposit binding |
+| `is_deposit` | `MAX_L` | `4 + 5·MAX_L` | booleanity, the step-5 zeroings, and `active_dep` |
+
+**The deposit-binding fields, and why they need one extra constraint.** The
+per-leaf equality
+
+    active_dep[k] · (cv_dep[k] − (leaf_public_in[k]·V^leaf_asset[k] + rcv[k]·H)) === 0
+
+pins `leaf_public_in[k]` and `leaf_asset[k]` against `cv_dep[k]` under the
+discrete-log hardness of the Jubjub subgroup: moving either operand forces a
+compensating `cv_dep`, itself two coefficients.
+
+It degenerates on its own. `ValueTimesGen(0, gen)` is the curve identity for
+every `gen`, so at `leaf_public_in[k] == 0` the equality reduces to
+`cv_dep[k] == rcv[k]·H` and `leaf_asset[k]` retains only its 64-bit range check,
+reaching neither the leaf hash nor `new_root`. **A range check bounds a
+coefficient without pinning it** — the residue bullet above describes the same
+condition. Four such leaves give 4 × 64 = 256 bits of free dial against a
+254-bit modulus, which is a small CVP rather than a search, and a `fbps = 0`
+flush supplies exactly four.
+
+`tree_update_batch.circom` closes that per slot, without reference to any
+neighbour, by splitting on whether the binding is degenerate:
+
+* **value != 0** — the equality is non-degenerate and pins the asset under
+  discrete-log hardness. `leaf_asset[k] != 0` is required, as before: `SpentNote`
+  refuses id 0 on every real note, so a leaf minted there would be unspendable.
+* **value == 0** — the asset is unconstrained by the equality and also carries no
+  information: `cv_dep` is `rcv·H` whatever it says, and it reaches neither the
+  note commitment nor the leaf hash. It is canonicalised to `leaf_asset[k] == 0`.
+  Pinned to a constant is pinned.
+
+The zero-value case is legitimate and stays provable — a flush at `fbps = 0`
+mints a worthless fee note, which `MASP._validateDeposit` permits explicitly.
+What the constraint removes is its freedom, not the shape. `MASP._drainDeposit`
+sets `leafAsset` to 0 on such a leaf to match.
+
+Both arms are gated on `active_dep[k]`, so a spend batch is untouched; there
+`leaf_asset` and `leaf_public_in` are already forced to zero.
+
+Nothing in this refers to a neighbouring slot, so the circuit stays agnostic to
+how a consumer lays deposits out across a batch — the leaf-granular property
+`lean/Lelantos/Circuit/TreeUpdateBatch.lean` is written around.
+
+**What "pinned" does and does not mean here.** Each row above names the
+constraint that ties its word to the rest of the witness, so none of them is a
+free dial a prover can solve `y = Σ c_k z^k` with directly. It does not mean the
+coefficient vector is rigid, and the blinders are where it is loosest.
+
+`ValueCommitPair` pins `cv` only *relative* to a prover-chosen blinder, and
+`PerAssetPointBalance` cancels every blinder identically, so a blinder appears in
+no constraint outside the coefficients its own `cv` produces. `PolyEval` is
+affine in each coefficient with slope `z^k`, so uncommitted blinders are
+*additively separable* knobs on `y` at a fixed challenge — and `z` is
+calldata-derived and read before the witness is chosen, so they survive it.
+Forging `y` becomes a modular k-sum rather than a 254-bit search.
+
+So the residue, at `Transact(11, 4, 6)`:
+
+| blinder | count | status |
+|---|---:|---|
+| `in_rcv_dep` | 4 | pinned — Merkle membership fixes the leaf it opens |
+| `in_rcv` | 4 | free and separable |
+| `out_rcv` | 6 | free and separable |
+| `out_rcv_dep` | 6 | free and separable |
+
+**Sixteen separable knobs, and nothing in the tree closes them today.** The work
+factor of a k-sum at that width is **unquantified**: the audit that raised it left
+the cost open, and its 2^38 figure does not follow from the knob count. Measure
+that before choosing a fix — the two obvious ones were tried and rejected, and
+`test/transact/blinders.test.ts` records both with the reason each failed:
+
+* *Hash the blinders into `cm`.* Cheap (+2.3k constraints) and it does make each
+  knob's contribution non-linear. But separability is a property *across* knobs,
+  and displacements from distinct knobs still add — the knob count is unchanged,
+  so the k-sum is unaffected. The separability assertion in that file is what
+  caught this.
+* *Derive the blinders from the note opening.* This does remove them as
+  independent degrees of freedom, at ~15k constraints once the Poseidon output is
+  reduced to `RCV_BITS` alias-free. But `rcv` is the sender's fresh per-spend
+  blinder: deriving it from the note makes `in_cv` at spend time a deterministic
+  function of the note, and deriving `out_rcv` the same way makes it equal the
+  creating transaction's value — a direct link between creation and spend. It is
+  a privacy design decision, not a constraint-level fix.
+
+The batch shape is not affected: `rcv[k]` there cannot be derived or committed,
+because `tree_update_batch` never opens a leaf — it sees `cms[k]` and `cv_dep[k]`
+and not the note behind them. Its knobs are already non-separable for a different
+reason, since each also feeds `new_root` through the insert chain.
+
+**Do not demote these three to challenge-only.** It was tried, and it is
+exploitable in two independent ways: with `is_deposit` free a `flushBatch`
+caller escrows one unit and commits a leaf bound by nothing but `BabyCheck`, and
+with `leaf_public_in` free the binding certifies a prover-chosen amount. Both
+produce a verifying proof against the production key. Promoting them back
+*without* step 7a is the other failure, the 256-bit dial above.
+`test/tree_update_batch.test.ts :: divergent witness` holds both directions.
 
 **Verifier signature.** `snarkjs zkey export solidityverifier` emits
 `verifyProof(uint[2] _pA, uint[2][2] _pB, uint[2] _pC, uint[2] _pubSignals)`
@@ -499,9 +663,12 @@ Padding:
 Before invoking the Groth16 verifier the on-chain wrapper MUST:
 
 1. **Fiat-Shamir.** Flatten the logical public inputs in the canonical order
-   (§2a), derive `z = H(transcript) mod r` for a domain-separated `H` over the
-   flat vector, compute `y = Σ coeffs[k]·z^k mod r`, and pass `[y, z]` in that
-   order. `z` MUST be a deterministic function of every slot.
+   (§2a), derive `z = H(transcript) mod r` for a domain-separated `H` over **all
+   69 words**, compute `y = Σ coeffs[k]·z^k mod r` over **the 46 coefficients**,
+   and pass `[y, z]` in that order. `z` MUST be a deterministic function of every
+   word, including the 23 the polynomial skips — that is the only thing binding
+   them. Evaluating a word the circuit does not constrain is the opposite error
+   and breaks soundness outright; see §2a.
 2. **Canonical slots.** Either `require(slot < r)` for every logical public
    input before compressing, **or** derive `z` by hashing the raw pre-reduction
    calldata words. One of the two is mandatory. `compress()` is modular, so `v`
@@ -510,8 +677,8 @@ Before invoking the Groth16 verifier the on-chain wrapper MUST:
    calldata while the proof still verifies. `PubInputs.sol` takes the hashing
    route, which is why it carries no explicit `slot < r` check. Reducing the
    slots before hashing would reintroduce the malleability.
-3. **Aux digest.** Fill the final slot with `keccak256(abi.encode(aux)) mod r`
-   computed from the aux calldata. Never read it from the caller: taking it as an
+3. **Aux digest.** Fill the final challenge word with
+   `keccak256(abi.encode(aux)) mod r` computed from the aux calldata. Never read it from the caller: taking it as an
    input makes it agree with any payload and restores the tampering it prevents.
 4. `require(chainId == block.chainid)`.
 5. `require(public_in < 2**64 && public_out < 2**64)` and
@@ -534,11 +701,27 @@ Before invoking the Groth16 verifier the on-chain wrapper MUST:
 12. Move `public_in` in from `payer_address`; pay `public_out` to
     `recipient_address`.
 
-For the paired batch proof the contract must additionally pin
+For the paired batch proof the contract must additionally pin three things.
+
 `start_index == committedCount`. `FrontierRoot` binds the frontier to `old_root`
 but cannot bind the index, since a tree with trailing empty leaves has the same
 root as one without them, so replaying a valid batch at a lower index would
-overwrite committed leaves. The batch circuit's header carries the full list.
+overwrite committed leaves.
+
+`is_deposit[k]` per active slot — 1 on every leaf of a deposit batch, 0 on every
+leaf of a spend batch — taken from the contract's own deposit records rather
+than from relayer calldata. The circuit constrains it only to be boolean, and it
+gates the per-leaf deposit binding, so a relayer that clears it on a deposit
+leaf commits a leaf whose `cv_dep` is constrained by nothing but `BabyCheck`.
+`MASP._drainDeposit` and `MASP._validateRequest` cover every active slot on
+their respective paths.
+
+`leaf_asset[k] == 0` on every zero-value deposit leaf, matching step 7a (§2a).
+`MASP._drainDeposit` sets it on the fee note it emits; a consumer that forwards a
+non-zero asset on a worthless leaf produces a batch no prover can satisfy. The
+circuit is otherwise indifferent to how deposits are laid out across the batch.
+
+The batch circuit's header carries the full list.
 
 `rcv` is bounded to 252 bits by the `Num2Bits(252)` inside `MulH`. Wallets should
 sample it uniformly below the Baby-Jubjub subgroup order `ell < 2^251`, which
@@ -621,8 +804,8 @@ Instance counts at `Transact(11, 4, 6)`, from the source: 11 `HashToAssetGen`
 (one per note slot plus the public bucket), 10 `ValueCommitPair` (one per note
 slot), 20 `MulH` and 12 `EscalarMulAny(64)`. The remainder is note commitments,
 Merkle levels, nullifiers, leaf hashes and key derivation; `PerAssetValueBalance`
-is about 200 constraints, `PerAssetPointBalance` about 70, and the `PolyEval(69)`
-Horner chain about 70. FMD clue signals cost nothing (§7a).
+is about 200 constraints, `PerAssetPointBalance` about 70, and the `PolyEval(46)`
+Horner chain about 46. FMD clue signals cost nothing (§7a).
 
 `TreeUpdateBatch` is dominated by `MAX_L` single-leaf inserts across `DEPTH`
 Merkle levels of `Poseidon(5)`, plus the `MAX_L` deposit-binding equalities, each

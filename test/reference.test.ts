@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { keccak_256 } from "@noble/hashes/sha3";
 
+import { buildJubjub } from "./lib/harness";
 import {
     Poseidon,
     Jubjub,
@@ -182,7 +183,7 @@ describe("reference / fuzzy message detection", function () {
     let P: Poseidon;
     let J: Jubjub;
     before(async () => {
-        [P, J] = await Promise.all([Poseidon.build(), Jubjub.build()]);
+        [P, J] = await Promise.all([Poseidon.build(), buildJubjub()]);
     });
 
     // The clue signals carry no in-circuit constraints, so the scheme's own
@@ -287,8 +288,17 @@ describe("reference / snark compression", () => {
         );
     });
 
-    // The vectors record `abiEncodedCoeffs` so the contract side can localise a
-    // mismatch to the encoding; recomputing it here checks the published value.
+    // The vectors record `abiEncodedChallenge` so the contract side can localise
+    // a mismatch to the encoding; recomputing it here checks the published value.
+    //
+    // Two vectors per case, and the split is the point: `challenge` is every
+    // logical public input and is what `z` hashes, `coeffs` is the subset the
+    // circuit pins and is what `y` evaluates. They differ for `transact` (69
+    // hashed, 46 evaluated) and coincide for `tree_update_batch` (52 and 52).
+    // The difference is not a formatting choice: transact's extra 23 words are
+    // not signals of the circuit, so `z` is the only thing that can bind them,
+    // while every batch word IS a signal and so must be evaluated. See
+    // src/README.md § 2a.
     //
     // Driven from index.json, so a shape change (a new circuit, or a different
     // MAX_L) is covered without editing this file.
@@ -299,19 +309,58 @@ describe("reference / snark compression", () => {
         expect(VECTOR_FILES.length, "no vector files listed").to.be.greaterThan(0);
     });
 
+    // ===== a challenge-only field must be one the circuit cannot see =====
+    //
+    // A word in the challenge preimage but not the coefficient vector is bound
+    // by nothing on its own: `z` is a circuit INPUT the prover reads before
+    // choosing a witness, so hashing a field into it binds that field only if
+    // something else already pins it (src/README.md § 2a).
+    //
+    // Exactly one argument makes a demotion sound, and `transact` is the only
+    // shape that can make it: its trailing words are not signals of the circuit
+    // at all, so no witness copy exists to disagree with calldata. Checked
+    // against the compiled circuit by `test/transact/binding.test.ts :: the
+    // challenge-only fields are not circuit signals`.
+    //
+    // `tree_update_batch` cannot make that argument — every word of its preimage
+    // is a signal — and demoting three of them anyway is what shipped two
+    // critical mints. So it is absent from this set, and publishing a
+    // challenge-only field would fail here.
+    const MAY_DEMOTE = new Set(["transact"]);
+
+    for (const file of VECTOR_FILES) {
+        const v = JSON.parse(readFileSync(resolve(ROOT, "vectors", file), "utf8"));
+        const challengeOnly: string[] = v.circuit.challengeOnly ?? [];
+        if (challengeOnly.length === 0) continue;
+
+        it(`vectors/${file} :: challenge-only fields are not circuit signals`, () => {
+            expect(MAY_DEMOTE.has(v.circuit.id), `${v.circuit.id} publishes challenge-only ` +
+                `fields (${challengeOnly.join(", ")}) but its words ARE circuit signals, so ` +
+                "hashing them into z binds nothing. Either evaluate them into y and name the " +
+                "constraint that pins each, or add this shape here with the argument for why " +
+                "they are not signals.").to.equal(true);
+        });
+    }
+
     for (const file of VECTOR_FILES) {
         it(`vectors/${file} is internally consistent`, () => {
             const v = JSON.parse(readFileSync(resolve(ROOT, "vectors", file), "utf8"));
             for (const vec of v.vectors) {
                 const coeffs = vec.compression.coeffs.map(BigInt);
+                const challenge = vec.compression.challenge.map(BigInt);
                 const where = `${file} :: ${vec.name}`;
 
                 expect(coeffs.length, `${where}: coefficient count`).to.equal(v.circuit.coeffCount);
+                expect(challenge.length, `${where}: challenge word count`).to.equal(
+                    v.circuit.challengeWords ?? v.circuit.coeffCount,
+                );
                 expect(
-                    "0x" + Buffer.from(abiEncodeCoeffs(coeffs)).toString("hex"),
+                    "0x" + Buffer.from(abiEncodeCoeffs(challenge)).toString("hex"),
                     `${where}: recorded ABI preimage`,
-                ).to.equal(vec.compression.abiEncodedCoeffs);
-                expect(fiatShamirZ(coeffs).toString(), `${where}: z`).to.equal(vec.compression.z);
+                ).to.equal(vec.compression.abiEncodedChallenge);
+                expect(fiatShamirZ(challenge).toString(), `${where}: z`).to.equal(
+                    vec.compression.z,
+                );
                 expect(
                     hornerEval(coeffs, BigInt(vec.compression.z)).toString(),
                     `${where}: y`,

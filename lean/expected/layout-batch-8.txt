@@ -1,0 +1,52 @@
+oldRoot
+newRoot
+startIndex
+actualCount
+cms 0
+cms 1
+cms 2
+cms 3
+cms 4
+cms 5
+cms 6
+cms 7
+cvDepX 0
+cvDepY 0
+cvDepX 1
+cvDepY 1
+cvDepX 2
+cvDepY 2
+cvDepX 3
+cvDepY 3
+cvDepX 4
+cvDepY 4
+cvDepX 5
+cvDepY 5
+cvDepX 6
+cvDepY 6
+cvDepX 7
+cvDepY 7
+leafAsset 0
+leafAsset 1
+leafAsset 2
+leafAsset 3
+leafAsset 4
+leafAsset 5
+leafAsset 6
+leafAsset 7
+leafPublicIn 0
+leafPublicIn 1
+leafPublicIn 2
+leafPublicIn 3
+leafPublicIn 4
+leafPublicIn 5
+leafPublicIn 6
+leafPublicIn 7
+isDeposit 0
+isDeposit 1
+isDeposit 2
+isDeposit 3
+isDeposit 4
+isDeposit 5
+isDeposit 6
+isDeposit 7

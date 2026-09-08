@@ -71,7 +71,7 @@ theorem indN_le_one (P : Prop) [Decidable P] : indN P ≤ 1 := by
 
 /-! ## `LessThan`
 
-circomlib `LessThan(n)` (`comparators.circom:89-98`) is the comparator
+circomlib `LessThan(n)` (`comparators.circom:89-99`) is the comparator
 `src/tree_update_batch.circom:74` uses to derive `active[k] = (k < actual_count)`:
 
     component n2b = Num2Bits(n + 1);
@@ -104,12 +104,12 @@ theorem bitNat_top_iff (bs : ℕ → F) (n : ℕ) :
   · simp
     omega
 
-/-- The constraint system of circomlib `LessThan(n)` — `comparators.circom:89-98`.
+/-- The constraint system of circomlib `LessThan(n)` — `comparators.circom:89-99`.
 `a` is `in[0]`, `b` is `in[1]`, and `bs` the `Num2Bits(n+1)` output. -/
 structure LessThanSat (n : ℕ) (a b : F) (bs : ℕ → F) (out : F) : Prop where
-  /-- `:82-82` — `Num2Bits(n+1)` applied to `in[0] + 2^n - in[1]`. -/
+  /-- `comparators.circom:94-96` — `Num2Bits(n+1)` applied to `in[0] + 2^n - in[1]`. -/
   diff_bits : Num2BitsSat (n + 1) (a + (2 : F) ^ n - b) bs
-  /-- `:84` — `out <== 1 - n2b.out[n]`. -/
+  /-- `comparators.circom:98` — `out <== 1 - n2b.out[n]`. -/
   out_def : out = 1 - bs n
 
 /-- **Soundness of `LessThan`.** Given that both operands really are `n`-bit, the output is

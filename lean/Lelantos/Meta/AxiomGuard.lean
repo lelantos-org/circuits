@@ -4,7 +4,7 @@ import Lelantos
 # Environment-wide axiom guard
 
 `Lelantos.Meta.Assumptions` prints the axiom dependencies of the headline theorems, and
-`scripts/check-axioms.sh` diffs that output against `expected/axioms.txt`. That guard is
+`lean/scripts/check-axioms.sh` diffs that output against `expected/axioms.txt`. That guard is
 only as good as the list of theorems someone remembered to add to it: a new result proved
 from a new axiom is invisible to it.
 
@@ -25,7 +25,7 @@ private def leanAxioms : List Name :=
   [``propext, ``Classical.choice, ``Quot.sound]
 
 /-- Arithmetic facts that Mathlib cannot decide at these bit widths, discharged externally
-by `scripts/check-prime.py`. -/
+by `lean/scripts/check-prime.py`. -/
 private def arithmeticAxioms : List Name :=
   [``Lelantos.p_prime, ``Lelantos.ell_prime]
 

@@ -7,7 +7,7 @@ import Lelantos.Proofs.Completeness
 `Circuit/TreeUpdateBatch.lean` proves a dozen theorems of the form `BatchChainSat … → P`.
 Read literally, all of them are vacuous unless something satisfies `BatchChainSat`, and
 nothing in `Proofs/Completeness.lean` does — that file exhibits assignments for the transact
-circuit only. This file closes the gap for `TreeUpdateBatch(10, 4)`, the deployed shape.
+circuit only. This file closes the gap for `TreeUpdateBatch(11, 8)`, the deployed shape.
 
 The batch commits **three** leaves into four slots. That is deliberate: an odd,
 partially-filled batch is the case `actual_count` exists for, and it is the one where the
@@ -198,7 +198,7 @@ noncomputable def rootAt : ℕ → F
 
 /-! ## The assignment -/
 
-/-- A satisfying assignment for `TreeUpdateBatch(10, 4)` committing three leaves. -/
+/-- A satisfying assignment for `TreeUpdateBatch(11, 8)` committing three leaves. -/
 noncomputable def batch : BatchSignals depth slots where
   -- chosen: an empty tree, three spend leaves, no public input
   oldRoot := 0
@@ -212,6 +212,8 @@ noncomputable def batch : BatchSignals depth slots where
   frontierIn := fun _ _ => 0
   rcv := fun _ => 0
   zeros := emptyFill
+  -- derived: `start_index = 0` decomposes to the all-zero bit vector
+  startIdxBits := natBits 0
   -- derived: activity
   cntBits := natBits (filled - 1)
   ltBits := actBits
@@ -242,6 +244,8 @@ noncomputable def batch : BatchSignals depth slots where
   expected := fun _ => Witness.cvOf Witness.zeroBits 0
   assetInv := fun _ => 0
   assetIsZero := fun _ => 1
+  pubInInv := fun _ => 0
+  pubInIsZero := fun _ => 1
 
 /-! ## The two halves of the constraint system -/
 
@@ -263,6 +267,10 @@ theorem batch_chain_sat : BatchChainSat countBits batch where
   spend_zero_asset k _ := by simp [batch]
   spend_zero_public_in k _ := by simp [batch]
   leaf_def k _ := rfl
+  start_index_bits := by
+    show Num2BitsSat (2 * depth) 0 (natBits 0)
+    have h := num2Bits_witness (n := 2 * depth) (m := 0) (by positivity)
+    rwa [Nat.cast_zero] at h
   idx_in_def _ _ := rfl
   idx_bits k hk := by
     -- `start_index = 0`, so an active slot decomposes `k` and an inactive one 0;
@@ -291,7 +299,8 @@ quantifies over. -/
 theorem batch_deposit_sat : BatchDepositSat batch where
   active_dep_def k _ := by simp [batch]
   asset_isZero k _ := by constructor <;> simp [batch]
-  asset_nonzero k _ := by simp [batch]
+  public_in_isZero k _ := by constructor <;> simp [batch]
+  asset_matches_value k _ := by simp [batch]
   gen_def k _ := rfl
   public_in_range k _ := Witness.num2Bits_zero 64
   expected_def k _ := Witness.valueCommit_witness Witness.zeroBits 0

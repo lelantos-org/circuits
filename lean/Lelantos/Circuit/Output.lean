@@ -67,7 +67,8 @@ structure OutputNoteSat (o : OutputSlot) : Prop where
   asset_bits : Num2BitsSat 64 o.assetId o.assetBits
   /-- `:56-57` — …and its output point. -/
   gen_def : o.gen = coords (assetGen o.assetId)
-  /-- `:59-66, 68-69` — value commitment (`ValueCommitPair.cv`, bound to the `cv` input). -/
+  /-- `:59-66, 68-69` — value commitment (`ValueCommitPair.cv`, bound to the `cv` input),
+  with `rH` exported at `:71-72`. -/
   cv_sat : ValueCommitSat o.valueBits o.gen o.rcv o.rcvBits o.vT o.rH o.cv
   /-- `:59-66, 74-75` — deposit value commitment (`ValueCommitPair.cv_dep`), sharing the
   same bits and generator structurally rather than by convention. -/

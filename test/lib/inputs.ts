@@ -4,7 +4,7 @@
 // signal names circom reads. The key set is part of the contract with the
 // circuit.
 
-import { flattenBatch, type Field, type Point } from "../helpers";
+import { batchCoeffs, flattenBatch, type Field, type Point } from "../helpers";
 
 /** Pad a real-slot array out to the circuit's fixed width. */
 export function padToSlots<T>(real: T[], total: number, zero: T): T[] {
@@ -45,9 +45,10 @@ export interface TreeUpdateBatchArgs extends TreeUpdateBatchPublicArgs {
     z: Field;
 }
 
-// Consumed twice: `treeUpdateBatchInputJson` spreads the result into the object
-// handed to the circuit and `treeUpdateBatchCoeffs` flattens it, so the
-// coefficient vector always describes the evaluated witness.
+// Consumed three times: `treeUpdateBatchInputJson` spreads the result into the
+// object handed to the circuit, `treeUpdateBatchChallenge` flattens it into the
+// preimage and `treeUpdateBatchCoeffs` into the coefficient vector. All three
+// therefore always describe the same witness.
 function publicJson(a: TreeUpdateBatchPublicArgs) {
     return {
         old_root: a.oldRoot.toString(),
@@ -79,11 +80,21 @@ export function treeUpdateBatchInputJson(a: TreeUpdateBatchArgs) {
 }
 
 /**
- * PolyEval coefficients for a batch witness: 4 + 6·MAX_L of them.
+ * Challenge preimage for a batch witness: 4 + 6·MAX_L words, hashed into `z`.
  *
  * The layout is defined in `ref/compress.ts :: flattenBatch`, which is also
  * what `scripts/gen-vectors.ts` publishes vectors from.
  */
-export function treeUpdateBatchCoeffs(a: TreeUpdateBatchPublicArgs): Field[] {
+export function treeUpdateBatchChallenge(a: TreeUpdateBatchPublicArgs): Field[] {
     return flattenBatch(publicJson(a));
+}
+
+/**
+ * PolyEval coefficients for a batch witness: 4 + 6·MAX_L of them — the same
+ * words as the preimage, since every one is pinned. `ref/compress.ts ::
+ * batchCoeffs` says why nothing is demoted, and which constraints do the
+ * pinning.
+ */
+export function treeUpdateBatchCoeffs(a: TreeUpdateBatchPublicArgs): Field[] {
+    return batchCoeffs(publicJson(a));
 }

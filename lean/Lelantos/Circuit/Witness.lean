@@ -15,11 +15,21 @@ and it should be reviewable without reading the soundness proofs.
 
 namespace Lelantos
 
-/-- Number of `PolyEval` coefficients: `9 + 3·N_IN + 8·N_OUT`
-(`src/lib/poly_eval.circom:41-42`). For `(2, 2)` this is 31. -/
-def piCount (nIn nOut : ℕ) : ℕ := 9 + 3 * nIn + 8 * nOut
+/-- Number of `PolyEval` coefficients: `4 + 3·N_IN + 5·N_OUT`
+(`src/lib/poly_eval.circom:65`). For `(2, 2)` this is 20, for `(4, 6)` it is 46.
 
-example : piCount 2 2 = 31 := by norm_num [piCount]
+**Membership rule.** A logical public input is a coefficient only if some
+constraint outside `TransactCompressN` pins it. `PolyEval` is affine in each
+coefficient and `z` is an input the prover reads first, so an unpinned
+coefficient is one linear equation in one unknown — solve it and `y` is whatever
+the contract asks for. The four address words, the FMD clue triples and the
+payload digest carry no constraint at all, so they are not here; they are bound
+by being hashed into the challenge instead (`PubInputs.TRANSACT_CHALLENGE_WORDS`,
+69 words at the 4x6 shape). -/
+def piCount (nIn nOut : ℕ) : ℕ := 4 + 3 * nIn + 5 * nOut
+
+example : piCount 2 2 = 20 := by norm_num [piCount]
+example : piCount 4 6 = 46 := by norm_num [piCount]
 
 /-- Every signal of `Transact(depth, nIn, nOut)`. -/
 structure TxWitness (depth nIn nOut : ℕ) where
@@ -31,25 +41,11 @@ structure TxWitness (depth nIn nOut : ℕ) where
   publicAssetId : F
   publicIn : F
   publicOut : F
-  recipient : F
-  chainId : F
-  payer : F
-  relayer : F
   /-- Per-slot sub-circuits. -/
   spent : ℕ → SpentSlot depth
   out : ℕ → OutputSlot
   /-- Deposit value commitments, forwarded to `tree_update_batch`. -/
   outCvDep : ℕ → Pt
-  /-- FMD clue fields — `PolyEval`-bound only, no other constraint. -/
-  outClueRx : ℕ → F
-  outClueRy : ℕ → F
-  outClueBits : ℕ → F
-  /-- Digest of the encrypted-note payload (`ephPub` and ciphertext, per output).
-  `PolyEval`-bound only, exactly like the clue fields: the circuit carries it so that
-  tampering with the payload in calldata changes `y`. That the digest is the *real* hash of
-  the payload the contract received is a contract obligation, not a circuit property —
-  see `ContractObligations` in `Lelantos.Circuit.Transact`. -/
-  outAuxDigest : F
   /-- Public-bucket signals. -/
   pubGen : Pt
   pubAssetBits : ℕ → F
@@ -68,15 +64,14 @@ structure TxWitness (depth nIn nOut : ℕ) where
   vbOutTerm : ℕ → ℕ → F
   vbLhs : ℕ → ℕ → F
   vbRhs : ℕ → ℕ → F
-  /-- Group-level readings of the points `PerAssetPointBalance` sums. -/
-  inCvG : ℕ → G
-  outCvG : ℕ → G
-  inRHG : ℕ → G
-  outRHG : ℕ → G
-  pubInG : G
-  pubOutG : G
   /-- `PolyEval` accumulator. -/
   peAcc : ℕ → F
+  /-- Running count of dummy input slots, and the `IsEqual` comparing it to `nIn`.
+  `src/lib/transact.circom` rejects the all-dummy witness with it; see
+  `TransactSat.not_all_dummy`. -/
+  dummyAcc : ℕ → F
+  dummyAllInv : F
+  dummyAllOut : F
 
 variable {depth nIn nOut : ℕ}
 
@@ -94,9 +89,9 @@ def outValue (w : TxWitness depth nIn nOut) (j : ℕ) : F := (w.out j).value
 The layout is defined once, as a map from coefficient index to a named slot; the field
 value at an index is a separate lookup. Because the dumped names and the values the proofs
 use come from the same definition, `lean/scripts/dump-layout.sh` is a cross-check against
-the other implementations of this ordering — `contracts/src/lib/PubInputs.sol ::
-compress(Transact, aux)` and `sdk/src/bundle/snark-compression.ts :: flatten` — rather than
-a restatement of a second copy.
+the other implementations of this ordering — `contracts/src/libs/PubInputs.sol ::
+compress(Transact, aux)` and `test/ref/compress.ts :: coeffs` — rather than a restatement
+of a second copy.
 -/
 
 /-- One coefficient position of `TransactCompressN`. -/
@@ -111,19 +106,11 @@ inductive PISlot where
   | inCvY (i : ℕ)
   | outCvX (j : ℕ)
   | outCvY (j : ℕ)
-  | recipient
-  | chainId
-  | payer
-  | relayer
   | outCvDepX (j : ℕ)
   | outCvDepY (j : ℕ)
-  | clueRx (j : ℕ)
-  | clueRy (j : ℕ)
-  | clueBits (j : ℕ)
-  | auxDigest
 deriving Repr, DecidableEq, Inhabited
 
-/-- The layout of `TransactCompressN(nIn, nOut)` — `src/lib/poly_eval.circom:66-107`.
+/-- The layout of `TransactCompressN(nIn, nOut)` — `src/lib/poly_eval.circom:64-108`.
 Single source of truth. -/
 def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   let oNf := 1
@@ -131,10 +118,7 @@ def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   let oPub := oCm + nOut
   let oInCv := oPub + 3
   let oOutCv := oInCv + 2 * nIn
-  let oAddr := oOutCv + 2 * nOut
-  let oDep := oAddr + 4
-  let oClue := oDep + 2 * nOut
-  let oAux := oClue + 3 * nOut
+  let oDep := oOutCv + 2 * nOut
   if k = 0 then .merkleRoot
   else if k < oCm then .nullifier (k - oNf)
   else if k < oPub then .outCm (k - oCm)
@@ -143,18 +127,10 @@ def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   else if k = oPub + 2 then .publicOut
   else if k < oOutCv then
     (if (k - oInCv) % 2 = 0 then .inCvX ((k - oInCv) / 2) else .inCvY ((k - oInCv) / 2))
-  else if k < oAddr then
+  else if k < oDep then
     (if (k - oOutCv) % 2 = 0 then .outCvX ((k - oOutCv) / 2) else .outCvY ((k - oOutCv) / 2))
-  else if k = oAddr then .recipient
-  else if k = oAddr + 1 then .chainId
-  else if k = oAddr + 2 then .payer
-  else if k = oAddr + 3 then .relayer
-  else if k < oClue then
+  else
     (if (k - oDep) % 2 = 0 then .outCvDepX ((k - oDep) / 2) else .outCvDepY ((k - oDep) / 2))
-  else if oAux ≤ k then .auxDigest
-  else if (k - oClue) % 3 = 0 then .clueRx ((k - oClue) / 3)
-  else if (k - oClue) % 3 = 1 then .clueRy ((k - oClue) / 3)
-  else .clueBits ((k - oClue) / 3)
 
 /-- The signal a slot names. -/
 def slotValue (w : TxWitness depth nIn nOut) : PISlot → F
@@ -168,16 +144,8 @@ def slotValue (w : TxWitness depth nIn nOut) : PISlot → F
   | .inCvY i => (w.spent i).cv.y
   | .outCvX j => (w.out j).cv.x
   | .outCvY j => (w.out j).cv.y
-  | .recipient => w.recipient
-  | .chainId => w.chainId
-  | .payer => w.payer
-  | .relayer => w.relayer
   | .outCvDepX j => (w.outCvDep j).x
   | .outCvDepY j => (w.outCvDep j).y
-  | .clueRx j => w.outClueRx j
-  | .clueRy j => w.outClueRy j
-  | .clueBits j => w.outClueBits j
-  | .auxDigest => w.outAuxDigest
 
 /-- The `PolyEval` coefficient vector. -/
 def txCoeffs (w : TxWitness depth nIn nOut) (k : ℕ) : F :=
@@ -195,8 +163,7 @@ only be applied by someone who already knows the coefficient index.
 for the slots that exist. -/
 def PISlot.InRange (nIn nOut : ℕ) : PISlot → Prop
   | .nullifier i | .inCvX i | .inCvY i => i < nIn
-  | .outCm j | .outCvX j | .outCvY j | .outCvDepX j | .outCvDepY j
-  | .clueRx j | .clueRy j | .clueBits j => j < nOut
+  | .outCm j | .outCvX j | .outCvY j | .outCvDepX j | .outCvDepY j => j < nOut
   | _ => True
 
 /-- The coefficient index a slot occupies — the inverse of `piSlot` on in-range slots. -/
@@ -211,16 +178,8 @@ def slotIndex (nIn nOut : ℕ) : PISlot → ℕ
   | .inCvY i => 4 + nIn + nOut + 2 * i + 1
   | .outCvX j => 4 + 3 * nIn + nOut + 2 * j
   | .outCvY j => 4 + 3 * nIn + nOut + 2 * j + 1
-  | .recipient => 4 + 3 * nIn + 3 * nOut
-  | .chainId => 4 + 3 * nIn + 3 * nOut + 1
-  | .payer => 4 + 3 * nIn + 3 * nOut + 2
-  | .relayer => 4 + 3 * nIn + 3 * nOut + 3
-  | .outCvDepX j => 8 + 3 * nIn + 3 * nOut + 2 * j
-  | .outCvDepY j => 8 + 3 * nIn + 3 * nOut + 2 * j + 1
-  | .clueRx j => 8 + 3 * nIn + 5 * nOut + 3 * j
-  | .clueRy j => 8 + 3 * nIn + 5 * nOut + 3 * j + 1
-  | .clueBits j => 8 + 3 * nIn + 5 * nOut + 3 * j + 2
-  | .auxDigest => 8 + 3 * nIn + 8 * nOut
+  | .outCvDepX j => 4 + 3 * nIn + 3 * nOut + 2 * j
+  | .outCvDepY j => 4 + 3 * nIn + 3 * nOut + 2 * j + 1
 
 theorem slotIndex_lt {nIn nOut : ℕ} {s : PISlot} (hs : s.InRange nIn nOut) :
     slotIndex nIn nOut s < piCount nIn nOut := by
@@ -239,10 +198,92 @@ theorem piSlot_slotIndex {nIn nOut : ℕ} {s : PISlot} (hs : s.InRange nIn nOut)
       | rw [if_pos (by omega)]
       | (congr 1; omega)
 
+/-- **`slotIndex` is a retraction of `piSlot` too.** With `piSlot_slotIndex` this makes the
+two a bijection between coefficient indices below `piCount` and in-range slots.
+
+`piSlot_slotIndex` alone is enough to *find* the index of a named slot, which is all
+`transact_pi_binding_slot` needs. This direction is what lets a proof go the other way —
+"no index other than this one carries this slot" — which is what any statement about a
+*single* coefficient being free or pinned requires. -/
+theorem slotIndex_piSlot (nIn nOut : ℕ) {k : ℕ} (hk : k < piCount nIn nOut) :
+    slotIndex nIn nOut (piSlot nIn nOut k) = k := by
+  -- `split_ifs` and `split` both blow simp's step budget on the `ite` chain under
+  -- `slotIndex`'s matcher, so the chain is peeled by hand. Each `rw` is syntactic and the
+  -- resulting goal is one linear arithmetic fact, including the interleaved coordinate
+  -- slots, where `omega` handles the `/ 2` and `% 2`.
+  simp only [piCount] at hk
+  simp only [piSlot]
+  by_cases h1 : k = 0
+  · rw [if_pos h1]; simp only [slotIndex]; omega
+  rw [if_neg h1]
+  by_cases h2 : k < 1 + nIn
+  · rw [if_pos h2]; simp only [slotIndex]; omega
+  rw [if_neg h2]
+  by_cases h3 : k < 1 + nIn + nOut
+  · rw [if_pos h3]; simp only [slotIndex]; omega
+  rw [if_neg h3]
+  by_cases h4 : k = 1 + nIn + nOut
+  · rw [if_pos h4]; simp only [slotIndex]; omega
+  rw [if_neg h4]
+  by_cases h5 : k = 1 + nIn + nOut + 1
+  · rw [if_pos h5]; simp only [slotIndex]; omega
+  rw [if_neg h5]
+  by_cases h6 : k = 1 + nIn + nOut + 2
+  · rw [if_pos h6]; simp only [slotIndex]; omega
+  rw [if_neg h6]
+  by_cases h7 : k < 1 + nIn + nOut + 3 + 2 * nIn
+  · rw [if_pos h7]
+    by_cases h7a : (k - (1 + nIn + nOut + 3)) % 2 = 0
+    · rw [if_pos h7a]; simp only [slotIndex]; omega
+    · rw [if_neg h7a]; simp only [slotIndex]; omega
+  rw [if_neg h7]
+  by_cases h8 : k < 1 + nIn + nOut + 3 + 2 * nIn + 2 * nOut
+  · rw [if_pos h8]
+    by_cases h8a : (k - (1 + nIn + nOut + 3 + 2 * nIn)) % 2 = 0
+    · rw [if_pos h8a]; simp only [slotIndex]; omega
+    · rw [if_neg h8a]; simp only [slotIndex]; omega
+  rw [if_neg h8]
+  by_cases h9 : (k - (1 + nIn + nOut + 3 + 2 * nIn + 2 * nOut)) % 2 = 0
+  · rw [if_pos h9]; simp only [slotIndex]; omega
+  · rw [if_neg h9]; simp only [slotIndex]; omega
+
+/-- **A slot occupies exactly one coefficient index.** -/
+theorem piSlot_eq_iff {nIn nOut k : ℕ} (hk : k < piCount nIn nOut) {s : PISlot}
+    (hs : s.InRange nIn nOut) : piSlot nIn nOut k = s ↔ k = slotIndex nIn nOut s := by
+  constructor
+  · intro h; rw [← slotIndex_piSlot nIn nOut hk, h]
+  · rintro rfl; exact piSlot_slotIndex hs
+
 /-- The coefficient at a slot's index is that slot's signal. -/
 theorem txCoeffs_slotIndex {depth nIn nOut : ℕ} (w : TxWitness depth nIn nOut) {s : PISlot}
     (hs : s.InRange nIn nOut) : txCoeffs w (slotIndex nIn nOut s) = slotValue w s := by
   rw [txCoeffs, piSlot_slotIndex hs]
+
+/-! ### Moving one slot
+
+`txCoeffs_eq_update` is the bridge from "these two witnesses agree on every public input
+but one" to "their coefficient vectors differ in exactly one place", which is the shape
+`polyEval_update` and `polyEval_forge` consume. It needs both halves of the layout
+bijection: `piSlot_slotIndex` to place the moved slot, `slotIndex_piSlot` to know no other
+index carries it.
+
+Kept as the standing statement of what a free slot would buy an attacker. Every slot in
+this layout is pinned by a constraint in `TransactSat`, so no witness pair satisfying its
+hypothesis exists at a single slot — but that is a property of the layout's membership, not
+of this lemma, and it is the property a future slot addition has to re-establish.
+-/
+
+/-- Two witnesses agreeing on every slot but `s` have coefficient vectors related by a
+single-point update. -/
+theorem txCoeffs_eq_update {depth nIn nOut : ℕ} {w w' : TxWitness depth nIn nOut} {s : PISlot}
+    (hs : s.InRange nIn nOut) (hother : ∀ s', s' ≠ s → slotValue w' s' = slotValue w s')
+    {k : ℕ} (hk : k < piCount nIn nOut) :
+    txCoeffs w' k = Function.update (txCoeffs w) (slotIndex nIn nOut s) (slotValue w' s) k := by
+  rw [Function.update_apply]
+  by_cases hks : k = slotIndex nIn nOut s
+  · rw [if_pos hks, hks, txCoeffs, piSlot_slotIndex hs]
+  · rw [if_neg hks, txCoeffs, txCoeffs]
+    exact hother _ fun hcon => hks ((piSlot_eq_iff hk hs).mp hcon)
 
 /-- The layout as a list of slot names, for `lean/scripts/dump-layout.sh`. -/
 def layoutNames (nIn nOut : ℕ) : List String :=

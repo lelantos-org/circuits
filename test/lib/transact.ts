@@ -11,17 +11,21 @@ import {
     toCircomInput,
     deterministicClueGen,
     buildLeaf,
+    circuitSignals,
     dummyInputAt,
     dummyOutput,
     fiatShamirZ,
     flatten,
-    type CircomTransactInput,
+    coeffs,
+    hornerEval,
+    type TransactWitnessBundle,
     type ClueInputs,
     type Field,
     type Note,
     type SpentNote,
 } from "../helpers";
 import { ALICE_NSK, N_IN, N_OUT } from "./constants";
+import type { CircuitInput, CircuitTester } from "./circuit";
 
 // Default asset id, for tests that do not depend on which asset is in use.
 export const DEFAULT_ASSET: Field = 7n;
@@ -96,7 +100,7 @@ export class TxBuilder {
     // Output rho is forced to the derivation the circuit enforces,
     // rho = Poseidon(TAG_RHO, nullifier[0], out_index), overriding any note.rho
     // the caller supplied. Matches the SDK bundle builders.
-    build(args: TxBuildArgs): CircomTransactInput {
+    build(args: TxBuildArgs): TransactWitnessBundle {
         const nf0 = args.inputs[0].nf;
         // `Transact` takes exactly N_IN inputs and N_OUT outputs; a short
         // witness fails witness calculation. Unused slots take dummy inputs
@@ -176,7 +180,7 @@ export class TxBuilder {
      * The base for the tamper tests, which mutate a single field and expect
      * rejection, so it is honest in every respect but the field under test.
      */
-    balanced(nsk: Field = ALICE_NSK): CircomTransactInput {
+    balanced(nsk: Field = ALICE_NSK): TransactWitnessBundle {
         const { root, inputs } = this.twoRealInputs([100n, 50n], nsk);
         return this.build({
             inputs,
@@ -205,7 +209,7 @@ export class TxBuilder {
      * not balance by coincidence, and the rho seeds are spaced well apart so a
      * `+1` tamper on one slot's field cannot land on another slot's value.
      */
-    fullShape(nsk: Field = ALICE_NSK): CircomTransactInput {
+    fullShape(nsk: Field = ALICE_NSK): TransactWitnessBundle {
         assertFullShapeValues();
         const { root, inputs } = this.nRealInputs(FULL_SHAPE_IN_VALUES, nsk);
         const outputs = FULL_SHAPE_OUT_VALUES.map((v, j) =>
@@ -270,9 +274,53 @@ function assertFullShapeValues(): void {
  * not, since `z` carries no constraint of its own and a stale one only moves
  * the `y` the circuit outputs.
  */
-export function rebindFiatShamir(input: CircomTransactInput): CircomTransactInput {
-    input.z = fiatShamirZ(flatten(input)).toString();
-    return input;
+export function rebindFiatShamir(input: TransactWitnessBundle): TransactWitnessBundle {
+    return bindFiatShamir(input, calldataView(input));
+}
+
+/**
+ * Snapshot a bundle's logical public inputs — the calldata view.
+ *
+ * A structural clone rather than a field-by-field copy, because unlike the batch
+ * every field `flatten`/`coeffs` read is already a logical public input; there
+ * is no private state in the bundle to exclude. Deep enough that the caller can
+ * mutate one view without disturbing the other, which is the whole point.
+ */
+export function calldataView(w: TransactWitnessBundle): TransactWitnessBundle {
+    return structuredClone(w);
+}
+
+/**
+ * Bind `z` to a CALLDATA view that may differ from the witness `w`, and return
+ * the `y` the contract will compare against.
+ *
+ * `rebindFiatShamir` fuses two roles a deployment keeps apart: deriving the
+ * challenge, and choosing the witness. `MASP` hashes ITS calldata into `z` and
+ * compares ITS `y`; the prover then picks any witness satisfying the R1CS at
+ * that `z`. `z` is a circuit INPUT read before the witness is chosen, so
+ * Schwartz-Zippel does not apply and a word is bound only if a constraint
+ * already pins it (src/README.md § 2a).
+ *
+ * Mirrors `lib/batch.ts :: bindFiatShamir`. Use this wherever the question is
+ * "can the prover lie to the contract", and `rebindFiatShamir` where it is
+ * "does constraint X fire".
+ */
+export function bindFiatShamir(
+    w: TransactWitnessBundle,
+    calldata: TransactWitnessBundle,
+): TransactWitnessBundle {
+    w.z = fiatShamirZ(flatten(calldata)).toString();
+    return w;
+}
+
+/**
+ * The `y` the contract computes for a calldata view at the bound challenge.
+ *
+ * `z` defaults to the view's own, which is what an honest caller wants; pass one
+ * explicitly to evaluate a calldata view at a challenge bound from elsewhere.
+ */
+export function calldataY(calldata: TransactWitnessBundle, z: Field = BigInt(calldata.z)): Field {
+    return hornerEval(coeffs(calldata), z);
 }
 
 /**
@@ -327,10 +375,45 @@ export interface Scenario {
     inputs: SpentNote[];
 }
 
+/**
+ * Wrap a tester so it drops the challenge-only fields before the witness
+ * calculator sees them.
+ *
+ * `TxBuilder.build` emits a `TransactWitnessBundle`: the circuit's signals plus
+ * `recipient_address`, `chain_id`, `payer_address`, `relayer_address`, the clue
+ * triples and `out_aux_digest`. Those are logical public inputs but NOT signals
+ * of this circuit — they reach the proof through the Fiat-Shamir challenge, not
+ * through `PolyEval`.
+ *
+ * The wasm calculator rejects an unknown key outright ("Signal
+ * recipient_address not found"), and `expectWitnessFails` classifies that as a
+ * test bug rather than a constraint firing — correctly, since a rejection test
+ * that accepts it would pass while proving nothing. So every suite that feeds a
+ * bundle straight to a tester has to project first, and doing it once at the
+ * `loadCircuit` call is the only place that cannot be forgotten at one call site
+ * out of thirty.
+ *
+ * `circuitSignals` is an explicit pick, so this drops exactly the binding fields
+ * and nothing else: a signal added to the circuit and forgotten there arrives as
+ * "Not all inputs have been set" rather than being silently defaulted.
+ */
+export function projectingTester(c: CircuitTester): CircuitTester {
+    return {
+        calculateWitness: (input: CircuitInput, sanityCheck?: boolean) =>
+            c.calculateWitness(
+                circuitSignals(input as unknown as TransactWitnessBundle) as unknown as CircuitInput,
+                sanityCheck,
+            ),
+        checkConstraints: w => c.checkConstraints(w),
+        assertOut: (w, e) => c.assertOut(w, e),
+    };
+}
+
 /** Re-exported so suites import their transact vocabulary from one module. */
+import { buildJubjub } from "./harness";
 export { dummyInputAt, dummyOutput };
 
 export async function buildTxBuilder(depth: number): Promise<TxBuilder> {
-    const [P, J] = await Promise.all([Poseidon.build(), Jubjub.build()]);
+    const [P, J] = await Promise.all([Poseidon.build(), buildJubjub()]);
     return new TxBuilder(P, J, depth);
 }

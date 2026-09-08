@@ -27,13 +27,17 @@ describe("transact_4x6 / value balance", function () {
         }));
     });
 
-    it("deposit: 2 dummy inputs, 1 real output, public_in > 0", async () => {
+    it("deposit: one real input carried through, public_in > 0", async () => {
+        // Was an all-dummy witness. The circuit now requires at least one real
+        // input slot — with every slot dummy the Merkle check is skipped for all
+        // of them and `merkle_root` becomes a free PolyEval coefficient — so the
+        // deposit carries a real note through instead of spending nothing.
         const { tx, circuit } = ctx;
-        const { root, inputs } = tx.allDummyInputs();
+        const { root, inputs } = tx.oneRealOneDummy(1n, ALICE_NSK);
         await expectAccepts(circuit, tx.build({
             publicIn: 1000n,
             inputs,
-            outputs: [tx.note(1000n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
+            outputs: [tx.note(1001n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
             merkleRoot: root,
         }));
     });
@@ -60,15 +64,29 @@ describe("transact_4x6 / value balance", function () {
         }));
     });
 
-    it("all-dummy zero tx is accepted", async () => {
+    it("FAILS on an all-dummy transaction", async () => {
+        // Every slot dummy means every Merkle check is skipped, and then nothing
+        // in the circuit reads `merkle_root` — it becomes a PolyEval coefficient
+        // no constraint pins. Since `PolyEval` is affine in each coefficient and
+        // the prover reads `z` before choosing a witness, one free coefficient is
+        // one linear equation in one unknown: solve it and the contract's `y` is
+        // matched by a proof of an unrelated transaction.
+        //
+        // Nothing legitimate is lost. `MASP.withdraw` and `MASP.transfer` both
+        // require `publicIn == 0` and shielding goes through the deposit escrow,
+        // so an all-dummy transact could only ever have been a no-op.
         const { tx, circuit } = ctx;
         const { root, inputs } = tx.allDummyInputs();
-        await expectAccepts(circuit, tx.build({
-            publicAssetId: 0n,
-            inputs,
-            outputs: [dummyOutput(tx.P, 0), dummyOutput(tx.P, 1)],
-            merkleRoot: root,
-        }));
+        await expectWitnessFails(
+            circuit,
+            tx.build({
+                publicAssetId: 0n,
+                inputs,
+                outputs: [dummyOutput(tx.P, 0), dummyOutput(tx.P, 1)],
+                merkleRoot: root,
+            }),
+            "an all-dummy transaction leaves merkle_root unpinned and must be rejected",
+        );
     });
 
     it("FAILS on unbalanced values", async () => {

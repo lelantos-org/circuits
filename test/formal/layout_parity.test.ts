@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { keccak_256 } from "@noble/hashes/sha3";
-
-import { flatten } from "../helpers";
+import { coeffs as refCoeffs, flatten } from "../helpers";
 import { N_IN, N_OUT } from "../lib/constants";
+import { sentinels } from "../lib/sentinels";
+import { layoutDigest } from "../../scripts/vectors/common";
 
 // Public-input layout parity between the Lean model and `ref/compress.ts`.
 //
@@ -41,7 +41,14 @@ const LAYOUT_FILE = resolve(ROOT, "lean/expected/layout-4x6.txt");
 // Every shape that ships both a Lean layout dump and a published vector.
 const SHIPPED_SHAPES = ["4x6"] as const;
 
-const COEFF_COUNT = 9 + 3 * N_IN + 8 * N_OUT;
+// The polynomial's slots, which is what the Lean model lays out.
+const COEFF_COUNT = 4 + 3 * N_IN + 5 * N_OUT;
+
+// The challenge preimage: a superset, adding the four address words, the clue
+// triples and the aux digest. Those are logical public inputs bound through `z`
+// rather than through `y`, so they are outside the Lean layout by construction —
+// see `TRANSACT_COEFFS` in PubInputs.sol and `coeffs` in ref/compress.ts.
+const CHALLENGE_WORDS = 9 + 3 * N_IN + 8 * N_OUT;
 
 // Distinct sentinel per logical field, so any transposition shows up as a
 // mismatch rather than coincidentally agreeing.
@@ -50,50 +57,53 @@ const COEFF_COUNT = 9 + 3 * N_IN + 8 * N_OUT;
 // independence the test needs is in `SENTINEL_INPUT` below, which assigns each
 // sentinel to a field by name: that assignment is the transcription under test,
 // and `flatten` has to reproduce Lean's order from it.
-const SENTINEL: Record<string, bigint> = Object.fromEntries(
-    readLayout(LAYOUT_FILE).map((name, i) => [name, BigInt(1000 + i)]),
+const S = sentinels(readLayout(LAYOUT_FILE), 1000, "layout_parity");
+
+/**
+ * Sentinels for the fields that are hashed but never evaluated.
+ *
+ * Separate from `S.map` because that one is derived from the Lean layout,
+ * and these are exactly the names the Lean layout must NOT contain. Written out
+ * rather than generated, so adding one back to the coefficient vector by mistake
+ * fails the superset case below instead of silently regenerating.
+ */
+const CHALLENGE_ONLY = sentinels(
+    [
+        "recipient",
+        "chainId",
+        "payer",
+        "relayer",
+        "auxDigest",
+        ...["clueRx", "clueRy", "clueBits"].flatMap((f) =>
+            Array.from({ length: N_OUT }, (_, i) => `${f} ${i}`),
+        ),
+    ],
+    // A second family in one test, which is what `base` is for: these must not
+    // collide with the coefficient sentinels, or a word moving between the two
+    // vectors would go unnoticed.
+    9000,
+    "layout_parity challenge-only",
 );
 
-const S = SENTINEL;
-
-/** `S[name]`, failing loudly rather than yielding `undefined` on a typo. */
-function sentinel(name: string): bigint {
-    const v = S[name];
-    if (v === undefined) throw new Error(`layout_parity: no sentinel for slot "${name}"`);
-    return v;
-}
-
-/** `[S["<field>X i"], S["<field>Y i"]]` for each of `n` slots. */
-function points(field: string, n: number): bigint[][] {
-    return Array.from({ length: n }, (_, i) => [
-        sentinel(`${field}X ${i}`),
-        sentinel(`${field}Y ${i}`),
-    ]);
-}
-
-/** `[S["<field> 0"], …, S["<field> n-1"]]`. */
-function scalars(field: string, n: number): bigint[] {
-    return Array.from({ length: n }, (_, i) => sentinel(`${field} ${i}`));
-}
-
 const SENTINEL_INPUT = {
-    merkle_root: sentinel("merkleRoot"),
-    nullifier: scalars("nullifier", N_IN),
-    out_cm: scalars("outCm", N_OUT),
-    public_asset_id: sentinel("publicAssetId"),
-    public_in: sentinel("publicIn"),
-    public_out: sentinel("publicOut"),
-    in_cv: points("inCv", N_IN),
-    out_cv: points("outCv", N_OUT),
-    recipient_address: sentinel("recipient"),
-    chain_id: sentinel("chainId"),
-    payer_address: sentinel("payer"),
-    relayer_address: sentinel("relayer"),
-    out_cv_dep: points("outCvDep", N_OUT),
-    out_clue_Rx: scalars("clueRx", N_OUT),
-    out_clue_Ry: scalars("clueRy", N_OUT),
-    out_clue_bits: scalars("clueBits", N_OUT),
-    out_aux_digest: sentinel("auxDigest"),
+    merkle_root: S.at("merkleRoot"),
+    nullifier: S.scalars("nullifier", N_IN),
+    out_cm: S.scalars("outCm", N_OUT),
+    public_asset_id: S.at("publicAssetId"),
+    public_in: S.at("publicIn"),
+    public_out: S.at("publicOut"),
+    in_cv: S.points("inCv", N_IN),
+    out_cv: S.points("outCv", N_OUT),
+    out_cv_dep: S.points("outCvDep", N_OUT),
+    // Hashed, never evaluated — hence sentinels from the other map.
+    recipient_address: CHALLENGE_ONLY.at("recipient"),
+    chain_id: CHALLENGE_ONLY.at("chainId"),
+    payer_address: CHALLENGE_ONLY.at("payer"),
+    relayer_address: CHALLENGE_ONLY.at("relayer"),
+    out_clue_Rx: CHALLENGE_ONLY.scalars("clueRx", N_OUT),
+    out_clue_Ry: CHALLENGE_ONLY.scalars("clueRy", N_OUT),
+    out_clue_bits: CHALLENGE_ONLY.scalars("clueBits", N_OUT),
+    out_aux_digest: CHALLENGE_ONLY.at("auxDigest"),
 };
 
 function readLayout(file: string): string[] {
@@ -114,15 +124,40 @@ describe("formal model / public-input layout parity", () => {
         expect(new Set(layout).size).to.equal(COEFF_COUNT, "layout slot names must be distinct");
     });
 
-    it("every Lean slot name has a sentinel (the test covers the whole layout)", () => {
-        for (const name of leanLayout()) {
-            expect(SENTINEL, `no sentinel for Lean slot "${name}"`).to.have.property(name);
+    it("the challenge preimage is a strict superset of the coefficients", () => {
+        // The unconstrained fields must be hashed and not evaluated. Both halves
+        // matter: dropping them from the preimage would leave a relayer free to
+        // rewrite the recipient, and adding them back to the coefficients would
+        // restore the free variables that made `y` forgeable.
+        const c = refCoeffs(SENTINEL_INPUT);
+        const pre = flatten(SENTINEL_INPUT);
+        expect(c.length).to.equal(COEFF_COUNT);
+        expect(pre.length).to.equal(CHALLENGE_WORDS);
+
+        const inCoeffs = new Set(c);
+        for (const [name, v] of Object.entries(CHALLENGE_ONLY.map)) {
+            expect(inCoeffs.has(v), `${name} must not be a coefficient`).to.equal(false);
+            expect(pre, `${name} must be a challenge word`).to.include(v);
+        }
+        for (const name of Object.keys(CHALLENGE_ONLY.map)) {
+            expect(S.map, `"${name}" must not appear in the Lean layout`).to.not.have.property(
+                name,
+            );
+        }
+        for (const v of c) {
+            expect(pre, "every coefficient must also be hashed into the challenge").to.include(v);
         }
     });
 
-    it("ref/compress.ts flattens into exactly the order the Lean model claims", () => {
+    it("every Lean slot name has a sentinel (the test covers the whole layout)", () => {
+        for (const name of leanLayout()) {
+            expect(S.map, `no sentinel for Lean slot "${name}"`).to.have.property(name);
+        }
+    });
+
+    it("ref/compress.ts orders coefficients exactly as the Lean model claims", () => {
         const layout = leanLayout();
-        const coeffs = flatten(SENTINEL_INPUT);
+        const coeffs = refCoeffs(SENTINEL_INPUT);
 
         expect(coeffs.length).to.equal(
             layout.length,
@@ -131,8 +166,8 @@ describe("formal model / public-input layout parity", () => {
 
         layout.forEach((name, k) => {
             expect(coeffs[k]).to.equal(
-                SENTINEL[name],
-                `slot ${k}: Lean says "${name}" (${SENTINEL[name]}) but ref/flatten put ${coeffs[k]}`,
+                S.map[name],
+                `slot ${k}: Lean says "${name}" (${S.map[name]}) but ref/coeffs put ${coeffs[k]}`,
             );
         });
     });
@@ -153,17 +188,18 @@ describe("formal model / public-input layout parity", () => {
             );
             expect(vector.circuit.coeffCount).to.equal(layout.length);
             expect(vector.circuit.coeffCount).to.equal(
+                4 + 3 * vector.circuit.shape.nIn + 5 * vector.circuit.shape.nOut,
+                "coefficient count must equal 4 + 3·N_IN + 5·N_OUT",
+            );
+            expect(vector.circuit.challengeWords).to.equal(
                 9 + 3 * vector.circuit.shape.nIn + 8 * vector.circuit.shape.nOut,
-                "coefficient count must equal 9 + 3·N_IN + 8·N_OUT",
+                "challenge preimage must equal 9 + 3·N_IN + 8·N_OUT",
             );
 
-            const digest =
-                "0x" +
-                Buffer.from(keccak_256(new TextEncoder().encode(layout.join("\n")))).toString(
-                    "hex",
-                );
+            // Computed with the generator's own function: what this pins is the
+            // layout LIST, not the digest algorithm.
             expect(vector.circuit.layoutDigest).to.equal(
-                digest,
+                layoutDigest(layout),
                 "layoutDigest does not match the Lean slot names it claims to digest",
             );
         });

@@ -86,7 +86,22 @@ jobs:
 
       # Doc comments cite the circom lines they mirror. The citations are
       # hand-maintained, so this resolves every one of them against the file it
-      # names — catching a renamed or deleted source, or a citation past the end
-      # of a file, which is how they rot.
+      # names — catching a renamed or deleted source, a citation past the end of
+      # a file, and a span that has drifted away from what the comment quotes,
+      # which is the way they actually rot.
       - name: Source citations resolve
         run: python3 scripts/check-citations.py
+
+      # The other direction over the same scan: whether the citations, taken
+      # together, reach every `===` and `<==` the circom emits. A constraint no
+      # citation names is one the model may simply not have. The residue —
+      # `frontier_root`, `fixed_base_mul`, `EmptySubtreeHashes` — is pinned in
+      # `expected/coverage.txt` and diffed, the way the trusted base is.
+      - name: Constraint coverage unchanged
+        run: python3 scripts/check-coverage.py
+
+      # The other half: the `Lelantos` declarations the prose names. A renamed
+      # theorem, or one described in a module note but never written, is
+      # invisible to the compiler — comments hold no identifiers it resolves.
+      - name: Names the prose claims resolve
+        run: python3 scripts/check-names.py

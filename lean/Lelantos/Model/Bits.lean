@@ -83,6 +83,74 @@ theorem cast_bitsNat {n : ℕ} {bs : ℕ → F} (h : ∀ i, i < n → IsBit (bs 
     push_cast
     rw [cast_bitNat (h m (Nat.lt_succ_self m))]
 
+/-! ## Reading a bit back out
+
+`bitsNat` sends a bit vector to the natural it denotes. `bitNat_eq_digit` is the inverse
+direction: the decomposition is unique, so bit `i` of that natural is the bit the assignment
+supplied. Nothing downstream can read an individual bit without it — `num2Bits_sound` pins
+only the *sum*, and a statement about one bit (or, in `Gadgets.Insert`, about one quaternary
+digit) needs the bits back.
+-/
+
+/-- Splitting a decomposition at position `i`: the low `i` bits, plus the rest shifted. -/
+theorem bitsNat_add (bs : ℕ → F) (i m : ℕ) :
+    bitsNat bs (i + m) = bitsNat bs i + 2 ^ i * bitsNat (fun j => bs (i + j)) m := by
+  induction m with
+  | zero => simp [bitsNat]
+  | succ t ih =>
+    have hidx : i + (t + 1) = (i + t) + 1 := by omega
+    rw [hidx, bitsNat, Finset.sum_range_succ, ← bitsNat, ih]
+    simp only [bitsNat, Finset.sum_range_succ]
+    rw [pow_add]
+    ring
+
+/-- **The decomposition is unique.** Bit `i` of the natural the bits denote is the bit at
+index `i`, so `num2Bits_sound` pins every bit individually and not merely their sum. -/
+theorem bitNat_eq_digit {bs : ℕ → F} {n i : ℕ} (hi : i < n) :
+    bitsNat bs n / 2 ^ i % 2 = bitNat (bs i) := by
+  obtain ⟨m, rfl⟩ : ∃ m, n = i + (m + 1) := ⟨n - i - 1, by omega⟩
+  -- Peel the low `i` bits, then the bit at `i` itself, leaving an even remainder.
+  have hhigh : bitsNat (fun j => bs (i + j)) (m + 1)
+      = bitNat (bs i) + 2 * bitsNat (fun j => bs (i + 1 + j)) m := by
+    have h1 : (1 : ℕ) + m = m + 1 := by omega
+    have := bitsNat_add (fun j => bs (i + j)) 1 m
+    rw [h1] at this
+    simp only [bitsNat, Finset.sum_range_one, pow_zero, mul_one, pow_one] at this ⊢
+    rw [this]
+    simp only [Nat.add_zero]
+    congr 2
+    · exact Finset.sum_congr rfl fun j _ => by rw [show i + (1 + j) = i + 1 + j by omega]
+  have hlow : bitsNat bs i < 2 ^ i := bitsNat_lt bs i
+  have hpos : 0 < 2 ^ i := by positivity
+  rw [bitsNat_add, hhigh, Nat.add_mul_div_left _ _ hpos, Nat.div_eq_of_lt hlow,
+    Nat.zero_add, Nat.add_mul_mod_self_left]
+  exact Nat.mod_eq_of_lt (lt_of_le_of_lt (bitNat_le_one _) (by norm_num))
+
+/-! ## Quaternary digits
+
+The quaternary tree reads its path one *digit* at a time, and the circuits produce that
+digit by pairing two bits of a `Num2Bits` output — `idx_dig[k][d] <== out[2d] + 2·out[2d+1]`
+(`src/tree_update_batch.circom:336`), the same shape as `src/lib/common.circom:21`. -/
+
+/-- Digit `d` of `m` in base 4. -/
+def quatDigit (m d : ℕ) : ℕ := m / 4 ^ d % 4
+
+theorem quatDigit_lt (m d : ℕ) : quatDigit m d < 4 := Nat.mod_lt _ (by norm_num)
+
+/-- **The paired bits are the quaternary digit.** With `bitNat_eq_digit` this is what turns
+a `Num2Bits(2·depth)` decomposition of an index into the digit vector the insert consumes.
+-/
+theorem quatDigit_eq_bits {bs : ℕ → F} {n d : ℕ} (h : 2 * d + 1 < n) :
+    quatDigit (bitsNat bs n) d = bitNat (bs (2 * d)) + 2 * bitNat (bs (2 * d + 1)) := by
+  have h0 := bitNat_eq_digit (bs := bs) (n := n) (i := 2 * d) (by omega)
+  have h1 := bitNat_eq_digit (bs := bs) (n := n) (i := 2 * d + 1) (by omega)
+  have hpow : (4 : ℕ) ^ d = 2 ^ (2 * d) := by
+    rw [show (4 : ℕ) = 2 ^ 2 by norm_num, ← pow_mul, Nat.mul_comm]
+  have hdiv : bitsNat bs n / 2 ^ (2 * d + 1) = bitsNat bs n / 2 ^ (2 * d) / 2 := by
+    rw [pow_succ, Nat.div_div_eq_div_mul]
+  rw [quatDigit, hpow, ← h0, ← h1, hdiv]
+  omega
+
 /-! ## The constraint system -/
 
 /-- The constraint system of `Num2Bits(n)` — `circomlib/circuits/bitify.circom:24-39`. -/

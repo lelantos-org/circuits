@@ -80,8 +80,22 @@ export function sharedConstants(P: Poseidon, J: Jubjub) {
 
 /** The Fiat-Shamir pair plus the coefficients it was derived from. */
 export interface Compression {
+    /**
+     * The Fiat-Shamir preimage: every logical public input, in calldata order.
+     * `z = keccak256(abiEncodedChallenge) mod r`.
+     *
+     * A superset of `coeffs`. The four address words, the FMD clue triples and
+     * the payload digest are hashed and never evaluated — the circuit constrains
+     * none of them, and an unevaluated word binds with no constraint at all
+     * because moving it moves `z`, hence `y`.
+     */
+    challenge: string[];
+    abiEncodedChallenge: string;
+    /**
+     * The polynomial's coefficients: exactly the slots the circuit pins.
+     * `y = Σ coeffs[k]·z^k`.
+     */
     coeffs: string[];
-    abiEncodedCoeffs: string;
     zDerivation: "fiat-shamir";
     z: string;
     y: string;

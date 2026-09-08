@@ -15,24 +15,31 @@ include "lib/transact.circom";
 // DEPTH-level Merkle path with its key derivation and nullifier, roughly 16.8k
 // constraints against an output slot's 4.9k.
 //
-// PolyEval coefficient slots. Must match the PubInputs.sol :: compress overload
-// for this shape:
-//     [ 0]      merkle_root
-//     [ 1.. 4]  nullifier[0..3]
-//     [ 5..10]  out_cm[0..5]
-//     [11]      public_asset_id
-//     [12]      public_in
-//     [13]      public_out
-//     [14..21]  in_cv[0..3][0..1]
-//     [22..33]  out_cv[0..5][0..1]
-//     [34]      recipient_address
-//     [35]      chain_id
-//     [36]      payer_address
-//     [37]      relayer_address
-//     [38..49]  out_cv_dep[0..5][0..1]
-//     [50..67]  (clue_Rx, clue_Ry, clue_bits) per output
-//     [68]      out_aux_digest           (contract recomputes; never read from calldata)
-// Total = 9 + 3*N_IN + 8*N_OUT = 69.
+// The challenge preimage PubInputs.sol :: compress hashes into z. Must match
+// that overload word for word:
+//     [ 0]      merkle_root                  coefficient
+//     [ 1.. 4]  nullifier[0..3]              coefficient
+//     [ 5..10]  out_cm[0..5]                 coefficient
+//     [11]      public_asset_id              coefficient
+//     [12]      public_in                    coefficient
+//     [13]      public_out                   coefficient
+//     [14..21]  in_cv[0..3][0..1]            coefficient
+//     [22..33]  out_cv[0..5][0..1]           coefficient
+//     [34]      recipient_address            challenge only
+//     [35]      chain_id                     challenge only
+//     [36]      payer_address                challenge only
+//     [37]      relayer_address              challenge only
+//     [38..49]  out_cv_dep[0..5][0..1]       coefficient
+//     [50..67]  (clue_Rx, clue_Ry, clue_bits) per output   challenge only
+//     [68]      out_aux_digest               challenge only (contract recomputes)
+// Total = 9 + 3*N_IN + 8*N_OUT = 69 words hashed.
+//
+// PolyEval evaluates the 46 marked "coefficient" — words [0..33] and [38..49],
+// two contiguous runs — in that order. Total = 4 + 3*N_IN + 5*N_OUT.
+//
+// The 23 marked "challenge only" are not signals of this circuit and carry no
+// constraint here. Hashing them into z binds them to the proof without one.
+// See src/README.md § 2a.
 //
 // The struct's calldata prefix is 50 words (1 + 4 + 6 + 3 + 8 + 12 + 4 + 12).
 // PubInputs.compress re-masks the uint64 and address words at offsets hardcoded

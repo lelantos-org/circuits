@@ -7,7 +7,7 @@
 //   FUZZ=light|medium|heavy            global run count (5 / 20 / 100)
 //   FUZZ_RUNS_<SUITE>=N                per-suite override, takes precedence
 //     SUITE keys: FIXEDBASE, FRONTIER, MERKLE, POLYEVAL, TRANSACT,
-//                 TRANSACT_OVERFLOW, TRANSACT_VARIANTS
+//                 TRANSACT_OVERFLOW, TRANSACT_VARIANTS, UNDERCONSTRAINED
 //   FUZZ_SEED=N                        pin the fast-check seed (see below)
 //   FUZZ_PATH=a:b:c                    replay one shrunk counterexample
 
@@ -147,6 +147,13 @@ const SUITE_SCALE: Record<string, number> = {
     TRANSACT_VARIANTS: 0.5,
     // Overflow path runs SDK + circuit per trial; cap tighter.
     TRANSACT_OVERFLOW: 0.25,
+    // Each trial builds a witness and then sweeps all ~100k of its entries,
+    // re-checking the full system once per finding.
+    UNDERCONSTRAINED: 0.25,
+    // Same search over the larger batch R1CS, ~8.5s per trial. An unlisted
+    // suite falls through to scale 1, which put this one at four times its
+    // sibling's trial count.
+    UNDERCONSTRAINED_BATCH: 0.25,
 };
 
 function runsFor(suite: string): number {

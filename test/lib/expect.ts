@@ -39,6 +39,36 @@ const SHAPE_ERROR =
 
 const CONSTRAINT_ERROR = /Assert Failed/;
 
+/**
+ * Decide what a witness-calculator failure means, or throw saying it proves
+ * nothing.
+ *
+ * Returns normally only for the one class that is evidence about the circuit: a
+ * constraint fired. The other two are test bugs, and reporting them as passes is
+ * how a rejection suite goes green while checking nothing.
+ *
+ * `context` is prepended to the diagnostic, so each caller names what it was
+ * asserting.
+ */
+function requireConstraintFailure(text: string, context: string): void {
+    if (SHAPE_ERROR.test(text)) {
+        throw new Error(
+            `${context}\n` +
+                "  ...but the witness calculator rejected the INPUT OBJECT, not a constraint. " +
+                "A signal is misnamed, missing, or has the wrong arity — note that an unknown " +
+                "key reports as \"Too many values\". Fix the test input; this proves nothing " +
+                `about the circuit.\n  ${text.trim()}`,
+        );
+    }
+    if (!CONSTRAINT_ERROR.test(text)) {
+        throw new Error(
+            `${context}\n` +
+                "  ...but the failure is neither a constraint assert nor a known input-shape " +
+                `error, so it cannot be attributed to the circuit.\n  ${text.trim()}`,
+        );
+    }
+}
+
 /** `Error in template Foo_12 line: 34` -> `Foo`, for every frame, outermost last. */
 function failingTemplates(message: string): string[] {
     return [...message.matchAll(/Error in template (\w+?)_\d+ line/g)].map(m => m[1]);
@@ -84,24 +114,7 @@ export async function expectWitnessFails(
     if (err === undefined) throw new Error(message);
 
     const text = err instanceof Error ? err.message : String(err);
-
-    if (SHAPE_ERROR.test(text)) {
-        throw new Error(
-            `${message}\n` +
-                "  ...but the witness calculator rejected the INPUT OBJECT, not a constraint. " +
-                "A signal is misnamed, missing, or has the wrong arity — note that an unknown " +
-                "key reports as \"Too many values\". Fix the test input; this proves nothing " +
-                `about the circuit.\n  ${text.trim()}`,
-        );
-    }
-
-    if (!CONSTRAINT_ERROR.test(text)) {
-        throw new Error(
-            `${message}\n` +
-                "  ...but the failure is neither a constraint assert nor a known input-shape " +
-                `error, so it cannot be attributed to the circuit.\n  ${text.trim()}`,
-        );
-    }
+    requireConstraintFailure(text, message);
 
     if (opts.template !== undefined) {
         const frames = failingTemplates(text);
@@ -160,4 +173,88 @@ export async function witnessMatchesRoot(
     } catch {
         return false;
     }
+}
+
+/**
+ * Assert that a witness diverging from the calldata it is proved against cannot
+ * be forged into a passing proof.
+ *
+ * This is the soundness shape the rest of this file cannot express. Every other
+ * batch assertion derives `(y, z)` from the same object it feeds the circuit, so
+ * the witness and the calldata are the same thing by construction. A real
+ * prover authors them separately: `z` arrives from the contract's hash over
+ * calldata, and nothing forces the witness to agree with it. The gap between the
+ * two is where an unpinned coefficient lives.
+ *
+ * `input.z` must already be the CALLDATA challenge and `calldataY` the value the
+ * contract will compare against — see `lib/batch.ts :: bindFiatShamir`.
+ *
+ * The circuit is sound on this field if EITHER:
+ *   - a constraint rejects the divergent witness, or
+ *   - it is admitted but yields `y != calldataY`, so the on-chain equality
+ *     fails.
+ *
+ * It is BROKEN if the witness is admitted and `y == calldataY`: the contract
+ * validated one set of values and the proof attests to another. That is a
+ * forgery, and it is what this assertion exists to name.
+ */
+export async function expectNotForgeable(
+    circuit: CircuitTester,
+    input: CircuitInput,
+    calldataY: Field,
+    field: string,
+): Promise<void> {
+    let witness: bigint[] | undefined;
+    let err: unknown;
+    try {
+        witness = await circuit.calculateWitness(input, true);
+        await circuit.checkConstraints(witness);
+    } catch (e) {
+        err = e;
+    }
+
+    if (err !== undefined) {
+        const text = err instanceof Error ? err.message : String(err);
+        requireConstraintFailure(
+            text,
+            `divergent witness on ${field} was expected to be rejected by a constraint`,
+        );
+        // A constraint fired: the divergence is pinned in-circuit.
+        return;
+    }
+
+    const y = readOutput(witness!);
+    if (y === calldataY) {
+        throw new Error(
+            `FORGERY: ${field} diverges from the calldata word it is proved against, yet the ` +
+                "circuit admitted the witness AND emitted the calldata's own y " +
+                `(${calldataY.toString()}).\n` +
+                "  The contract will therefore accept a proof attesting to values it never " +
+                "validated. This field is neither a PolyEval coefficient nor pinned by any " +
+                "constraint that reaches one — hashing it into z binds nothing, because the " +
+                "prover reads z before choosing the witness.\n" +
+                "  See src/README.md § 2a and BatchCompress in src/lib/poly_eval.circom.",
+        );
+    }
+}
+
+/**
+ * Assert that a witness view and a calldata view describe different statements.
+ *
+ * The guard a divergence case needs before it asserts anything. It exists
+ * because a mutation run showed all 49 batch cases surviving a SHALLOW
+ * `calldataView`: the snapshot then shares the witness's arrays, the mutation
+ * moves both, and every case compares a view against itself and passes.
+ *
+ * Both arguments are challenge preimages — `treeUpdateBatchChallenge` for the
+ * batch, `flatten` for transact — so the comparison covers exactly the words the
+ * contract hashes.
+ */
+export function assertViewsDiverge(witness: Field[], calldata: Field[], field: string): void {
+    expect(witness.join(","), `${field}: the witness and calldata views are identical, so ` +
+        "this case proves nothing about the circuit. Either `calldataView` is not returning a " +
+        "deep copy, or this case's `diverge` writes a value the honest base already holds — " +
+        "several cases assign a constant rather than bumping, so a change to the base can " +
+        "silently make one a no-op.")
+        .to.not.equal(calldata.join(","));
 }

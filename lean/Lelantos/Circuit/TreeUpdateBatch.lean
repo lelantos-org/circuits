@@ -33,7 +33,7 @@ On the chain side:
   below `actual_count` is a genuine `InsertsTo` of that leaf over the running frontier, and
   `new_root` is the running root at index `actual_count`. Neither half alone is the wanted
   statement — see the theorem's own note. This is the formal content of "odd counts work",
-  and `batch_advances_by_count_deployed` pins it at `TreeUpdateBatch(10, 4)`.
+  and `batch_advances_by_count_deployed` pins it at `TreeUpdateBatch(11, 8)`.
 
 `InsertsTo` (`Gadgets/Insert.lean`) is the abstract meaning of an append. It is an
 existential over the hash chain, but `InsertsTo.unique` shows the chain is determined by
@@ -50,7 +50,7 @@ and one on the deposit side:
 
 ## Not covered
 
-* **`FrontierRoot`** (`src/lib/frontier_root.circom`, step 8) is not modelled, so
+* **`FrontierRoot`** (`src/lib/frontier_root.circom`, step 8; `:290-299`) is not modelled, so
   `old_root === frontier_root.root` appears nowhere below. The chain results take the
   frontier as given; they say what the circuit *does with* `frontier_in`, not that
   `frontier_in` is the honest frontier for `old_root`. That binding is what stops a relayer
@@ -60,7 +60,7 @@ and one on the deposit side:
   `batch_deposit_opens` gets its point structure from the value-commitment gadget instead.
 * **`BatchCompress`** (step 11) is not re-proved here; `polyEval_sound` and
   `polyEval_binding` already cover the Horner chain, and the slot *order* is pinned by
-  `test/tree_update_batch.test.ts` against `PubInputs.sol`, not in Lean.
+  `test/formal/batch_layout_parity.test.ts`, not in Lean.
 * Nothing here is a statement about `start_index` being the true tree size; that is the
   contract's obligation (`MASP._validateBatchHeader`).
 -/
@@ -70,7 +70,7 @@ namespace Lelantos
 /-- Every signal of one `TreeUpdateBatch(depth, maxL)` instance. Array signals are total
 functions, read only below their declared length, per the convention in `Model.Bits`. -/
 structure BatchSignals (depth maxL : ℕ) where
-  -- Logical public inputs (`:101-109`).
+  -- Logical public inputs (`:113-121`).
   oldRoot : F
   newRoot : F
   startIndex : F
@@ -80,16 +80,16 @@ structure BatchSignals (depth maxL : ℕ) where
   leafAsset : ℕ → F
   leafPublicIn : ℕ → F
   isDeposit : ℕ → F
-  -- Private inputs (`:112-113`).
+  -- Private inputs (`:124-125`).
   frontierIn : ℕ → ℕ → F
   rcv : ℕ → F
-  -- Activity (`:121-138`).
+  -- Activity (`:138-148`).
   cntBits : ℕ → F
   ltBits : ℕ → ℕ → F
   active : ℕ → F
-  -- Leaf hashes (`:162-174`).
+  -- Leaf hashes (`:173-183`).
   leaves : ℕ → F
-  -- Deposit binding (`:188-229`).
+  -- Deposit binding (`:199-236`).
   activeDep : ℕ → F
   gen : ℕ → Pt
   pubInBits : ℕ → ℕ → F
@@ -99,11 +99,15 @@ structure BatchSignals (depth maxL : ℕ) where
   expected : ℕ → Pt
   assetInv : ℕ → F
   assetIsZero : ℕ → F
-  -- Insert indices (`:280-287`).
+  pubInInv : ℕ → F
+  pubInIsZero : ℕ → F
+  -- `start_index`'s own decomposition (`:287-288`).
+  startIdxBits : ℕ → F
+  -- Insert indices (`:331-336`).
   idxIn : ℕ → F
   idxBits : ℕ → ℕ → F
   idxDig : ℕ → ℕ → F
-  -- Per-leaf insert instances (`:290-296`).
+  -- Per-leaf insert instances (`:340-347`).
   zeros : ℕ → F
   insB : ℕ → ℕ → ℕ → F
   insS : ℕ → ℕ → ℕ → F
@@ -111,7 +115,7 @@ structure BatchSignals (depth maxL : ℕ) where
   insCur : ℕ → ℕ → F
   insFrOut : ℕ → ℕ → ℕ → F
   insRoot : ℕ → F
-  -- Running state and its mux (`:258-311`).
+  -- Running state and its mux (`:310-360`).
   fr : ℕ → ℕ → ℕ → F
   runningRoot : ℕ → F
 
@@ -119,33 +123,40 @@ structure BatchSignals (depth maxL : ℕ) where
 Line numbers refer to `src/tree_update_batch.circom`. -/
 structure BatchChainSat {depth maxL : ℕ} (countBits : ℕ)
     (w : BatchSignals depth maxL) : Prop where
-  /-- `:128-129` — `Num2Bits(COUNT_BITS)` on `actual_count - 1`. -/
+  /-- `:138-139` — `Num2Bits(COUNT_BITS)` on `actual_count - 1`. -/
   count_bits : Num2BitsSat countBits (w.actualCount - 1) w.cntBits
-  /-- `:134-138` — `active[k] = LessThan(COUNT_BITS+1)(k, actual_count)`. -/
+  /-- `:145-148` — `active[k] = LessThan(COUNT_BITS+1)(k, actual_count)`. -/
   active_def : ∀ k, k < maxL →
     LessThanSat (countBits + 1) ((k : ℕ) : F) w.actualCount (w.ltBits k) (w.active k)
-  /-- `:144` — inactive `cms` are zero. -/
+  /-- `:154` — inactive `cms` are zero. -/
   pad_cm : ∀ k, k < maxL → (1 - w.active k) * w.cms k = 0
-  /-- `:145-146` — inactive `cv_dep` coordinates are zero. -/
+  /-- `:155-156` — inactive `cv_dep` coordinates are zero. -/
   pad_cv_x : ∀ k, k < maxL → (1 - w.active k) * (w.cvDep k).x = 0
   pad_cv_y : ∀ k, k < maxL → (1 - w.active k) * (w.cvDep k).y = 0
-  /-- `:147-149` — inactive deposit fields are zero. -/
+  /-- `:157-159` — inactive deposit fields are zero. -/
   pad_asset : ∀ k, k < maxL → (1 - w.active k) * w.leafAsset k = 0
   pad_public_in : ∀ k, k < maxL → (1 - w.active k) * w.leafPublicIn k = 0
   pad_is_deposit : ∀ k, k < maxL → (1 - w.active k) * w.isDeposit k = 0
-  /-- `:150` — inactive blinders are zero. -/
+  /-- `:160` — inactive blinders are zero. -/
   pad_rcv : ∀ k, k < maxL → (1 - w.active k) * w.rcv k = 0
-  /-- `:157` — `is_deposit` is boolean. -/
+  /-- `:167` — `is_deposit` is boolean. -/
   deposit_bit : ∀ k, k < maxL → IsBit (w.isDeposit k)
-  /-- `:158-159` — spend leaves carry no deposit fields. -/
+  /-- `:168-169` — spend leaves carry no deposit fields. -/
   spend_zero_asset : ∀ k, k < maxL → (1 - w.isDeposit k) * w.leafAsset k = 0
   spend_zero_public_in : ∀ k, k < maxL → (1 - w.isDeposit k) * w.leafPublicIn k = 0
-  /-- `:170-174` — `leaf_k = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)`. -/
+  /-- `:176-183` — `leaf_k = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)`. -/
   leaf_def : ∀ k, k < maxL → w.leaves k = leafHash (w.cms k) (w.cvDep k).x (w.cvDep k).y
-  /-- `:282` — the insertion index, gated on `active[k]`. -/
+  /-- `:287-288` — `Num2Bits(2·DEPTH)(start_index)`.
+
+  Modelled even though the `FrontierRoot` instance it feeds is not: on its own it says
+  `start_index < 4^depth`, which is what makes `active[k] · (start_index + k)` a
+  *position* rather than a field element that happens to decompose. Without it
+  `batch_active_index` cannot rule out `start_index` wrapping the modulus. -/
+  start_index_bits : Num2BitsSat (2 * depth) w.startIndex w.startIdxBits
+  /-- `:331` — the insertion index, gated on `active[k]`. -/
   idx_in_def : ∀ k, k < maxL →
     w.idxIn k = w.active k * (w.startIndex + ((k : ℕ) : F))
-  /-- `:284` — that gated index, range-checked to `2·depth` bits.
+  /-- `:333` — that gated index, range-checked to `2·depth` bits.
 
   The gate is load-bearing for fidelity, not a convenience: the circuit decomposes
   `active[k] · (start_index + k)`, so a model demanding the decomposition of
@@ -153,51 +164,66 @@ structure BatchChainSat {depth maxL : ℕ} (countBits : ℕ)
   satisfy — the dangerous direction of the table in `FIDELITY.md`. It would also
   be false of the circuit, which deliberately admits a batch whose last active
   index is the final leaf of the tree. On an active slot `active[k] = 1` and the
-  two coincide; `activeIdx_eq` below is where that is used. -/
+  two coincide; `batch_active_index` below is where that is used. -/
   idx_bits : ∀ k, k < maxL →
     Num2BitsSat (2 * depth) (w.idxIn k) (w.idxBits k)
-  /-- `:287` — quaternary digits read off the bit decomposition. -/
+  /-- `:336` — quaternary digits read off the bit decomposition. -/
   idx_dig : ∀ k, k < maxL → ∀ d, d < depth →
     w.idxDig k d = w.idxBits k (2 * d) + 2 * w.idxBits k (2 * d + 1)
-  /-- `:290-296` — one `QuaternaryInsert` per leaf slot, over the running frontier. -/
+  /-- `:340-347` — one `QuaternaryInsert` per leaf slot, over the running frontier. -/
   insert : ∀ k, k < maxL →
     QuaternaryInsertSat depth (w.leaves k) (w.idxDig k) (w.fr k) w.zeros
       (w.insB k) (w.insS k) (w.insC k) (w.insCur k) (w.insFrOut k) (w.insRoot k)
-  /-- `:262` — the chain starts at `frontier_in`. -/
+  /-- `:313-315` — the chain starts at `frontier_in`. -/
   fr_base : ∀ d, d < depth → ∀ s, s < 3 → w.fr 0 d s = w.frontierIn d s
-  /-- `:265` — …and at `old_root`. -/
+  /-- `:318` — …and at `old_root`. -/
   root_base : w.runningRoot 0 = w.oldRoot
-  /-- `:303-305` — the frontier mux. -/
+  /-- `:352-354` — the frontier mux. -/
   fr_mux : ∀ k, k < maxL → ∀ d, d < depth → ∀ s, s < 3 →
     w.fr (k + 1) d s = w.active k * w.insFrOut k d s + (1 - w.active k) * w.fr k d s
-  /-- `:309-311` — the root mux. -/
+  /-- `:358-360` — the root mux. -/
   root_mux : ∀ k, k < maxL →
     w.runningRoot (k + 1) = w.active k * w.insRoot k + (1 - w.active k) * w.runningRoot k
-  /-- `:315` — `new_root === running_root[MAX_L]`. -/
+  /-- `:364` — `new_root === running_root[MAX_L]`. -/
   new_root_def : w.newRoot = w.runningRoot maxL
 
-/-- The deposit-binding half of the constraint system (`:188-229`). Kept apart from
+/-- The deposit-binding half of the constraint system (`:199-282`). Kept apart from
 `BatchChainSat` deliberately: it is the only part mentioning the curve, so the chain
 results below reach no curve axiom. `expected/axioms.txt` records the split. -/
 structure BatchDepositSat {depth maxL : ℕ} (w : BatchSignals depth maxL) : Prop where
-  /-- `:198` — `active_dep = active · is_deposit`. -/
+  /-- `:208` — `active_dep = active · is_deposit`. -/
   active_dep_def : ∀ k, k < maxL → w.activeDep k = w.active k * w.isDeposit k
-  /-- `:210` — `HashToAssetGen(leaf_asset)`. -/
+  /-- `:213` — `HashToAssetGen(leaf_asset)`. -/
   gen_def : ∀ k, k < maxL → w.gen k = coords (assetGen (w.leafAsset k))
-  /-- `:214-216` — `ValueTimesGen` range-checks `leaf_public_in` to 64 bits. -/
+  /-- `:217` — `ValueTimesGen` range-checks `leaf_public_in` to 64 bits. -/
   public_in_range : ∀ k, k < maxL → RangeCheck64Sat (w.leafPublicIn k) (w.pubInBits k)
-  /-- `:214-226` — `expected = leaf_public_in · V^asset + rcv · H`, which is exactly a
-  `ValueCommit` over the public-input bits. -/
+  /-- `:217-230` — `expected = leaf_public_in · V^asset + rcv · H`, which is exactly
+  a `ValueCommit` over the public-input bits. -/
   expected_def : ∀ k, k < maxL →
     ValueCommitSat (w.pubInBits k) (w.gen k) (w.rcv k) (w.rcvBits k) (w.vT k) (w.rH k)
       (w.expected k)
-  /-- `:206` — `IsZero(leaf_asset)`. -/
+  /-- `:210-211` — `IsZero(leaf_asset)`. -/
   asset_isZero : ∀ k, k < maxL →
     IsZeroSat (w.leafAsset k) (w.assetInv k) (w.assetIsZero k)
-  /-- `:207` — an active deposit leaf may not claim asset id 0. `SpentNote` rejects
-  that id on every real note, so such a leaf would be committed and unspendable. -/
-  asset_nonzero : ∀ k, k < maxL → w.activeDep k * w.assetIsZero k = 0
-  /-- `:228-229` — the binding, gated on `active · is_deposit`. -/
+  /-- `:235-236` — `IsZero(leaf_public_in)`. -/
+  public_in_isZero : ∀ k, k < maxL →
+    IsZeroSat (w.leafPublicIn k) (w.pubInInv k) (w.pubInIsZero k)
+  /-- `:282` — step 7a. On an active deposit leaf, `leaf_asset = 0` exactly when
+  `leaf_public_in = 0`.
+
+  Both directions matter and they are one constraint. A leaf carrying value must
+  declare a non-zero asset: `SpentNote` rejects id 0 on every real note, so such a
+  leaf would be committed and unspendable. A WORTHLESS leaf must declare asset 0,
+  because `ValueTimesGen(0, gen)` is the curve identity for every `gen` — at
+  `leaf_public_in = 0` the binding below degenerates to `cv_dep = rcv · H` and says
+  nothing about the asset, which would leave `leaf_asset` a PolyEval coefficient
+  held by nothing but a range check. Pinned to a constant is pinned.
+
+  Nothing here refers to a neighbouring slot: the circuit is agnostic to how a
+  consumer lays deposits out across the batch. -/
+  asset_matches_value : ∀ k, k < maxL →
+    w.activeDep k * (w.assetIsZero k - w.pubInIsZero k) = 0
+  /-- `:232-233` — the binding, gated on `active · is_deposit`. -/
   deposit_x : ∀ k, k < maxL → w.activeDep k * ((w.cvDep k).x - (w.expected k).x) = 0
   deposit_y : ∀ k, k < maxL → w.activeDep k * ((w.cvDep k).y - (w.expected k).y) = 0
 
@@ -378,11 +404,88 @@ theorem batch_advances_by_count {depth maxL countBits : ℕ} {w : BatchSignals d
   rw [h.new_root_def]
   exact runningRoot_stable hmax hp h maxL hhi le_rfl
 
+/-! ## Where the leaves land
+
+`batch_advances_by_count` says each active step is a genuine insert *at the digits the
+witness supplied*. It does not say which tree position those digits name, and until it does,
+"append leaf `k` at `start_index + k`" is prose: `idx_in_def`, `idx_bits` and `idx_dig` sit
+in `BatchChainSat` with nothing consuming them, and a witness free to choose `idx_dig`
+could fold every leaf into the same slot.
+
+`batch_active_index` is the missing step. It reads the digits back off the range check —
+`bitNat_eq_digit` for uniqueness of the decomposition, `quatDigit_eq_bits` for the pairing —
+and lands on the *position*, `start_index + k`, as a natural number below `4 ^ depth`.
+
+`start_index_bits` is what makes the last part true rather than merely stated. Without it
+`start_index` could be any field element and `start_index.val + k` need not be the natural
+the index decomposes to. -/
+
+/-- **The active insertion index is the tree position `start_index + k`**, digit by digit,
+and that position is inside the tree. -/
+theorem batch_active_index {depth maxL countBits : ℕ} {w : BatchSignals depth maxL}
+    (hmax : 2 ^ countBits = maxL) (hp : 2 ^ (countBits + 2) ≤ p)
+    (hpd : 2 ^ (2 * depth) + maxL ≤ p) (h : BatchChainSat countBits w)
+    {k : ℕ} (hk : k < maxL) (hlt : k < w.actualCount.val) :
+    w.startIndex.val + k < 4 ^ depth ∧
+      ∀ d, d < depth →
+        w.idxDig k d = ((quatDigit (w.startIndex.val + k) d : ℕ) : F) := by
+  have hdp : 2 ^ (2 * depth) ≤ p := by omega
+  -- `start_index` is a genuine position, so `start_index + k` does not wrap.
+  have hstart : w.startIndex.val < 2 ^ (2 * depth) :=
+    (num2Bits_sound hdp h.start_index_bits).2
+  have hsum : w.startIndex.val + k < p := by omega
+  -- On an active slot the gate is transparent.
+  have hone := batch_active_one hmax hp h hk hlt
+  have hidx : w.idxIn k = (((w.startIndex.val + k : ℕ)) : F) := by
+    rw [h.idx_in_def k hk, hone, one_mul]
+    push_cast
+    simp [ZMod.natCast_val, ZMod.cast_id]
+  have hval : (w.idxIn k).val = w.startIndex.val + k := by
+    rw [hidx, ZMod.val_natCast_of_lt hsum]
+  obtain ⟨hbits, hlt2⟩ := num2Bits_sound hdp (h.idx_bits k hk)
+  rw [hval] at hbits hlt2
+  refine ⟨by rwa [show (4 : ℕ) ^ depth = 2 ^ (2 * depth) by
+      rw [show (4 : ℕ) = 2 ^ 2 by norm_num, ← pow_mul, Nat.mul_comm]], fun d hd => ?_⟩
+  -- The two bits the circuit pairs are the two bits of the position, by uniqueness of the
+  -- decomposition; pairing them is the quaternary digit.
+  have hb : ∀ i, i < 2 * depth → IsBit (w.idxBits k i) := (h.idx_bits k hk).bits
+  have hq := quatDigit_eq_bits (bs := w.idxBits k) (n := 2 * depth) (d := d) (by omega)
+  rw [← hbits] at hq
+  rw [h.idx_dig k hk d hd, hq]
+  push_cast
+  rw [cast_bitNat (hb (2 * d) (by omega)), cast_bitNat (hb (2 * d + 1) (by omega))]
+
+/-- **The batch appends at consecutive positions, starting at `start_index`.**
+
+`batch_advances_by_count` with the digit vector replaced by the digits of the position, so
+the statement names where each leaf goes rather than deferring to a private signal. Together
+with `batch_active_spec`'s contiguity this is the full reading of the circuit: leaf `k` is
+inserted at tree position `start_index + k`, for every `k` below `actual_count` and no
+other, and `new_root` is what the tree reaches after those inserts.
+
+The one thing it still does not say is that `frontier_in` is the honest frontier for
+`old_root`. That is `FrontierRoot`, modelled nowhere — see the module note. -/
+theorem batch_advances_at_positions {depth maxL countBits : ℕ} {w : BatchSignals depth maxL}
+    (hmax : 2 ^ countBits = maxL) (hp : 2 ^ (countBits + 2) ≤ p)
+    (hpd : 2 ^ (2 * depth) + maxL ≤ p) (h : BatchChainSat countBits w) :
+    (∀ k, k < w.actualCount.val →
+        w.startIndex.val + k < 4 ^ depth ∧
+        InsertsTo depth (w.leaves k)
+          (fun d => ((quatDigit (w.startIndex.val + k) d : ℕ) : F))
+          (w.fr k) w.zeros (w.fr (k + 1)) (w.runningRoot (k + 1))) ∧
+      w.newRoot = w.runningRoot w.actualCount.val := by
+  obtain ⟨_, hhi⟩ := batch_count_range hmax (pow_countBits_lt_p hp) h
+  refine ⟨fun k hk => ?_, (batch_advances_by_count hmax hp h).2⟩
+  have hkm : k < maxL := by omega
+  obtain ⟨hfits, hdig⟩ := batch_active_index hmax hp hpd h hkm hk
+  exact ⟨hfits,
+    ((batch_advances_by_count hmax hp h).1 k hk).digits_congr fun d hd => (hdig d hd).symm⟩
+
 /-! ### The deployed instantiation
 
 `src/tree_update_batch.circom` instantiates `TreeUpdateBatch(11, 8)` with
 `COUNT_BITS = 3`. Discharging the side conditions at those numbers is not decoration: it
-shows the two bounds the results above carry are *simultaneously satisfiable*, so those
+shows the three bounds the results above carry are *simultaneously satisfiable*, so those
 theorems are not conditional on an impossible hypothesis.
 
 `MAX_L = 8` is a floor rather than a choice: `COUNT_BITS` forces a power of two, and a
@@ -390,9 +493,15 @@ spend emits `TRANSACT_OUT = 6` leaves that must fit one batch. Six is not a powe
 so the floor is eight — which is also why `flushBatch` carries four deposits per batch
 rather than two. -/
 
-/-- The deployed shape meets both side conditions. -/
+/-- The deployed shape meets both count-side conditions. -/
 theorem batch_bounds_deployed : (2 : ℕ) ^ 3 = 8 ∧ (2 : ℕ) ^ (3 + 2) ≤ p := by
   refine ⟨by norm_num, ?_⟩
+  unfold p
+  norm_num
+
+/-- …and the depth-side one: a `4^11`-leaf tree plus a full batch is far inside the field,
+so `batch_active_index` is not vacuous at the deployed shape either. -/
+theorem batch_depth_bound_deployed : (2 : ℕ) ^ (2 * 11) + 8 ≤ p := by
   unfold p
   norm_num
 
@@ -404,6 +513,20 @@ theorem batch_advances_by_count_deployed {w : BatchSignals 11 8}
         (w.runningRoot (k + 1))) ∧
       w.newRoot = w.runningRoot w.actualCount.val :=
   batch_advances_by_count batch_bounds_deployed.1 batch_bounds_deployed.2 h
+
+/-- **`batch_advances_at_positions` at `TreeUpdateBatch(11, 8)`.** Leaf `k` of the batch is
+appended at tree position `start_index + k`, that position is inside the tree, and
+`new_root` is what the tree reaches after exactly `actual_count` such appends. -/
+theorem batch_advances_at_positions_deployed {w : BatchSignals 11 8}
+    (h : BatchChainSat 3 w) :
+    (∀ k, k < w.actualCount.val →
+        w.startIndex.val + k < 4 ^ 11 ∧
+        InsertsTo 11 (w.leaves k)
+          (fun d => ((quatDigit (w.startIndex.val + k) d : ℕ) : F))
+          (w.fr k) w.zeros (w.fr (k + 1)) (w.runningRoot (k + 1))) ∧
+      w.newRoot = w.runningRoot w.actualCount.val :=
+  batch_advances_at_positions batch_bounds_deployed.1 batch_bounds_deployed.2
+    batch_depth_bound_deployed h
 
 /-- `actual_count ∈ [1, 8]` at the deployed shape — odd values included. -/
 theorem batch_count_range_deployed {w : BatchSignals 11 8} (h : BatchChainSat 3 w) :
@@ -439,5 +562,118 @@ theorem batch_deposit_opens {depth maxL : ℕ} {w : BatchSignals depth maxL}
   have hcommit := h.expected_def k hk
   rw [hgen] at hcommit
   exact valueCommit_opens (h.public_in_range k hk) hcommit
+
+/-! ## The public-input layout
+
+`BatchCompress(MAX_L)` (`src/lib/poly_eval.circom:156-198`) folds the batch's public inputs
+into `(z, y)` with the same Horner chain `TransactCompressN` uses, so `polyEval_sound` and
+`polyEval_binding` already cover the evaluation. What they do not cover is the *order*, and
+until this section existed Lean pinned no batch layout at all: `test/formal/batch_layout_parity.test.ts`
+anchored on the published vector instead, and says in its own header that a Lean dump would
+let it switch anchors without changing what it asserts. This is that dump.
+
+The batch layout differs from the transact one in a way worth stating where the definition
+is. All `4 + 6·MAX_L` words are coefficients. Transact evaluates 46 of its 69 because the
+other 23 are not signals of `4x6.circom` and so can be bound through the challenge instead;
+the batch has no such words, so evaluating every one is the only sound option — hashing a
+signal into `z` binds nothing against a prover that reads `z` first. `polyEval_forge` is
+why.
+-/
+
+/-- One coefficient position of `BatchCompress`. -/
+inductive BatchPISlot where
+  | oldRoot
+  | newRoot
+  | startIndex
+  | actualCount
+  | cms (k : ℕ)
+  | cvDepX (k : ℕ)
+  | cvDepY (k : ℕ)
+  | leafAsset (k : ℕ)
+  | leafPublicIn (k : ℕ)
+  | isDeposit (k : ℕ)
+deriving Repr, DecidableEq, Inhabited
+
+/-- Number of `BatchCompress` coefficients: `4 + 6·MAX_L`
+(`src/lib/poly_eval.circom:157`). At `MAX_L = 8` this is 52. -/
+def batchPiCount (maxL : ℕ) : ℕ := 4 + 6 * maxL
+
+example : batchPiCount 8 = 52 := by norm_num [batchPiCount]
+
+/-- The layout of the `pe.coeffs` assignments — `src/lib/poly_eval.circom:173-197`.
+Single source of truth, as `piSlot` is for the transact shapes. -/
+def batchPiSlot (maxL : ℕ) (i : ℕ) : BatchPISlot :=
+  let oCms := 4
+  let oCv := oCms + maxL
+  let oAsset := oCv + 2 * maxL
+  let oPublicIn := oAsset + maxL
+  let oDeposit := oPublicIn + maxL
+  if i = 0 then .oldRoot
+  else if i = 1 then .newRoot
+  else if i = 2 then .startIndex
+  else if i = 3 then .actualCount
+  else if i < oCv then .cms (i - oCms)
+  else if i < oAsset then
+    (if (i - oCv) % 2 = 0 then .cvDepX ((i - oCv) / 2) else .cvDepY ((i - oCv) / 2))
+  else if i < oPublicIn then .leafAsset (i - oAsset)
+  else if i < oDeposit then .leafPublicIn (i - oPublicIn)
+  else .isDeposit (i - oDeposit)
+
+/-- The signal a batch slot names. -/
+def batchSlotValue {depth maxL : ℕ} (w : BatchSignals depth maxL) : BatchPISlot → F
+  | .oldRoot => w.oldRoot
+  | .newRoot => w.newRoot
+  | .startIndex => w.startIndex
+  | .actualCount => w.actualCount
+  | .cms k => w.cms k
+  | .cvDepX k => (w.cvDep k).x
+  | .cvDepY k => (w.cvDep k).y
+  | .leafAsset k => w.leafAsset k
+  | .leafPublicIn k => w.leafPublicIn k
+  | .isDeposit k => w.isDeposit k
+
+/-- The `PolyEval` coefficient vector of the batch circuit. The challenge and the
+result are wired at `src/lib/poly_eval.circom:199-200`, and `y` reaches the circuit's
+own output at `src/tree_update_batch.circom:381`. -/
+def batchCoeffs {depth maxL : ℕ} (w : BatchSignals depth maxL) (i : ℕ) : F :=
+  batchSlotValue w (batchPiSlot maxL i)
+
+/-- The coefficient index a batch slot occupies — the inverse of `batchPiSlot`. -/
+def batchSlotIndex (maxL : ℕ) : BatchPISlot → ℕ
+  | .oldRoot => 0
+  | .newRoot => 1
+  | .startIndex => 2
+  | .actualCount => 3
+  | .cms k => 4 + k
+  | .cvDepX k => 4 + maxL + 2 * k
+  | .cvDepY k => 4 + maxL + 2 * k + 1
+  | .leafAsset k => 4 + 3 * maxL + k
+  | .leafPublicIn k => 4 + 4 * maxL + k
+  | .isDeposit k => 4 + 5 * maxL + k
+
+/-- The slots a `maxL` instance actually has. -/
+def BatchPISlot.InRange (maxL : ℕ) : BatchPISlot → Prop
+  | .cms k | .cvDepX k | .cvDepY k | .leafAsset k | .leafPublicIn k | .isDeposit k => k < maxL
+  | _ => True
+
+theorem batchSlotIndex_lt {maxL : ℕ} {s : BatchPISlot} (hs : s.InRange maxL) :
+    batchSlotIndex maxL s < batchPiCount maxL := by
+  cases s <;> simp only [BatchPISlot.InRange] at hs <;>
+    simp only [batchSlotIndex, batchPiCount] <;> omega
+
+/-- **`batchSlotIndex` is a section of `batchPiSlot`.** -/
+theorem batchPiSlot_batchSlotIndex {maxL : ℕ} {s : BatchPISlot} (hs : s.InRange maxL) :
+    batchPiSlot maxL (batchSlotIndex maxL s) = s := by
+  cases s <;> simp only [BatchPISlot.InRange] at hs <;>
+    simp only [batchSlotIndex, batchPiSlot] <;>
+    repeat' first
+      | rfl
+      | rw [if_neg (by omega)]
+      | rw [if_pos (by omega)]
+      | (congr 1; omega)
+
+/-- The layout as a list of slot names, for `lean/scripts/dump-layout.sh`. -/
+def batchLayoutNames (maxL : ℕ) : List String :=
+  (List.range (batchPiCount maxL)).map (fun i => reprStr (batchPiSlot maxL i))
 
 end Lelantos

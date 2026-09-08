@@ -200,6 +200,24 @@ test-unit:
 test-fuzz:
     npm run test:fuzz
 
+# === underconstraint search ===
+#
+# Mutates an honest WITNESS VECTOR and asks the R1CS whether it still satisfies,
+# which is the half `test-tamper` cannot reach: the tamper suites mutate the
+# input object, and the witness calculator turns any input it accepts into a
+# self-consistent witness, so a signal the template computes but never
+# constrains is invisible from there. See test/lib/underconstrained.ts.
+#
+# Unlike `picus` this needs no docker, so it runs in the normal suite. The batch
+# shape dominates the runtime: a few minutes at FUZZ=medium, more at heavy. It is strictly weaker: single-signal only. `picus` decides
+# multi-signal underconstraints and is the tool to reach for when this is clean
+# but the question is still open.
+underconstrained:
+    FUZZ=${FUZZ:-medium} NODE_OPTIONS="--import tsx/esm" \
+        ./node_modules/.bin/mocha --reporter spec --timeout 1800000 --exit \
+        test/underconstrained_selftest.test.ts test/fuzz/underconstrained.fuzz.test.ts \
+        test/fuzz/underconstrained_batch.fuzz.test.ts
+
 # === constraint budget ===
 
 # Every shape must fit its FFT domain and its exact count must match
@@ -261,6 +279,50 @@ vectors-check:
     fi
     echo "==> vectors/ up to date"
 
+# Check the copies downstream consumers keep of vectors/.
+#
+# `contracts/` pins `PubInputs.compress` against a COPY of
+# vectors/tree-update-batch-8.json, checked into its own repo because forge
+# cannot read across a repository boundary. A copy is a second source of truth:
+# regenerate here, forget to re-copy, and the Solidity suite keeps passing
+# against the old layout while the circuit has moved. That is precisely the
+# binding the copy exists to anchor.
+#
+# Skips cleanly when the sibling checkout is absent, so the circuits repo still
+# builds alone.
+vectors-consumers-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    contracts="{{ROOT}}/../contracts"
+    if [ ! -d "$contracts" ]; then
+        echo "==> ../contracts not checked out; skipping consumer drift check"
+        exit 0
+    fi
+    status=0
+    for pair in \
+        "tree-update-batch-8.json:tree_update_batch_vector.json" \
+        "transact-4x6.json:transact_4x6_vector.json"
+    do
+        ours="{{ROOT}}/vectors/${pair%%:*}"
+        theirs="$contracts/test/fixtures/${pair##*:}"
+        if [ ! -f "$theirs" ]; then
+            echo "MISSING  $theirs"; status=1; continue
+        fi
+        if ! diff -q "$ours" "$theirs" >/dev/null; then
+            echo "DRIFTED  $theirs"
+            echo "         differs from $ours"
+            echo "         re-copy it: cp \"$ours\" \"$theirs\""
+            status=1
+        fi
+    done
+    if [ "$status" -ne 0 ]; then
+        echo
+        echo "A consumer's vector copy is stale. The Solidity suite would keep passing"
+        echo "against the old layout while the circuit has moved."
+        exit 1
+    fi
+    echo "==> consumer vector copies up to date"
+
 # Static analysis via Trail of Bits circomspect. Install: cargo install circomspect
 #
 # Scope is `src/lib/` plus the top-level `src/*.circom` entry points. The tree
@@ -311,6 +373,16 @@ clean:
 # Elaborate and kernel-check every proof; also runs the namespace-wide axiom guard.
 lean-build:
     cd "{{ROOT}}/lean" && lake build
+
+# Model-to-circuit signal parity. Needs build/*.sym, so it is the one check that
+# wants the production compile rather than circom_tester's own artifacts; run
+# `just compile-4x6 compile-batch` first. REQUIRE_ARTIFACTS=1 makes a missing
+# artifact a failure instead of a skip, so this can never pass by doing nothing.
+signal-parity:
+    @echo "==> Model signal parity"
+    cd "{{ROOT}}" && REQUIRE_ARTIFACTS=1 NODE_OPTIONS="--import tsx/esm" \
+        ./node_modules/.bin/mocha --reporter spec --timeout 120000 --exit \
+        test/formal/signal_parity.test.ts
 
 # Everything CI runs against the Lean development.
 lean-check:

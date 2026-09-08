@@ -14,7 +14,7 @@ Three transactions, each ruling out a different way for the theorem to be empty:
 
 | Witness | What it rules out |
 |---|---|
-| `padTx` | the whole system being unsatisfiable |
+| `minTx` | the whole system being unsatisfiable |
 | `spendTx` | `spentNote_sound`'s `is_dummy = 0` branch being unreachable |
 | `dualTx` | the per-asset balance being exercised only where all candidates agree |
 
@@ -186,6 +186,28 @@ slot at index `0`, that one everywhere else". `pair` names the shape once and
 /-- The slot vector holding `hd` at index `0` and `tl i` elsewhere. -/
 def pair {α : Type} (hd : α) (tl : ℕ → α) (i : ℕ) : α := if i = 0 then hd else tl i
 
+/-- An accumulator whose only non-zero term sits at index `0`. Needed because every
+transaction below now carries exactly one real input slot, at an arity the shape leaves
+open. -/
+theorem accOf_single {t : ℕ → F} (ht : ∀ i, i ≠ 0 → t i = 0) :
+    ∀ n, 0 < n → accOf 0 t n = t 0 := by
+  intro n
+  induction n with
+  | zero => intro h; exact absurd h (lt_irrefl 0)
+  | succ m ih =>
+    intro _
+    rcases Nat.eq_zero_or_pos m with hm | hm
+    · subst hm; simp [accOf]
+    · rw [accOf, ih hm, ht m (by omega), add_zero]
+
+/-- The same for a point sum. -/
+theorem pointSum_single {pts : ℕ → G} (h : ∀ i, i ≠ 0 → pts i = 0) :
+    ∀ n, 0 < n → pointSum pts n = pts 0 := by
+  intro n hn
+  rw [pointSum, Finset.sum_eq_single 0]
+  · intro b hb hb0; exact h b hb0
+  · intro hmem; exact absurd (Finset.mem_range.mpr hn) hmem
+
 theorem pair_zero {α : Type} (hd : α) (tl : ℕ → α) : pair hd tl 0 = hd := rfl
 
 theorem pair_succ {α : Type} {hd : α} {tl : ℕ → α} {i : ℕ} (h : i ≠ 0) :
@@ -243,11 +265,11 @@ theorem merkleRoot_chain (d : ℕ) (leaf : F) :
   ⟨rfl, fun d _ => merkleLevel4_zero (chainFrom leaf d), rfl⟩
 
 /-- A real (non-dummy) membership proof: the recomputed root equals the advertised one. -/
-theorem merkleProofOrDummy_real (leaf : F) :
-    MerkleProofOrDummySat 10 leaf (fun _ => zeroBits) (fun _ => 0) (rootFrom 10 leaf) 0
-      0 (rootFrom 10 leaf) (fun _ => zeroBits) (fun _ => selZero)
+theorem merkleProofOrDummy_real (d : ℕ) (leaf : F) :
+    MerkleProofOrDummySat d leaf (fun _ => zeroBits) (fun _ => 0) (rootFrom d leaf) 0
+      0 (rootFrom d leaf) (fun _ => zeroBits) (fun _ => selZero)
       (fun d => slots 0 (chainFrom leaf d) zeroBits) (chainFrom leaf) :=
-  ⟨by simp [IsBit], merkleRoot_chain 10 leaf, by ring, by ring⟩
+  ⟨by simp [IsBit], merkleRoot_chain d leaf, by ring, by ring⟩
 
 /-- A dummy membership proof: the path is unconstrained, so the advertised `root` is a
 parameter and the difference is left non-zero. -/
@@ -387,12 +409,12 @@ noncomputable def realCm : F := noteCommitment 1 1 realPk 0 0
 /-- Its leaf, hashing the deposit value commitment of a *non-zero* value. -/
 noncomputable def realLeaf : F := leafHash realCm (cvOf oneBits 1).x (cvOf oneBits 1).y
 
-/-- The root this note is opened against. -/
-noncomputable def realRoot : F := rootFrom 10 realLeaf
+/-- The root this note is opened against, at the shape's depth. -/
+noncomputable def realRoot (d : ℕ) : F := rootFrom d realLeaf
 
 /-- A real spent slot: `is_dummy = 0`, so ownership, the non-zero asset id and Merkle
 membership are all enforced rather than bypassed. -/
-noncomputable def realSlot : SpentSlot 10 where
+noncomputable def realSlot (d : ℕ) : SpentSlot d where
   assetId := 1
   value := 1
   pk := realPk
@@ -402,7 +424,7 @@ noncomputable def realSlot : SpentSlot 10 where
   rcv := 0
   rcvDep := 0
   isDummy := 0
-  root := realRoot
+  root := realRoot d
   nullifier := nullifierOf (deriveNk 0) 0 realCm
   cv := cvOf oneBits 1
   cvDep := cvOf oneBits 1
@@ -428,13 +450,13 @@ noncomputable def realSlot : SpentSlot 10 where
   mpS := fun _ => selZero
   mpC := fun d => slots 0 (chainFrom realLeaf d) zeroBits
   mpChain := chainFrom realLeaf
-  mpComputed := realRoot
+  mpComputed := realRoot d
   mpDiff := 0
 
-theorem realSlot_sat : SpentNoteSat realSlot := by
+theorem realSlot_sat (d : ℕ) : SpentNoteSat (realSlot d) := by
   refine ⟨rfl, rfl, ?_, rfl, num2Bits_one (by norm_num), num2Bits_one (by norm_num), rfl,
-    valueCommit_witness oneBits 1, rfl, merkleProofOrDummy_real realLeaf, rfl, rfl,
-    ⟨?_, ?_⟩, ?_, valueCommit_witness oneBits 1⟩ <;> simp [realSlot, realPk, pkOfNsk]
+    valueCommit_witness oneBits 1, rfl, merkleProofOrDummy_real d realLeaf, rfl, rfl,
+    ⟨?_, ?_⟩, ?_, valueCommit_witness oneBits 1⟩ <;> simp [realSlot, realRoot, realPk, pkOfNsk]
 
 /-! ## Assembling a transaction
 
@@ -487,8 +509,10 @@ noncomputable def lhsOf {depth nIn nOut : ℕ} (w : TxWitness depth nIn nOut) (c
 noncomputable def rhsOf {depth nIn nOut : ℕ} (w : TxWitness depth nIn nOut) (c : ℕ) : ℕ → F :=
   accOf (w.publicOut * eqOut w.publicAssetId (candOf w c)) (outTermOf w c)
 
-/-- Every witness below has zero blinding, an empty `public_out`, and no address or clue
-data; those are fixed here rather than repeated three times. -/
+/-- Every witness below has zero blinding and an empty `public_out`; those are fixed here
+rather than repeated three times. The address and clue fields are absent from `TxWitness`
+entirely — they are bound through the challenge, not through `PolyEval`, so the circuit
+never carries them. -/
 noncomputable def ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) :
     TxWitness depth nIn nOut :=
   let base : TxWitness depth nIn nOut :=
@@ -497,12 +521,9 @@ noncomputable def ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) :
       publicAssetId := p.pubAsset
       publicIn := p.pubIn
       publicOut := 0
-      recipient := 0, chainId := 0, payer := 0, relayer := 0
       spent := p.spent
       out := p.out
       outCvDep := fun j => (p.out j).cvDep
-      outClueRx := fun _ => 0, outClueRy := fun _ => 0, outClueBits := fun _ => 0
-      outAuxDigest := 0
       pubGen := gen p.pubAsset
       pubAssetBits := p.pubAssetBits
       pubInBits := p.pubInBits
@@ -514,10 +535,12 @@ noncomputable def ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) :
       vbOutInv := fun _ _ => 0, vbOutEq := fun _ _ => 0
       vbInTerm := fun _ _ => 0, vbOutTerm := fun _ _ => 0
       vbLhs := fun _ _ => 0, vbRhs := fun _ _ => 0
-      inCvG := p.inCvG, outCvG := p.outCvG
-      inRHG := fun _ => 0, outRHG := fun _ => 0
-      pubInG := p.pubInG, pubOutG := 0
-      peAcc := fun _ => 0 }
+      peAcc := fun _ => 0
+      -- The dummy count and the comparator that rejects the all-dummy witness. With slot 0
+      -- real the difference `nIn - count` is 1, so `inv = 1` and `out = 0` satisfy `IsZero`.
+      dummyAcc := accOf 0 (fun i => (p.spent i).isDummy)
+      dummyAllInv := 1
+      dummyAllOut := 0 }
   { base with
     vbPubInv := fun c => eqInv base.publicAssetId (candOf base c)
     vbPubEq := fun c => eqOut base.publicAssetId (candOf base c)
@@ -538,12 +561,6 @@ noncomputable def ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) :
 @[simp] theorem ofParts_pubAsset {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).publicAssetId = p.pubAsset := rfl
 @[simp] theorem ofParts_pubIn {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).publicIn = p.pubIn := rfl
 @[simp] theorem ofParts_pubOut {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).publicOut = 0 := rfl
-@[simp] theorem ofParts_inCvG {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).inCvG = p.inCvG := rfl
-@[simp] theorem ofParts_outCvG {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).outCvG = p.outCvG := rfl
-@[simp] theorem ofParts_inRHG {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).inRHG = fun _ => (0 : G) := rfl
-@[simp] theorem ofParts_outRHG {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).outRHG = fun _ => (0 : G) := rfl
-@[simp] theorem ofParts_pubInG {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).pubInG = p.pubInG := rfl
-@[simp] theorem ofParts_pubOutG {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) : (ofParts p).pubOutG = 0 := rfl
 
 /-- The balance intermediates are the canonical ones, so the only obligation left is the
 `lhs[c][N_IN] === rhs[c][N_OUT]` equation itself. -/
@@ -581,7 +598,8 @@ theorem transactSat_ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut)
     (houtCv : ∀ j, (p.out j).cv = coords (p.outCvG j))
     (hinRH : ∀ i, (p.spent i).rH = coords 0)
     (houtRH : ∀ j, (p.out j).rH = coords 0)
-    (hpubInPt : vTOf p.pubInBits p.pubAsset = coords p.pubInG) :
+    (hpubInPt : vTOf p.pubInBits p.pubAsset = coords p.pubInG)
+    (hnotAllDummy : (nIn : F) - accOf 0 (fun i => (p.spent i).isDummy) nIn = 1) :
     TransactSat (ofParts p) where
   spent_sat i _ := hspent i
   spent_root i _ := hroot i
@@ -589,6 +607,15 @@ theorem transactSat_ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut)
   rho_derived j _ := hrho j
   out_sat j _ := hout j
   cv_dep_bound _ _ := rfl
+  dummy_acc_base := rfl
+  dummy_acc_step _ _ := rfl
+  dummy_all_eq := by
+    -- `IsEqualSat a b inv out` is `IsZeroSat (b - a) inv out`, and `hnotAllDummy` says that
+    -- difference is 1.
+    show IsZeroSat ((nIn : F) - accOf 0 (fun i => (p.spent i).isDummy) nIn) 1 0
+    rw [hnotAllDummy]
+    exact ⟨by ring, by ring⟩
+  not_all_dummy := rfl
   pub_gen := rfl
   pub_asset_range := hpubAsset
   pub_in_range := hpubIn
@@ -597,16 +624,19 @@ theorem transactSat_ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut)
   pub_out_mul := rfl
   value_balance := valueBalance_ofParts p hbal
   point_balance := by
-    show coords _ = coords _
-    simp only [ofParts_inCvG, ofParts_outCvG, ofParts_inRHG, ofParts_outRHG,
-      ofParts_pubInG, ofParts_pubOutG, pointSum_zero, add_zero]
-    exact congrArg coords hpoint
-  point_in_cv i _ := hinCv i
-  point_out_cv j _ := houtCv j
-  point_in_rH i _ := hinRH i
-  point_out_rH j _ := houtRH j
-  point_pub_in := hpubInPt
-  point_pub_out := vTOf_zero p.pubAsset
+    -- Move the four coordinate arrays and the two bucket points onto the subgroup elements
+    -- the transaction actually commits to, then discharge the equation there. The
+    -- coordinate equations are hypotheses of this lemma rather than fields of the model:
+    -- the circuit imposes none of them, and `PerAssetPointBalanceSat` no longer needs any.
+    show PerAssetPointBalanceSat nIn nOut (fun i => (p.spent i).cv) (fun j => (p.out j).cv)
+      (fun i => (p.spent i).rH) (fun j => (p.out j).rH)
+      (vTOf p.pubInBits p.pubAsset) (vTOf zeroBits p.pubAsset)
+    rw [funext hinCv, funext houtCv, funext hinRH, funext houtRH, hpubInPt,
+      vTOf_zero p.pubAsset]
+    refine perAssetPointBalance_of_group (inCv := p.inCvG) (outCv := p.outCvG)
+      (inRH := fun _ => 0) (outRH := fun _ => 0) (pubInPt := p.pubInG) (pubOutPt := 0) ?_
+    rw [pointSum_pbGroupLhs, pointSum_pbGroupRhs, pointSum_zero, pointSum_zero, add_zero]
+    simpa using hpoint
   compress := ⟨rfl, fun _ _ => rfl, rfl⟩
 
 /-! ## The padding transaction
@@ -617,111 +647,107 @@ commitments, every balance candidate and the whole Horner evaluation.
 
 Written once for an arbitrary arity. Nothing about it is shape-specific: every slot vector
 is index-generic, and the balance sums are zero whichever candidate is selected. That is
-what lets the same construction serve `Transact(10, 2, 2)`, the deployed
-`Transact(10, 3, 3)` and `Transact(10, 4, 4)`, whose soundness results each need a witness
-of their own type.
+what lets the same construction serve the small `Transact(10, 2, 2)` used here and the
+deployed `Transact(11, 4, 6)`, whose soundness results each need a witness of their own
+type.
 -/
 
-noncomputable def padParts (depth nIn nOut : ℕ) : Parts depth nIn nOut where
-  spent := fun _ => padSlot depth (rootFrom depth padLeaf)
-  out := padOut
-  root := rootFrom depth padLeaf
-  pubAsset := 0
-  pubIn := 0
-  pubAssetBits := zeroBits
-  pubInBits := zeroBits
-  inCvG := fun _ => 0
-  outCvG := fun _ => 0
-  pubInG := 0
+/-- The dummy count of a slot vector whose head is real and whose tail is all padding. -/
+private theorem accOf_dummies {t : ℕ → F} (h0 : t 0 = 0) (h1 : ∀ i, i ≠ 0 → t i = 1) :
+    ∀ n, 0 < n → accOf 0 t n = ((n - 1 : ℕ) : F) := by
+  intro n
+  induction n with
+  | zero => intro h; exact absurd h (lt_irrefl 0)
+  | succ m ih =>
+    intro _
+    rcases Nat.eq_zero_or_pos m with hm | hm
+    · subst hm; simp [accOf, h0]
+    · rw [accOf, ih hm, h1 m (by omega)]
+      have hcast : ((m - 1 : ℕ) : F) = (m : F) - 1 := by
+        rw [Nat.cast_sub hm]; norm_num
+      rw [hcast, show m + 1 - 1 = m from rfl]
+      ring
 
-noncomputable def padTx (depth nIn nOut : ℕ) : TxWitness depth nIn nOut :=
-  ofParts (padParts depth nIn nOut)
+/-- …hence the comparator input `nIn - count` is exactly 1. -/
+private theorem notAllDummy_of_head {nIn : ℕ} (hn : 0 < nIn) {t : ℕ → F} (h0 : t 0 = 0)
+    (h1 : ∀ i, i ≠ 0 → t i = 1) : (nIn : F) - accOf 0 t nIn = 1 := by
+  rw [accOf_dummies h0 h1 nIn hn, Nat.cast_sub hn]
+  norm_num
 
-theorem padTx_sat (depth nIn nOut : ℕ) : TransactSat (padTx depth nIn nOut) :=
-  transactSat_ofParts (padParts depth nIn nOut)
-    (fun _ => padSlot_sat _ _)
-    (fun _ => rfl)
-    (fun _ => padSlot_dummy _ _)
-    (fun _ => rfl)
-    padOut_sat
-    (num2Bits_zero 64) (num2Bits_zero 64)
-    -- Every note carries value zero and the public bucket is empty, so both accumulators
-    -- start at zero and never move, whichever candidate is selected.
-    (fun c _ => by
-      have hin : ∀ i, inTermOf (ofParts (padParts depth nIn nOut)) c i = 0 := fun i => by
-        simp [inTermOf, inValue, padParts, padSlot]
-      have hout : ∀ j, outTermOf (ofParts (padParts depth nIn nOut)) c j = 0 := fun j => by
-        simp [outTermOf, outValue, padParts, padOut, outSlotOf]
-      have hpubIn : (padParts depth nIn nOut).pubIn = 0 := rfl
-      simp only [lhsOf, rhsOf, ofParts_pubIn, ofParts_pubOut, hpubIn, zero_mul]
-      rw [accOf_zero hin, accOf_zero hout])
-    (by simp [padParts])
-    (fun _ => cvOf_zero_coords 0)
-    (fun _ => cvOf_zero_coords 1)
-    (fun _ => rH_eq)
-    (fun _ => rH_eq)
-    (vTOf_zero 0)
+/-! ## The minimal transaction
 
-/-! ## A transaction that spends
+Slot `0` spends the real note of asset `1`; every other input slot is padding opened
+against the same root. Output `0` receives that unit; every other output is an empty note
+of asset `1`.
 
-Slot `0` spends the real note of asset `1`; slot `1` is padding opened against the same
-root. This is the witness that exercises `is_dummy = 0`, a non-zero scalar multiplication in
-`ValueCommit`, and a balance whose sums are not all zero.
+It used to be all padding. `src/lib/transact.circom` now rejects that witness — with every
+slot dummy the Merkle check is skipped for all of them and `merkle_root` becomes a free
+`PolyEval` coefficient, which is a soundness break, not a nicety — so the smallest
+satisfying assignment carries one real spend. `TransactSat.not_all_dummy` is the modelled
+constraint and `notAllDummy_of_head` discharges it here.
 -/
 
-/-- The nullifier the outputs anchor their `rho` on. -/
-noncomputable def spendNf0 : F := nullifierOf (deriveNk 0) 0 realCm
+noncomputable def minIn (depth : ℕ) : ℕ → SpentSlot depth :=
+  pair (realSlot depth) (fun _ => padSlot depth (realRoot depth))
 
-noncomputable def spendIn : ℕ → SpentSlot 10 := pair realSlot (fun _ => padSlot 10 realRoot)
+theorem minIn_sat (depth : ℕ) (i : ℕ) : SpentNoteSat (minIn depth i) :=
+  pair_forall (realSlot_sat depth) (fun _ => padSlot_sat depth _) i
 
-/-- The input-side facts, shared with the two-asset transaction below. -/
-theorem spendIn_sat (i : ℕ) : SpentNoteSat (spendIn i) :=
-  pair_forall realSlot_sat (fun _ => padSlot_sat 10 _) i
+theorem minIn_root (depth : ℕ) (i : ℕ) : (minIn depth i).root = realRoot depth :=
+  pair_cases (motive := fun (_ : ℕ) (s : SpentSlot depth) => s.root = realRoot depth)
+    rfl (fun _ _ => rfl) i
 
-theorem spendIn_root (i : ℕ) : (spendIn i).root = realRoot :=
-  pair_forall (P := fun s : SpentSlot 10 => s.root = realRoot) rfl (fun _ => rfl) i
+theorem minIn_dummy (depth : ℕ) (i : ℕ) :
+    IsBit (minIn depth i).isDummy ∧ (minIn depth i).isDummy * (minIn depth i).value = 0 :=
+  pair_forall (P := fun s : SpentSlot depth => IsBit s.isDummy ∧ s.isDummy * s.value = 0)
+    ⟨by simp [realSlot, IsBit], by simp [realSlot]⟩ (fun _ => padSlot_dummy depth _) i
 
-theorem spendIn_dummy (i : ℕ) :
-    IsBit (spendIn i).isDummy ∧ (spendIn i).isDummy * (spendIn i).value = 0 :=
-  pair_forall (P := fun s : SpentSlot 10 => IsBit s.isDummy ∧ s.isDummy * s.value = 0)
-    ⟨by simp [realSlot, IsBit], by simp [realSlot]⟩ (fun _ => padSlot_dummy 10 _) i
+theorem minIn_isDummy_head (depth : ℕ) : (minIn depth 0).isDummy = 0 := rfl
 
-theorem spendIn_cv (i : ℕ) : (spendIn i).cv = coords (if i = 0 then assetGen 1 else 0) :=
+theorem minIn_isDummy_tail (depth : ℕ) : ∀ i, i ≠ 0 → (minIn depth i).isDummy = 1 := by
+  intro i hi
+  simp [minIn, pair, hi, padSlot]
+
+theorem minIn_cv (depth : ℕ) (i : ℕ) :
+    (minIn depth i).cv = coords (if i = 0 then assetGen 1 else 0) :=
   pair_cases
-    (motive := fun (i : ℕ) (s : SpentSlot 10) =>
+    (motive := fun (i : ℕ) (s : SpentSlot depth) =>
       s.cv = coords (if i = 0 then assetGen 1 else 0))
     (cvOf_one_coords 1)
     (fun _ hi => by rw [if_neg hi]; exact cvOf_zero_coords 0) i
 
-theorem spendIn_rH (i : ℕ) : (spendIn i).rH = coords 0 :=
-  pair_forall (P := fun s : SpentSlot 10 => s.rH = coords 0) rH_eq (fun _ => rH_eq) i
+theorem minIn_rH (depth : ℕ) (i : ℕ) : (minIn depth i).rH = coords 0 :=
+  pair_forall (P := fun s : SpentSlot depth => s.rH = coords 0) rH_eq (fun _ => rH_eq) i
 
-noncomputable def spendOut : ℕ → OutputSlot :=
+/-- The nullifier the outputs anchor their `rho` on. -/
+noncomputable def spendNf0 : F := nullifierOf (deriveNk 0) 0 realCm
+
+noncomputable def minOut : ℕ → OutputSlot :=
   pair (outSlotOf spendNf0 1 1 oneBits oneBits 0) (outSlotOf spendNf0 1 0 oneBits zeroBits)
 
-theorem spendOut_sat (j : ℕ) : OutputNoteSat (spendOut j) :=
+theorem minOut_sat (j : ℕ) : OutputNoteSat (minOut j) :=
   pair_forall
     (outSlotOf_sat one_ne_zero (num2Bits_one (by norm_num)) (num2Bits_one (by norm_num)) _ _)
     (fun _ => outSlotOf_sat one_ne_zero (num2Bits_one (by norm_num)) (num2Bits_zero 64) _ _) j
 
-theorem spendOut_rho (j : ℕ) : (spendOut j).rho = deriveRho spendNf0 (j : F) :=
+theorem minOut_rho (j : ℕ) : (minOut j).rho = deriveRho spendNf0 (j : F) :=
   pair_cases (motive := fun (j : ℕ) (o : OutputSlot) => o.rho = deriveRho spendNf0 (j : F))
     rfl (fun _ _ => rfl) j
 
-theorem spendOut_cv (j : ℕ) : (spendOut j).cv = coords (if j = 0 then assetGen 1 else 0) :=
+theorem minOut_cv (j : ℕ) : (minOut j).cv = coords (if j = 0 then assetGen 1 else 0) :=
   pair_cases
     (motive := fun (j : ℕ) (o : OutputSlot) =>
       o.cv = coords (if j = 0 then assetGen 1 else 0))
     (cvOf_one_coords 1)
     (fun _ hj => by rw [if_neg hj]; exact cvOf_zero_coords 1) j
 
-theorem spendOut_rH (j : ℕ) : (spendOut j).rH = coords 0 :=
+theorem minOut_rH (j : ℕ) : (minOut j).rH = coords 0 :=
   pair_forall (P := fun o : OutputSlot => o.rH = coords 0) rH_eq (fun _ => rH_eq) j
 
-noncomputable def spendParts : Parts 10 2 2 where
-  spent := spendIn
-  out := spendOut
-  root := realRoot
+noncomputable def minParts (depth nIn nOut : ℕ) : Parts depth nIn nOut where
+  spent := minIn depth
+  out := minOut
+  root := realRoot depth
   pubAsset := 0
   pubIn := 0
   pubAssetBits := zeroBits
@@ -730,21 +756,73 @@ noncomputable def spendParts : Parts 10 2 2 where
   outCvG := fun j => if j = 0 then assetGen 1 else 0
   pubInG := 0
 
-noncomputable def spendTx : TxWitness 10 2 2 := ofParts spendParts
+noncomputable def minTx (depth nIn nOut : ℕ) : TxWitness depth nIn nOut :=
+  ofParts (minParts depth nIn nOut)
+
+theorem minTx_sat (depth nIn nOut : ℕ) (hnIn : 0 < nIn) (hnOut : 0 < nOut) :
+    TransactSat (minTx depth nIn nOut) :=
+  transactSat_ofParts (minParts depth nIn nOut)
+    (minIn_sat depth) (minIn_root depth) (minIn_dummy depth) minOut_rho minOut_sat
+    (num2Bits_zero 64) (num2Bits_zero 64)
+    -- Only slot 0 carries value on either side, and both carry one unit of asset `1`, so
+    -- each accumulator collapses to `1 · [asset 1 = cand c]`.
+    (fun c _ => by
+      have hin : ∀ i, i ≠ 0 → inTermOf (ofParts (minParts depth nIn nOut)) c i = 0 := by
+        intro i hi
+        simp [inTermOf, inValue, minParts, minIn, pair, hi, padSlot]
+      have hout : ∀ j, j ≠ 0 → outTermOf (ofParts (minParts depth nIn nOut)) c j = 0 := by
+        intro j hj
+        simp [outTermOf, outValue, minParts, minOut, pair, hj, outSlotOf]
+      have hpubIn : (minParts depth nIn nOut).pubIn = 0 := rfl
+      simp only [lhsOf, rhsOf, ofParts_pubIn, ofParts_pubOut, hpubIn, zero_mul]
+      rw [accOf_single hin nIn hnIn, accOf_single hout nOut hnOut]
+      simp [inTermOf, outTermOf, inAsset, inValue, outAsset, outValue, ofParts_spent,
+        ofParts_out, minParts, minIn, minOut, pair, realSlot, outSlotOf])
+    (by
+      rw [pointSum_single (fun i hi => by simp [minParts, hi]) nIn hnIn,
+        pointSum_single (fun j hj => by simp [minParts, hj]) nOut hnOut]
+      simp [minParts])
+    (minIn_cv depth) minOut_cv (minIn_rH depth) minOut_rH (vTOf_zero 0)
+    (notAllDummy_of_head hnIn (minIn_isDummy_head depth) (minIn_isDummy_tail depth))
+
+/-! ## The two-in/two-out instance of it
+
+`minTx 10 2 2` under its old name. The shape-specific abbreviations below are what the
+two-asset transaction and the downstream results are stated over.
+-/
+
+noncomputable abbrev spendIn : ℕ → SpentSlot 10 := minIn 10
+
+theorem spendIn_sat (i : ℕ) : SpentNoteSat (spendIn i) := minIn_sat 10 i
+
+theorem spendIn_root (i : ℕ) : (spendIn i).root = realRoot 10 := minIn_root 10 i
+
+theorem spendIn_dummy (i : ℕ) :
+    IsBit (spendIn i).isDummy ∧ (spendIn i).isDummy * (spendIn i).value = 0 :=
+  minIn_dummy 10 i
+
+theorem spendIn_cv (i : ℕ) : (spendIn i).cv = coords (if i = 0 then assetGen 1 else 0) :=
+  minIn_cv 10 i
+
+theorem spendIn_rH (i : ℕ) : (spendIn i).rH = coords 0 := minIn_rH 10 i
+
+noncomputable abbrev spendOut : ℕ → OutputSlot := minOut
+
+theorem spendOut_sat (j : ℕ) : OutputNoteSat (spendOut j) := minOut_sat j
+
+theorem spendOut_rho (j : ℕ) : (spendOut j).rho = deriveRho spendNf0 (j : F) := minOut_rho j
+
+theorem spendOut_cv (j : ℕ) : (spendOut j).cv = coords (if j = 0 then assetGen 1 else 0) :=
+  minOut_cv j
+
+theorem spendOut_rH (j : ℕ) : (spendOut j).rH = coords 0 := minOut_rH j
+
+noncomputable abbrev spendParts : Parts 10 2 2 := minParts 10 2 2
+
+noncomputable def spendTx : TxWitness 10 2 2 := minTx 10 2 2
 
 /-- **A value-moving transaction satisfies the constraint system.** -/
-theorem spendTx_sat : TransactSat spendTx :=
-  transactSat_ofParts spendParts
-    spendIn_sat spendIn_root spendIn_dummy spendOut_rho spendOut_sat
-    (num2Bits_zero 64) (num2Bits_zero 64)
-    -- Both sides collapse to `1 · [asset 1 = cand c]`: one unit in, one unit out.
-    (fun _ _ => by
-      simp only [lhsOf, rhsOf, accOf, inTermOf, outTermOf, inAsset, inValue, outAsset,
-        outValue, ofParts_pubIn, ofParts_pubOut]
-      norm_num [ofParts_spent, ofParts_out, spendParts, spendIn, spendOut, pair, realSlot,
-        padSlot, outSlotOf])
-    (by simp [spendParts])
-    spendIn_cv spendOut_cv spendIn_rH spendOut_rH (vTOf_zero 0)
+theorem spendTx_sat : TransactSat spendTx := minTx_sat 10 2 2 (by norm_num) (by norm_num)
 
 /-! ## A transaction moving two different assets
 
@@ -781,7 +859,7 @@ theorem dualOut_rH (j : ℕ) : (dualOut j).rH = coords 0 :=
 noncomputable def dualParts : Parts 10 2 2 where
   spent := spendIn
   out := dualOut
-  root := realRoot
+  root := realRoot 10
   pubAsset := 2
   pubIn := 1
   pubAssetBits := twoBits
@@ -802,11 +880,12 @@ theorem dualTx_sat : TransactSat dualTx :=
     (fun _ _ => by
       simp only [lhsOf, rhsOf, accOf, inTermOf, outTermOf, inAsset, inValue, outAsset,
         outValue, ofParts_pubIn, ofParts_pubOut]
-      norm_num [ofParts_spent, ofParts_out, dualParts, spendIn, dualOut, pair, realSlot,
-        padSlot, outSlotOf]
+      norm_num [ofParts_spent, ofParts_out, dualParts, spendIn, minIn, dualOut, pair,
+        realSlot, padSlot, outSlotOf]
       ring)
     (by simp [dualParts, pointSum, Finset.sum_range_succ])
     spendIn_cv dualOut_cv spendIn_rH dualOut_rH (vTOf_one 2)
+    (notAllDummy_of_head (by norm_num) (minIn_isDummy_head 10) (minIn_isDummy_tail 10))
 
 end Witness
 
@@ -821,11 +900,11 @@ shape keeps them readable. `Transact(11, 4, 6)` gets its own witness further dow
 No compiled circuit is needed to instantiate the type: every result here is proved for the
 generic `Transact(depth, nIn, nOut)`. -/
 theorem transactSat_satisfiable : ∃ w : TxWitness 10 2 2, TransactSat w :=
-  ⟨Witness.padTx 10 2 2, Witness.padTx_sat 10 2 2⟩
+  ⟨Witness.minTx 10 2 2, Witness.minTx_sat 10 2 2 (by norm_num) (by norm_num)⟩
 
 /-- …and the conclusion really is derivable for it. -/
-theorem transact_wellFormed_witness : TxWellFormed (Witness.padTx 10 2 2) :=
-  transact_sound (by norm_num) (by norm_num) (Witness.padTx_sat 10 2 2)
+theorem transact_wellFormed_witness : TxWellFormed (Witness.minTx 10 2 2) :=
+  transact_sound (by norm_num) (by norm_num) (Witness.minTx_sat 10 2 2 (by norm_num) (by norm_num))
 
 /-- **`transact4x6_sound` is not vacuous.** The shipped shape, `Transact(11, 4, 6)`.
 
@@ -834,22 +913,22 @@ theorem transact_wellFormed_witness : TxWellFormed (Witness.padTx 10 2 2) :=
 would read vacuously. It is also what keeps the six-output end of the slot bound in
 `transact_sound` from being an unreachable hypothesis. -/
 theorem transact4x6Sat_satisfiable : ∃ w : Transact4x6, TransactSat w :=
-  ⟨Witness.padTx 11 4 6, Witness.padTx_sat 11 4 6⟩
+  ⟨Witness.minTx 11 4 6, Witness.minTx_sat 11 4 6 (by norm_num) (by norm_num)⟩
 
 /-- …and the conclusion is derivable at the target shape too. -/
-theorem transact4x6_wellFormed_witness : TxWellFormed (Witness.padTx 11 4 6) :=
-  transact4x6_sound (Witness.padTx_sat 11 4 6)
+theorem transact4x6_wellFormed_witness : TxWellFormed (Witness.minTx 11 4 6) :=
+  transact4x6_sound (Witness.minTx_sat 11 4 6 (by norm_num) (by norm_num))
 
 /-- **`SpentReal` is inhabited.** `spentNote_sound` concludes `SpentReal` from
 `is_dummy = 0`, and every slot in the padding witness is a dummy — so on its own that
 theorem could have been about an unreachable case. This exhibits a slot satisfying
 `SpentNoteSat` with the flag clear. -/
 theorem spentNoteSat_real_satisfiable : ∃ s : SpentSlot 10, SpentNoteSat s ∧ s.isDummy = 0 :=
-  ⟨Witness.realSlot, Witness.realSlot_sat, rfl⟩
+  ⟨Witness.realSlot 10, Witness.realSlot_sat 10, rfl⟩
 
 /-- …and the ownership, non-zero asset and membership conclusions really are derivable. -/
-theorem spentReal_witness : SpentReal Witness.realSlot :=
-  spentNote_sound Witness.realSlot_sat rfl
+theorem spentReal_witness : SpentReal (Witness.realSlot 10) :=
+  spentNote_sound (Witness.realSlot_sat 10) rfl
 
 /-- **A transaction that moves value is satisfiable.** The padding witness discharges every
 constraint with zero values, which leaves open whether the balance and value-commitment

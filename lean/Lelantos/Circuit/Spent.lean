@@ -19,7 +19,7 @@ The dummy branch deliberately yields nothing. When `is_dummy = 1`:
 * `asset_id` may be zero,
 * and the slot **still emits a prover-chosen `nullifier`**.
 
-Only `DummyZeroValue` (applied by the caller, `src/lib/transact.circom:120-121`) makes this safe,
+Only `DummyZeroValue` (applied by the caller, `src/lib/transact.circom:87-89`) makes this safe,
 by forcing `value = 0` so the slot is neutral for value conservation. The prover-chosen
 nullifier is a real obligation on the contract's double-spend set, not an artefact of the
 model — see `dummy_nullifier_unconstrained`.
@@ -82,7 +82,7 @@ constraint table is checked against this definition by eye, so it has to be read
 at a time; positional projections into a nested conjunction retarget silently when a
 constraint is inserted. -/
 structure SpentNoteSat {depth : ℕ} (s : SpentSlot depth) : Prop where
-  /-- `:46-47` — `ivk = Poseidon(TAG_IVK, nsk)`. -/
+  /-- `src/lib/spent.circom:46-47` — `ivk = Poseidon(TAG_IVK, nsk)`. -/
   ivk_def : s.ivk = deriveIvk s.nsk
   /-- `:49-50` — `pk_check.pk = Poseidon(TAG_PK, ivk)`. -/
   pk_derived : s.pkDerived = derivePk s.ivk
@@ -99,20 +99,20 @@ structure SpentNoteSat {depth : ℕ} (s : SpentSlot depth) : Prop where
   /-- `:71-78` — deposit value commitment (`ValueCommitPair.cv_dep`), sharing the value
   bits and generator with `cv_sat` below. -/
   cv_dep_sat : ValueCommitSat s.valueBits s.gen s.rcvDep s.rcvDepBits s.vTDep s.rHDep s.cvDep
-  /-- `:82-86` — leaf hash. -/
+  /-- `:82-88` — leaf hash. -/
   leaf_def : s.leaf = leafHash s.cm s.cvDep.x s.cvDep.y
-  /-- `:89-98` — membership, bypassed for dummies. -/
+  /-- `:91-100` — membership, bypassed for dummies. -/
   membership : MerkleProofOrDummySat depth s.leaf s.pathElements s.pathIndices s.root
     s.isDummy s.mpDiff s.mpComputed s.mpB s.mpS s.mpC s.mpChain
-  /-- `:102-103` — `nk = Poseidon(TAG_NK, nsk)`. -/
+  /-- `:104-105` — `nk = Poseidon(TAG_NK, nsk)`. -/
   nk_def : s.nk = deriveNk s.nsk
-  /-- `:105-109` — nullifier. -/
+  /-- `:107-111` — nullifier. -/
   nf_def : nullifierOf s.nk s.rho s.cm = s.nullifier
-  /-- `:112-113` — `IsZero(asset_id)`. -/
+  /-- `:114-115` — `IsZero(asset_id)`. -/
   asset_isZero : IsZeroSat s.assetId s.assetInv s.assetIsZero
-  /-- `:114` — real notes have a non-zero asset id. -/
+  /-- `:116` — real notes have a non-zero asset id. -/
   asset_nonzero_real : (1 - s.isDummy) * s.assetIsZero = 0
-  /-- `:71-78, 117-118` — value commitment (`ValueCommitPair.cv`, bound to the `cv`
+  /-- `:71-78, 119-120, 122-123` — value commitment (`ValueCommitPair.cv`, bound to the `cv`
   input), sharing the same value bits and generator as `cv_dep`. -/
   cv_sat : ValueCommitSat s.valueBits s.gen s.rcv s.rcvBits s.vT s.rH s.cv
 

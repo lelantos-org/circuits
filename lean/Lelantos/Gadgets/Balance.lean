@@ -5,7 +5,7 @@ import Mathlib.Tactic.Ring
 # `src/lib/balance.circom` — range checks and per-asset conservation
 
 Contains the load-bearing soundness result of the circuit: per-asset value conservation,
-`PerAssetValueBalance` (`src/lib/balance.circom:81`).
+`PerAssetValueBalance` (`src/lib/balance.circom:82`).
 
 The circuit checks conservation for only the `N_IN + N_OUT + 1` asset ids that appear in
 the transaction — eleven at the deployed `Transact(11, 4, 6)`. `perAssetValueBalance_all_assets` upgrades that to a statement about
@@ -232,14 +232,15 @@ private theorem cast_side (n : ℕ) (v : ℕ → F) (P : ℕ → Prop) [∀ i, D
   rw [Nat.cast_add, cast_term, cast_sum_terms]
 
 /-- **Per-asset conservation over `ℕ`.** With every value 64-bit range-checked and at most
-four input and four output slots, the field equality is an exact integer equality: no
+seven input and seven output slots, the field equality is an exact integer equality: no
 wrap-around forgery is possible.
 
-`≤ 4` is not a property of the circuit — `PerAssetValueBalance` is written for arbitrary
+`≤ 7` is not a property of the circuit — `PerAssetValueBalance` is written for arbitrary
 `N_IN` / `N_OUT`. It is the largest slot count for which the sums provably stay below `p`
-using only `two_pow_67_lt_p`, and it covers every shape the repository ships:
-`Transact(10, 2, 2)`, `Transact(10, 3, 3)` and `Transact(10, 4, 4)`. A wider shape needs a
-correspondingly wider bound in `Lelantos.Model.Field`, and nothing else. -/
+using only `two_pow_67_lt_p`, whose proof rounds `(n + 1) · 2^64` up to `8 · 2^64`. Seven
+is where that rounding runs out, not where any shape sits: the shipped
+`Transact(11, 4, 6)` is comfortably inside it. A wider shape needs a correspondingly wider
+bound in `Lelantos.Model.Field`, and nothing else. -/
 theorem perAssetValueBalance_nat
     (h : PerAssetValueBalanceSat nIn nOut inA inV outA outV pa pi po
       pubInv pubEq inInv inEq outInv outEq inTerm outTerm lhs rhs)

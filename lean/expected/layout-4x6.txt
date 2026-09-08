@@ -32,10 +32,6 @@ outCvX 4
 outCvY 4
 outCvX 5
 outCvY 5
-recipient
-chainId
-payer
-relayer
 outCvDepX 0
 outCvDepY 0
 outCvDepX 1
@@ -48,22 +44,3 @@ outCvDepX 4
 outCvDepY 4
 outCvDepX 5
 outCvDepY 5
-clueRx 0
-clueRy 0
-clueBits 0
-clueRx 1
-clueRy 1
-clueBits 1
-clueRx 2
-clueRy 2
-clueBits 2
-clueRx 3
-clueRy 3
-clueBits 3
-clueRx 4
-clueRy 4
-clueBits 4
-clueRx 5
-clueRy 5
-clueBits 5
-auxDigest

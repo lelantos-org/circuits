@@ -2,6 +2,7 @@ import { expect } from "chai";
 
 import { BN254_FR, hornerEval, mod } from "./helpers";
 import { fixturePath, loadCircuit, type CircuitTester } from "./lib/circuit";
+import { expectWitnessFails } from "./lib/expect";
 import { TIMEOUT_CIRCUIT } from "./lib/constants";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
@@ -36,13 +37,13 @@ describe("PolyEval (Horner-form binding gadget)", function () {
         }
     });
 
-    it("z = 0 ⇒ y = coeffs[0]", async () => {
+    it("FAILS at z = 0, which would leave every coefficient above 0 unbound", async () => {
         const coeffs = Array.from({ length: N }, (_, i) => BigInt(i + 1) * 11n);
-        const w = await circuit.calculateWitness(
+        await expectWitnessFails(
+            circuit,
             { coeffs: coeffs.map((c) => c.toString()), z: "0" },
-            true,
+            "z = 0 must be rejected",
         );
-        await circuit.assertOut(w, { y: coeffs[0].toString() });
     });
 
     it("z = 1 ⇒ y = Σ coeffs", async () => {

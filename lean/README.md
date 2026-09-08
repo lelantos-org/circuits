@@ -48,8 +48,10 @@ Individually:
 |---|---|
 | `lake build` | elaborates and kernel-checks every proof; runs the axiom guard over every declaration |
 | `./scripts/check-axioms.sh` | trusted base still matches `expected/axioms.txt` |
-| `./scripts/dump-layout.sh` | the public-input layout still matches `expected/layout-4x6.txt` |
-| `python3 scripts/check-prime.py` | discharges the two arithmetic axioms externally |
+| `./scripts/dump-layout.sh` | the transact and batch layouts still match `expected/layout-*.txt` |
+| `python3 lean/scripts/check-prime.py` | discharges the two arithmetic axioms externally |
+| `python3 lean/scripts/check-coverage.py` | every `===` / `<==` the circom emits is cited by something in `lean/` |
+| `python3 lean/scripts/check-names.py` | every `Lelantos` name the prose claims exists |
 
 CI runs the same set ([.github/workflows/lean.yml](../.github/workflows/lean.yml)).
 
@@ -81,7 +83,7 @@ The load-bearing result, and the one with the smallest trusted base.
 
 | Theorem | Where | Statement |
 |---|---|---|
-| `perAssetValueBalance_all_assets` | `Gadgets/Balance.lean` | the five candidate checks imply conservation for **every** asset id in the field |
+| `perAssetValueBalance_all_assets` | `Gadgets/Balance.lean` | the `N_IN + N_OUT + 1` candidate checks — eleven at `Transact(11, 4, 6)` — imply conservation for **every** asset id in the field |
 | `perAssetValueBalance_nat` | `Gadgets/Balance.lean` | …and as an exact **integer** equation, not a modular one |
 | `no_asset_creation` | `Circuit/Transact.lean` | an asset on no input and not in the public bucket cannot appear on any output |
 | `pointBalance_not_sound` | `Gadgets/PointBalance.lean` | the Edwards point balance is **not** a conservation check; exhibited at a 2-in, 2-out instance |
@@ -108,8 +110,33 @@ The load-bearing result, and the one with the smallest trusted base.
 | `transact_pi_binding` | `Circuit/Transact.lean` | two transactions with different public inputs share `(z, y)` for at most `piCount - 1` challenges, 68 at the shipped shape |
 | `transact_pi_binding_slot` | `Circuit/Transact.lean` | …stated per **named** public input |
 | `piSlot_slotIndex` | `Circuit/Witness.lean` | `slotIndex` inverts the coefficient layout, turning a named-field difference into a coefficient index |
+| `slotIndex_piSlot` | `Circuit/Witness.lean` | …and the other way, so no index other than a slot's own carries it |
+| `polyEval_forge` | `Gadgets/PolyEval.lean` | one free coefficient sends `y` to **any** target at a nonzero challenge — one linear equation, no collision |
+| `polyEval_not_binding` | `Gadgets/PolyEval.lean` | …hence compression binds nothing when a coefficient is unconstrained |
 
-### `tree_update_batch.circom`
+**Read the two halves together.** `transact_pi_binding` is the compression's
+security argument and it holds only with the coefficient vector fixed *before*
+the challenge. The prover gets the opposite order: `z` is a circuit input, and
+the contract derives it from calldata the prover authored. So Schwartz-Zippel
+does not carry the argument, and `polyEval_forge` says what fills the gap — the
+compression binds exactly when every coefficient is pinned by some other
+constraint, because `PolyEval` is affine in each with slope `z^k`.
+
+That makes the layout's *membership* the security property, and the layout is
+46 slots rather than 69 for exactly that reason. `recipient`, `chainId`, `payer`,
+`relayer`, the FMD clue triples and the payload digest carry no constraint in
+`4x6.circom`; as coefficients they were 23 free variables at once. They are not
+coefficients: `PubInputs.sol` hashes them into `z` and never evaluates them,
+which binds them against a tampering relayer at no cost. `piCount` records the
+rule, and the pinning table in `Circuit/Transact.lean` names the constraint
+behind every slot that remains.
+
+`TransactSat.not_all_dummy` is the other half of that table. `MerkleProofOrDummy`
+skips the root comparison on a dummy slot, so an all-dummy witness leaves
+`merkleRoot` read by nothing — a free coefficient. The circuit rejects it and
+`TxWellFormed.someRealInput` is the consequence.
+
+### `tree_update_batch.circom`### `tree_update_batch.circom`
 
 `Circuit/TreeUpdateBatch.lean` splits the constraint system in two: `BatchChainSat` (the
 append machinery) and `BatchDepositSat` (the per-leaf deposit binding). The split is
@@ -125,7 +152,11 @@ chain result below depends on `p_prime` alone.
 | `batch_step_stalls` | `Circuit/TreeUpdateBatch.lean` | an inactive step carries the running state through unchanged |
 | `batch_advances_by_count` | `Circuit/TreeUpdateBatch.lean` | **both halves at once: every step below `actual_count` is a real insert, and `new_root` is the running root at `actual_count`** — the formal content of "odd counts work" |
 | `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(11, 8)`, `COUNT_BITS = 3` |
-| `batch_bounds_deployed` | `Circuit/TreeUpdateBatch.lean` | the two side conditions are simultaneously satisfiable at the deployed shape, so the results above are not conditional on an impossible hypothesis |
+| `batch_active_index` | `Circuit/TreeUpdateBatch.lean` | **an active slot's insert digits are the digits of `start_index + k`**, and that position is below `4^DEPTH` |
+| `batch_advances_at_positions` | `Circuit/TreeUpdateBatch.lean` | …so leaf `k` is appended at tree position `start_index + k`, for every `k` below `actual_count` and no other |
+| `batch_advances_at_positions_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(11, 8)` |
+| `batchPiSlot_batchSlotIndex` | `Circuit/TreeUpdateBatch.lean` | the batch coefficient layout inverts, so `expected/layout-batch-8.txt` is derived from the definition rather than a second copy |
+| `batch_bounds_deployed` / `batch_depth_bound_deployed` | `Circuit/TreeUpdateBatch.lean` | the three side conditions are simultaneously satisfiable at the deployed shape, so the results above are not conditional on an impossible hypothesis |
 | `batch_deposit_opens` | `Circuit/TreeUpdateBatch.lean` | an active deposit leaf's `cv_dep` opens to exactly `leaf_public_in` units of `leaf_asset` |
 | `quaternaryInsertLevel_sound` | `Gadgets/Insert.lean` | the level arithmetic is the fill table: `cur` at the digit, frontier left, empty-subtree hash right — and the frontier update is a *different* mux, also proved |
 | `quaternaryInsert_sound` | `Gadgets/Insert.lean` | a satisfying assignment is an `InsertsTo`, with every digit quaternary |
@@ -146,6 +177,16 @@ leaf `k` at tree position `start_index + k` while position `start_index + k − 
 filled. It is the *contiguity* of the active prefix that rules that out. The statement never
 mentions the parity of `actual_count`, which is the whole point of the leaf-granular
 design.
+
+`batch_advances_at_positions` is what makes the sentence above about *positions* rather
+than about slots. `batch_advances_by_count` inserts each leaf at the digits the witness
+supplied and says nothing about which tree position those digits name; `idx_in`, `idx_bits`
+and `idx_dig` sat in the model with no theorem consuming them, so a witness free to choose
+`idx_dig` could have folded every leaf into one slot. `batch_active_index` closes it: it
+reads the digits back off the `Num2Bits(2·DEPTH)` decomposition — uniqueness of a binary
+decomposition (`bitNat_eq_digit`), then the pairing into quaternary digits
+(`quatDigit_eq_bits`) — and lands on `start_index + k` as a natural below `4^DEPTH`.
+`start_index_bits` is what stops `start_index` wrapping the modulus on the way.
 
 `batch_deposit_opens` is stated per leaf, with no aggregate anywhere in it. An aggregate
 form binding only `cv_dep[2i] + cv_dep[2i+1]` would fix `Σvalue` modulo the subgroup order
@@ -232,11 +273,11 @@ guard, and the hash assumption survives only as the explicit † hypothesis.
 
 **Per-asset conservation** mechanizes the candidate-set argument from
 [src/README.md § 6 "Value conservation, the binding check"](../src/README.md).
-`PerAssetValueBalance` checks only the five asset ids present in the transaction;
-`perAssetValueBalance_all_assets` shows that covers every asset id, and
-`perAssetValueBalance_nat` lifts the field equality to `ℕ` using the 64-bit range checks —
-the "three summands under `2^66 ≪ p`" argument at
-[balance.circom:75-80](../src/lib/balance.circom). Remove a `RangeCheck64` upstream and the
+`PerAssetValueBalance` checks only the `N_IN + N_OUT + 1` asset ids present in the
+transaction — eleven at the shipped shape; `perAssetValueBalance_all_assets` shows that
+covers every asset id, and `perAssetValueBalance_nat` lifts the field equality to `ℕ` using
+the 64-bit range checks — the "summands under `2^67 ≪ p`" argument at
+[balance.circom:75-81](../src/lib/balance.circom). Remove a `RangeCheck64` upstream and the
 theorem loses its hypothesis, which is exactly the failure that comment warns about. Both
 results depend on **`p_prime` alone** — no cryptographic assumption, which is what
 `PerAssetValueBalance` was written to achieve.
@@ -246,7 +287,14 @@ single-segment Pedersen hash, so every asset generator is a known multiple of on
 base, and asset ids 1, 2, 3 land on consecutive multipliers — giving `V¹ + V³ = 2·V²`.
 `pointBalance_not_sound` constructs an assignment satisfying the point equation while minting
 value; `cross_asset_cancellation_rejected` shows that same asset/value pattern has **no**
-satisfying assignment of the full system. Together they are exactly the claim
+satisfying assignment of the full system.
+
+The constraint is stated over the **coordinate pairs** the circuit compares, folded with
+`babyAdd` exactly as `PointSum` builds them. It was once stated over group elements, and
+that cost `TransactSat` six fields asserting each published `cv` / `rH` pair to be the image
+under `coords` of a subgroup element — no such check exists in `4x6.circom`, so they were
+the only fields in the model in the dangerous direction of
+[FIDELITY.md](FIDELITY.md)'s table. They are gone. Together they are exactly the claim
 [balance.circom:53-64](../src/lib/balance.circom) makes in prose, and nothing in the
 development may derive conservation from the point equation.
 
@@ -259,6 +307,13 @@ development may derive conservation from the point equation.
   frontier is the honest one for `old_root`. The constraint `old_root === frontier_root.root`
   is what stops a relayer pairing a real `old_root` with a forged frontier — a permanent-DoS
   vector — and it is modelled nowhere. This is the largest remaining gap in the batch proof.
+
+  Its `Num2Bits(2·DEPTH)` on `start_index` **is** modelled
+  (`BatchChainSat.start_index_bits`), because `batch_active_index` needs it: without a
+  range check on `start_index` the gated index `active[k] · (start_index + k)` decomposes
+  to some natural, but not to `start_index.val + k`, and the position claim collapses.
+  That is one constraint of `frontier_root.circom`'s twenty-nine, and it says nothing about
+  the frontier.
 * **Uniqueness of a deposit leaf's opening.** `batch_deposit_opens` gives existence, not
   uniqueness, and uniqueness is false in general: the Pedersen asset generators are known
   multiples of one base, so `v · m(a) == v' · m(a')` with both values under `2^64` lets a
@@ -271,19 +326,34 @@ development may derive conservation from the point equation.
   curve equation, only the opaque `coords` / `babyAdd` interface, so "the point is on the
   curve" is not expressible. `batch_deposit_opens` gets its point structure from the
   value-commitment gadget instead.
-* **`BatchCompress` slot order.** `polyEval_sound` and `polyEval_binding` cover the Horner
-  chain for any coefficient vector, but the batch layout (`4 + 6·MAX_L`) is pinned against
-  `PubInputs.sol` by `test/tree_update_batch.test.ts`, not in Lean. `dump-layout.sh`
-  covers the transact layouts only.
-* **Layout parity all the way to the contract.** `dump-layout.sh` pins the `4x6` layout
-  against Lean and `test/formal/layout_parity.test.ts` pins the published vector to that
-  dump, but `PubInputs.sol` has no 69-slot `compress` overload yet, so the chain ends at the
-  vector rather than at the contract.
+* ~~**`BatchCompress` slot order.**~~ Now covered: `batchPiSlot` defines the
+  `4 + 6·MAX_L` layout, `dump-layout.sh` writes `expected/layout-batch-8.txt`, and
+  `test/formal/batch_layout_parity.test.ts` checks the published vector against it. The
+  Horner chain itself was always covered by `polyEval_sound` / `polyEval_binding`; what was
+  missing was the order, and the batch test anchored on the published vector — the same
+  file the SDK and the contracts fixture read, so a drift agreed on by all three was
+  invisible. It is now anchored on Lean.
+* **Layout parity all the way to the contract.** `dump-layout.sh` pins the `4x6` and
+  batch layouts against Lean and the two `*_layout_parity` tests pin the published vectors
+  to those dumps, but `PubInputs.sol` has no 69-slot `compress` overload yet, so the
+  transact chain ends at the vector rather than at the contract.
 * **Under-constrainedness of the compiled R1CS**, beyond what Picus establishes — see
   [Under-constrainedness](#under-constrainedness-of-the-compiled-r1cs) below.
-* **Contract obligations.** Nullifier freshness, `z` being a genuine Fiat-Shamir challenge,
-  and the `chain_id` / `recipient_address` checks are recorded in
-  `Lelantos.ContractObligations` and assumed by nothing.
+* **Contract obligations.** Nullifier freshness, the `chain_id` / `recipient_address`
+  checks and the aux-digest recomputation are recorded in `Lelantos.ContractObligations` as
+  `True` and assumed by nothing. A stub there is a claim made outside Lean, not a
+  discharged one.
+* **That the compression is binding, unconditionally.** It is binding only under
+  `ContractObligations.challenge_binds_witness`, and that field is discharged by an argument
+  Lean states but does not close: every coefficient is pinned by a constraint the prover
+  cannot solve around. "Pinned" is checked slot by slot in the table in
+  `Circuit/Transact.lean`; it is not a theorem, because "cannot steer a Poseidon image to a
+  chosen value" is a preimage assumption, not arithmetic.
+* **The residue in the three 64-bit slots.** `publicAssetId` is free within its range when
+  `publicIn = publicOut = 0`, and `(publicIn, publicOut)` shift together without disturbing
+  conservation: about 128 bits of freedom against a 254-bit modulus, so a solution to the
+  linear equation exists for roughly `2⁻¹²⁶` of challenges. Bounded by the range checks,
+  not eliminated, and not proved here.
 * **Anything requiring Poseidon collision resistance** — the † rows, i.e. all of `TxBinding`.
   These follow from `¬ PoseidonCollision`, which `poseidon_collision` shows is unsatisfiable,
   so read literally they are vacuous. The assumption sits in the statement rather than in an
@@ -291,7 +361,10 @@ development may derive conservation from the point equation.
   non-vacuous treatment needs a concrete-security formulation with an explicit adversary and
   advantage bound, which is a separate and much larger development. The containment is the
   point: `transact_sound`, conservation, the range checks and `PolyEval` are unaffected.
-* **The dangerous direction of transcription error** — see [FIDELITY.md](FIDELITY.md).
+* **The dangerous direction of transcription error** — a model constraint the circuit does
+  not impose. `check-coverage.py` and the signal map close the *other* direction and the
+  misreading one; catching this needs the witness-parity harness, which is not built. See
+  [FIDELITY.md](FIDELITY.md), Defence 2.
 
 ## Under-constrainedness of the compiled R1CS
 
@@ -341,7 +414,7 @@ flowchart LR
     GUARD --> ALLOW{{"axiom ∈ allow-list?"}}
     ALLOW -->|no| FAILB["build fails"]
 
-    SRC -->|"lake env lean Meta/Assumptions"| PRINT["axiom report<br/><i>48 headline theorems</i>"]
+    SRC -->|"lake env lean Meta/Assumptions"| PRINT["axiom report<br/><i>63 headline theorems</i>"]
     PRINT --> DIFF{{"diff expected/axioms.txt"}}
     DIFF -->|differs| FAILA["check-axioms.sh fails"]
 
@@ -362,7 +435,7 @@ everything, and a `P ∨ PoseidonCollision` conclusion is discharged by `Or.inr`
 
 The two primality axioms (`p_prime`, `ell_prime`) exist only because Mathlib's `norm_num`
 extension is trial-division based and cannot certify 254- and 251-bit numbers.
-`scripts/check-prime.py` discharges them externally: for `p` it verifies the full
+`lean/scripts/check-prime.py` discharges them externally: for `p` it verifies the full
 factorization of `p - 1` and exhibits a base of order exactly `p - 1` — a Lucas certificate,
 hence a real primality proof — and checks `babyjub_order = 8 · ell` plus every size bound the
 proofs consume. For `ell` it runs 64-round Miller-Rabin only, stated plainly in the script's

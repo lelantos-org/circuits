@@ -1,12 +1,13 @@
 import { expect } from "chai";
 import * as fc from "fast-check";
 
-import { Poseidon, MerkleTree, Field } from "../helpers";
-import { fixturePath, loadCircuit } from "../lib/circuit";
+import { MerkleTree, Field } from "../helpers";
+import { fixturePath } from "../lib/circuit";
 import { merkleInputJson } from "../lib/inputs";
 import { expectWitnessFails, witnessMatchesRoot } from "../lib/expect";
 import { fcParamsFor, arbField, arbDistinctInt, R } from "./arbitraries";
 import { ARITY, TIMEOUT_HEAVY } from "../lib/constants";
+import { useCircuit } from "../lib/harness";
 
 const DEPTH = 2;
 const N_LEAVES = ARITY ** DEPTH;
@@ -29,29 +30,23 @@ const ROUND_TRIP_EXAMPLES: [bigint[], number][] = [
 describe("quaternary merkle [fuzz]", function () {
     this.timeout(TIMEOUT_HEAVY);
 
-    let circuit: any;
-    let P: Poseidon;
-
-    before(async () => {
-        P = await Poseidon.build();
-        circuit = await loadCircuit(WRAPPER);
-    });
+    const ctx = useCircuit(WRAPPER);
 
     it("insert+proof round-trip verifies for any leaf set and any index", async () => {
         await fc.assert(fc.asyncProperty(
             fc.array(arbField(1n << 200n), { minLength: N_LEAVES, maxLength: N_LEAVES }),
             fc.integer({ min: 0, max: N_LEAVES - 1 }),
             async (leaves, queryIdx) => {
-                const tree = new MerkleTree(P, DEPTH);
+                const tree = new MerkleTree(ctx.P, DEPTH);
                 for (const l of leaves) tree.insert(l);
                 const expected = tree.root();
                 const { pathElements, pathIndices } = tree.proof(queryIdx);
 
-                const w = await circuit.calculateWitness(
+                const w = await ctx.circuit.calculateWitness(
                     merkleInputJson(leaves[queryIdx], pathElements, pathIndices), true,
                 );
-                await circuit.checkConstraints(w);
-                await circuit.assertOut(w, { root: expected.toString() });
+                await ctx.circuit.checkConstraints(w);
+                await ctx.circuit.assertOut(w, { root: expected.toString() });
             },
         ), fcParamsFor("MERKLE", { examples: ROUND_TRIP_EXAMPLES }));
     });
@@ -66,7 +61,7 @@ describe("quaternary merkle [fuzz]", function () {
             // 0..2. Non-adjacent pairs are included, covering the 0↔2 boundary.
             arbDistinctInt(0, ARITY - 2),
             async (leaves, queryIdx, swapLevel, [a, b]) => {
-                const tree = new MerkleTree(P, DEPTH);
+                const tree = new MerkleTree(ctx.P, DEPTH);
                 for (const l of leaves) tree.insert(l);
                 const { pathElements, pathIndices } = tree.proof(queryIdx);
 
@@ -76,10 +71,10 @@ describe("quaternary merkle [fuzz]", function () {
                 if (swapped[swapLevel][a] === swapped[swapLevel][b]) return;
                 [swapped[swapLevel][a], swapped[swapLevel][b]] = [swapped[swapLevel][b], swapped[swapLevel][a]];
 
-                const w = await circuit.calculateWitness(
+                const w = await ctx.circuit.calculateWitness(
                     merkleInputJson(leaves[queryIdx], swapped, pathIndices), true,
                 );
-                expect(await witnessMatchesRoot(circuit, w, tree.root())).to.equal(false);
+                expect(await witnessMatchesRoot(ctx.circuit, w, tree.root())).to.equal(false);
             },
         ), fcParams);
     });
@@ -90,12 +85,12 @@ describe("quaternary merkle [fuzz]", function () {
             fc.integer({ min: 0, max: DEPTH - 1 }),
             fc.integer({ min: 4, max: 1 << 20 }),
             async (queryIdx, level, badIdx) => {
-                const tree = new MerkleTree(P, DEPTH);
+                const tree = new MerkleTree(ctx.P, DEPTH);
                 for (let i = 0; i < N_LEAVES; i++) tree.insert(BigInt(0x100 + i));
                 const { pathElements, pathIndices } = tree.proof(queryIdx);
                 pathIndices[level] = badIdx;
                 await expectWitnessFails(
-                    circuit,
+                    ctx.circuit,
                     merkleInputJson(tree.leaves[queryIdx], pathElements, pathIndices),
                     "expected out-of-range path_index to fail",
                 );

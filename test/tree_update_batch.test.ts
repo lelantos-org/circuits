@@ -13,17 +13,31 @@
 
 import { BN254_FR, Jubjub, Poseidon } from "./helpers";
 import { loadCircuit, srcPath, type CircuitTester } from "./lib/circuit";
-import { treeUpdateBatchInputJson } from "./lib/inputs";
-import { expectWitnessFails, expectWitnessY } from "./lib/expect";
 import {
+    treeUpdateBatchChallenge,
+    treeUpdateBatchInputJson,
+    type TreeUpdateBatchPublicArgs,
+} from "./lib/inputs";
+import {
+    assertViewsDiverge,
+    expectNotForgeable,
+    expectWitnessFails,
+    expectWitnessY,
+} from "./lib/expect";
+import {
+    bindFiatShamir,
     buildHonest,
     buildLeafWitness,
+    calldataView,
+    depositPairs,
     rebindFiatShamir,
+    DIVERGENCE_CASES,
     simpleLeaf,
     type BatchWitness,
     type LeafWitness,
 } from "./lib/batch";
 import { ARITY, BATCH_DEPTH, MAX_L, TIMEOUT_HEAVY, TWO_64, TWO_252 } from "./lib/constants";
+import { buildJubjub } from "./lib/harness";
 
 /** Leaf capacity of the batch circuit's tree: 4^11. */
 const CAPACITY = ARITY ** BATCH_DEPTH;
@@ -39,7 +53,7 @@ describe("tree_update_batch", function () {
 
     before(async () => {
         P = await Poseidon.build();
-        J = await Jubjub.build();
+        J = await buildJubjub();
         circuit = await loadCircuit(WRAPPER);
     });
 
@@ -442,17 +456,179 @@ describe("tree_update_batch", function () {
         );
     });
 
-    it("FAILS on a deposit leaf claiming asset id 0", async () => {
-        // asset 0 is reserved: SpentNote rejects it on every real note, so a leaf
-        // minted at asset 0 is committed and then unspendable. Built honestly at
-        // asset 0 — cv_dep opens correctly to leaf_public_in units of V^0 — so
-        // the deposit equality holds and the IsZero guard is what rejects.
+
+    // ===== Degenerate deposit binding (step 7a) =====
+    //
+    // The deposit binding pins `leaf_asset[k]` only while the V^leaf_asset term
+    // survives. `ValueTimesGen(0, gen)` is the curve identity for every `gen`,
+    // so at `leaf_public_in[k] == 0` the equality collapses to
+    // `cv_dep[k] == rcv[k]·H` and the asset drops out of the system — leaving a
+    // coefficient held only by a 64-bit range check, which is not a pin. Four
+    // such leaves would be 4 × 64 = 256 bits of free dial against a 254-bit
+    // modulus.
+    //
+    // Step 7a splits per slot: a leaf carrying value must declare a non-zero
+    // asset (the binding pins it), and a worthless leaf must declare asset 0
+    // (nothing reads it, so it is canonicalised rather than left free).
+
+    it("a zero-value fee note is accepted at asset 0", async () => {
+        // The liveness case this must not break. A flush at fbps = 0 mints a
+        // worthless fee note, which `_validateDeposit` permits explicitly ("The
+        // fee note's value may be zero").
+        const leaves = [
+            simpleLeaf({ J, P, val: 1000n, isDeposit: 1, asset: 7n, pk: 0xf01n }),
+            simpleLeaf({ J, P, val: 0n, isDeposit: 1, asset: 0n, pk: 0xf02n }),
+        ];
+        const w = buildHonest(P, 0, leaves);
+        await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
+    });
+
+    it("7a: FAILS on a zero-value deposit leaf declaring a non-zero asset", async () => {
+        // The dial itself. With the value at zero the binding says nothing about
+        // the asset, so an un-canonicalised asset here would be a free 64-bit
+        // coefficient. Built honestly at asset 7 — cv_dep opens correctly — so
+        // 7a is what rejects, not the Pedersen equality.
+        const leaves = [
+            simpleLeaf({ J, P, val: 1000n, isDeposit: 1, asset: 7n, pk: 0xf03n }),
+            simpleLeaf({ J, P, val: 0n, isDeposit: 1, asset: 7n, pk: 0xf04n }),
+        ];
+        const w = buildHonest(P, 0, leaves);
+        await expectWitnessFails(
+            circuit,
+            treeUpdateBatchInputJson(w),
+            "zero_value[1] * leaf_asset[1] === 0 must reject a worthless leaf with an asset",
+        );
+    });
+
+    it("7a: a valued leaf still requires a non-zero asset", async () => {
+        // The other arm, unchanged from before: SpentNote refuses id 0 on every
+        // real note, so a valued leaf minted there is committed and unspendable.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 100n, isDeposit: 1, asset: 0n })]);
         await expectWitnessFails(
             circuit,
             treeUpdateBatchInputJson(w),
-            "active_dep[0] * IsZero(leaf_asset[0]) === 0 must reject a deposit at asset 0",
+            "(active_dep[0] - zero_value[0]) * IsZero(leaf_asset[0]) === 0 must reject asset 0",
         );
+    });
+
+    it("a full flush of four principal/fee pairs, every fee note worthless, passes", async () => {
+        // The exact configuration that supplied the four free 64-bit dials.
+        // Still provable — the fix removes the freedom, not the shape.
+        const w = buildHonest(P, 0, depositPairs(P, J, MAX_L));
+        await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
+    });
+
+    it("a deposit leaf at an odd slot needs no relation to its neighbour", async () => {
+        // The circuit is layout-agnostic: nothing ties slot k to slot k-1, so a
+        // consumer may lay deposits out however it likes. A cross-asset pair of
+        // VALUED leaves is fine here and is rejected on-chain instead, by the
+        // escrow digest in MASP._drainDeposit.
+        const leaves = [
+            simpleLeaf({ J, P, val: 100n, isDeposit: 1, asset: 7n, pk: 0xf05n }),
+            simpleLeaf({ J, P, val: 25n, isDeposit: 1, asset: 99n, pk: 0xf06n }),
+        ];
+        const w = buildHonest(P, 0, leaves);
+        await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
+    });
+
+    it("7a is vacuous on a spend batch", async () => {
+        // Gated on active_dep, so an all-spend batch is untouched: there
+        // `leaf_asset` and `leaf_public_in` are already forced to zero by the
+        // step-5 zeroings, which is a stronger pin than either arm.
+        const leaves = Array.from({ length: 6 }, (_, i) =>
+            simpleLeaf({ J, P, val: BigInt(10 + i), isDeposit: 0, pk: BigInt(0xf20 + i) }));
+        const w = buildHonest(P, 0, leaves);
+        await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
+    });
+
+    // ===== Divergent witness (soundness) =====
+    //
+    // Every other block in this file derives `(z, y)` from the same object it
+    // hands the circuit, via `rebindFiatShamir`. That answers "does constraint X
+    // fire" and nothing else: witness and calldata are the same batch by
+    // construction, so a signal the circuit never pins still reads as bound.
+    //
+    // A deployment keeps the two apart. `MASP` hashes ITS calldata into `z` and
+    // compares ITS `y`; the prover then picks any witness satisfying the R1CS at
+    // that `z`. `z` is a circuit INPUT, read before the witness is chosen, so
+    // Schwartz-Zippel does not apply and hashing a word into the challenge binds
+    // it only if a constraint already pins it (src/README.md § 2a).
+    //
+    // These tests build the two views separately with `calldataView` +
+    // `bindFiatShamir` and assert the circuit cannot be made to attest to a
+    // batch the contract did not validate.
+
+    /** The base each divergence is applied to: one honest single-leaf deposit. */
+    function honestDeposit(val = 1000n, isDeposit: 0 | 1 = 1): BatchWitness {
+        return buildHonest(P, 0, [simpleLeaf({ J, P, val, isDeposit, asset: 7n })]);
+    }
+
+    /** The shared harness guard, over this circuit's challenge preimage. */
+    function assertDiverged(w: BatchWitness, calldata: TreeUpdateBatchPublicArgs, field: string) {
+        assertViewsDiverge(treeUpdateBatchChallenge(w), treeUpdateBatchChallenge(calldata), field);
+    }
+
+    for (const { field, diverge } of DIVERGENCE_CASES) {
+        it(`divergent witness: ${field} declared differently in calldata cannot be forged`, async () => {
+            const w = honestDeposit();
+            const calldata = calldataView(w);
+            diverge(calldata);
+            assertDiverged(w, calldata, field);
+            bindFiatShamir(w, calldata);
+            await expectNotForgeable(circuit, treeUpdateBatchInputJson(w), w.y, field);
+        });
+    }
+
+    // The two reproductions below are the audit's confirmed mints, written as
+    // the attacker would stage them rather than as a one-field sweep. Both are
+    // reachable by a single party: `MASP.flushBatch` is unpermissioned and
+    // `deposit` is external, so the depositor can also be the flusher.
+
+    it("divergent witness: is_deposit cleared in the witness cannot mint an unbound leaf", async () => {
+        // Contract sees a 1-unit deposit of asset 7 and escrows accordingly.
+        // The witness declares the same leaf a SPEND: `active_dep` is then 0, so
+        // the only constraint tying `cv_dep` to an asset and an amount is gated
+        // off, and the committed leaf holds 2^63 units instead of 1.
+        //
+        // `is_deposit` is the gate for that constraint and is a private witness
+        // signal, so the circuit's own header lists it as a contract obligation
+        // (item 4) rather than something it enforces.
+        const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n << 63n, isDeposit: 0, asset: 7n })]);
+        const calldata = calldataView(w);
+        calldata.isDeposit[0] = 1;
+        calldata.leafAsset[0] = 7n;
+        calldata.leafPublicIn[0] = 1n;
+        assertDiverged(w, calldata, "is_deposit");
+        bindFiatShamir(w, calldata);
+        await expectNotForgeable(circuit, treeUpdateBatchInputJson(w), w.y, "is_deposit");
+    });
+
+    it("divergent witness: leaf_public_in inflated in the witness cannot mint value", async () => {
+        // The gate is left honestly at 1 and the deposit binding is genuinely
+        // satisfied — against the WITNESS's operands. `cv_dep` opens to 2^63
+        // units of asset 7 and the equality holds, while the calldata the
+        // contract escrowed against declares 1. This survives any fix that pins
+        // `is_deposit` alone.
+        const w = honestDeposit(1n << 63n);
+        const calldata = calldataView(w);
+        calldata.leafPublicIn[0] = 1n;
+        assertDiverged(w, calldata, "leaf_public_in");
+        bindFiatShamir(w, calldata);
+        await expectNotForgeable(circuit, treeUpdateBatchInputJson(w), w.y, "leaf_public_in");
+    });
+
+    it("divergent witness: a fully honest witness still matches its own calldata", async () => {
+        // Guards the harness. `bindFiatShamir` against an UNMODIFIED snapshot is
+        // the case every divergence above perturbs, so if the circuit's `y`
+        // disagreed with it here, each of them would be rejected for the wrong
+        // reason and the block would pass while proving nothing.
+        //
+        // The two binders cannot disagree — `rebindFiatShamir` is defined as
+        // this call — so what is checked is the circuit against the reference,
+        // not one binder against the other.
+        const w = honestDeposit();
+        bindFiatShamir(w, calldataView(w));
+        await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
     // ===== Tree capacity =====

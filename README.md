@@ -145,3 +145,44 @@ FUZZ=heavy FUZZ_SEED=1234 just test-fuzz
 
 CI picks the seed from the run id and writes the replay command into the job
 summary, so a nightly failure stays reproducible after the logs expire.
+
+### Underconstraint search
+
+`just underconstrained` searches for a SECOND witness the R1CS accepts.
+
+The tamper and fuzz suites mutate the circuit's input object and require the
+witness calculator to reject. That tests the witness generator. A Groth16 proof
+binds the constraint system instead, and the two are not the same artifact: a
+signal a template computes with `<--` but never constrains is one a prover picks
+freely, and no input the generator accepts can reveal it, because the generator
+turns every input it accepts into a self-consistent witness.
+
+So this suite starts from an honest witness and edits the witness VECTOR. Every
+search reduces to one question — given a direction `v`, which steps `t` keep
+`w + t·v` satisfying? — which each constraint answers exactly, as a quadratic in
+`t` whose constant term vanishes because `w` is honest.
+
+- **Single-signal**: the unit vectors, so all ~100k witness entries, each decided
+  exactly with everything else held fixed.
+- **Multi-signal**: the null space of the Jacobian restricted to each gadget and
+  each constraint. A null vector is a direction whose first-order effect cancels
+  everywhere at once — exactly the freedom the unit sweep cannot see, because
+  along it every individual signal is still pinned by the others.
+- **Bit decompositions**: recovered from the coefficients of the `--O0` build and
+  checked for a width past `2^253` (where the bits of `v` and `v + p` both
+  satisfy the sum) and for digits carrying no booleanity constraint.
+
+A differing output or public input is a soundness break. A differing intermediate
+is malleability, and each one must be EXPLAINED by a rule that states a
+precondition and has it verified against the witness — not by a list of accepted
+signal names.
+
+Remaining gap: the group search holds everything outside a group fixed, and null
+directions are straight lines, so freedom spanning unrelated components or lying
+along a curved variety is out of reach. `just picus` decides the general case.
+
+`test/underconstrained_selftest.test.ts` points each check at a circuit broken in
+exactly the way that check exists to find, so a detector that silently matches
+nothing fails rather than reporting a clean bill of health. One fixture is built
+so the single-signal sweep MUST miss it — each signal of a pair is pinned while
+the other holds still — which is what keeps the multi-signal search honest.

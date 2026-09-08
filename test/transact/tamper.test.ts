@@ -52,7 +52,7 @@ interface TamperCase {
     base?: TamperBase;
 }
 
-type TamperBase = "balanced" | "allDummy" | "fullShape";
+type TamperBase = "balanced" | "oneRealRestDummy" | "fullShape";
 
 // ===== per-slot expansion =====
 //
@@ -137,10 +137,11 @@ const TAMPER_CASES: TamperCase[] = [
 
     // -- booleanity --
     // On `fullShape` every slot is real (is_dummy = 0), so 2 is out of range for
-    // each of them; the `allDummy` row below covers the is_dummy = 1 side.
+    // each of them; the row below covers the is_dummy = 1 side, in slot 1, which
+    // `oneRealRestDummy` fills with a dummy.
     ...perInput("in_is_dummy[%]", "in_is_dummy must be 0 or 1", { value: () => 2n }),
-    { path: "in_is_dummy[0]", reason: "in_is_dummy must be 0 or 1, in a dummy slot too",
-      value: () => 2n, base: "allDummy" },
+    { path: "in_is_dummy[1]", reason: "in_is_dummy must be 0 or 1, in a dummy slot too",
+      value: () => 2n, base: "oneRealRestDummy" },
 
     // -- Merkle path --
     // Both halves of an authentication path, per input: a bad digit and a
@@ -157,18 +158,46 @@ describe("transact_4x6 / single-field tamper", function () {
 
     const ctx = useTransactCircuit();
 
+    /**
+     * The three honest bases, built once and handed out as deep copies.
+     *
+     * There are 127 tamper rows and three distinct bases between them, and each
+     * base costs a full `TxBuilder` run — a tree, four inserts, four
+     * authentication paths — which was ~85% of every row's time. `structuredClone`
+     * of the finished input dict is free by comparison, and a row only ever
+     * writes one field of its copy, so the shared originals cannot drift.
+     */
+    type BaseName = NonNullable<TamperCase["base"]>;
+    const bases = {} as Record<BaseName, CircomTransactInput>;
+
+    before(() => {
+        bases.fullShape = ctx.tx.fullShape();
+        bases.balanced = ctx.tx.balanced();
+        bases.oneRealRestDummy = oneRealRestDummy();
+    });
+
+    // `base` is optional on a row; omitted means the balanced shape.
     function honest(base: TamperCase["base"]): CircomTransactInput {
+        return structuredClone(bases[base ?? "balanced"]);
+    }
+
+    /**
+     * One real input in slot 0, dummies in slots 1..N_IN-1, balanced and honest.
+     *
+     * The base for the rows that need a DUMMY slot to tamper. It cannot be an
+     * all-dummy bundle: `Transact` asserts `all_dummy.out === 0`
+     * (src/lib/transact.circom), so a bundle whose every input slot is a dummy is
+     * rejected before any tamper is read, and a rejection test built on one
+     * passes no matter what it does to the witness.
+     */
+    function oneRealRestDummy(): CircomTransactInput {
         const { tx } = ctx;
-        if (base === "allDummy") {
-            const { root, inputs } = tx.allDummyInputs();
-            return tx.build({
-                inputs,
-                outputs: [tx.note(0n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-                merkleRoot: root,
-            });
-        }
-        if (base === "fullShape") return tx.fullShape();
-        return tx.balanced();
+        const { root, inputs } = tx.oneRealOneDummy(1000n, ALICE_NSK);
+        return tx.build({
+            inputs,
+            outputs: [tx.note(1000n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
+            merkleRoot: root,
+        });
     }
 
     // The base every per-slot row tampers. Without it a row could "pass" because
@@ -176,6 +205,14 @@ describe("transact_4x6 / single-field tamper", function () {
     // would then be vacuous, and the whole expansion would prove nothing.
     it("accepts the fully-occupied shape: every input and output slot real", async () => {
         await expectAccepts(ctx.circuit, ctx.tx.fullShape());
+    });
+
+    // Same guard for the dummy-slot base. This one is not hypothetical: these
+    // rows previously ran on an all-dummy bundle, which `all_dummy.out === 0`
+    // rejects on its own, so they passed while proving nothing about the field
+    // they tampered.
+    it("accepts one real input with the remaining slots dummy", async () => {
+        await expectAccepts(ctx.circuit, oneRealRestDummy());
     });
 
     for (const { path, reason, value, base } of TAMPER_CASES) {
@@ -241,15 +278,10 @@ describe("transact_4x6 / single-field tamper", function () {
     });
 
     it("FAILS when a dummy input's nullifier is replaced", async () => {
-        const { tx, circuit } = ctx;
-        const { root, inputs } = tx.allDummyInputs();
-        const input = tx.build({
-            publicIn: 1000n,
-            inputs,
-            outputs: [tx.note(1000n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-        });
-        writeField(input, "nullifier[0]", 42n);
-        await expectWitnessFails(circuit, input, "nf is constrained in dummy slots as well");
+        const input = oneRealRestDummy();
+        // Slot 1 is a dummy; slot 0 holds the real note that keeps the bundle
+        // past `all_dummy.out === 0`.
+        writeField(input, "nullifier[1]", 42n);
+        await expectWitnessFails(ctx.circuit, input, "nf is constrained in dummy slots as well");
     });
 });
