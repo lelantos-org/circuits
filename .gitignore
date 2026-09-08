@@ -8,3 +8,7 @@ bench/public/input.json
 # CI staging dir for release assets; populated by .github/workflows/publish.yml.
 release
 assets
+# Python bytecode from lean/scripts/. The checks import each other, so running
+# one leaves a __pycache__ beside them.
+__pycache__/
+*.pyc
