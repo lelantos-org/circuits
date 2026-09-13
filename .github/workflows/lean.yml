@@ -51,16 +51,29 @@ jobs:
           # There is no `test` or `lint` target; do not let auto-config invent one.
           test: false
           lint: false
-          # Independent kernel re-check of every declaration under the
-          # `Lelantos` prefix, catching a proof that type-checks only because of
-          # an elaborator bug. Run with no arguments, so its target is the
-          # capitalized manifest package name; see `lean/lakefile.toml`.
-          #
-          # Runs on pull requests as well as pushes. The whole job is already
-          # path-filtered to `lean/**` and `src/**`, so this only fires on a
-          # change that could affect a proof — and a proof that survives only an
-          # elaborator bug should not reach `main` in the first place.
-          leanchecker: true
+          # Run as its own step below, after pruning: the action would run it
+          # straight after restoring `.lake`, orphaned oleans included.
+          leanchecker: false
+
+      # The restored `.lake` cache keeps the olean of every module ever built,
+      # including ones whose source has since been deleted or renamed, and
+      # `leanchecker` replays all of them. An orphan fails against the current
+      # oleans of the modules it imported, so drop those outputs first.
+      - name: Prune build outputs of deleted modules
+        run: ./scripts/prune-stale-build.sh
+
+      # Independent kernel re-check of every declaration under the `Lelantos`
+      # prefix, catching a proof that type-checks only because of an elaborator
+      # bug. Run with no arguments, so its target is the capitalized manifest
+      # package name; see `lean/lakefile.toml`. The same command `lean-action`
+      # runs for `leanchecker: true`.
+      #
+      # Runs on pull requests as well as pushes. The whole job is already
+      # path-filtered to `lean/**` and `src/**`, so this only fires on a
+      # change that could affect a proof — and a proof that survives only an
+      # elaborator bug should not reach `main` in the first place.
+      - name: Kernel re-check (leanchecker)
+        run: lake env leanchecker
 
       # `check-axioms.sh` catches a `sorryAx` reaching a top-level theorem; this
       # also catches a `sorry` in a file nothing imports.

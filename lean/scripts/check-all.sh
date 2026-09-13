@@ -3,7 +3,8 @@
 #
 # `lake build` is the proof check: compiling a Lean module elaborates and kernel-checks
 # every proof in it, and it also runs the environment-wide axiom scan in
-# `Lelantos.Meta.AxiomGuard`. The rest compare the development against artefacts outside
+# `Lelantos.Meta.AxiomGuard`. `leanchecker` then replays every declaration through the
+# kernel a second time, independently of the elaborator. The rest compare the development against artefacts outside
 # it — the primality of the field modulus, the recorded trusted base, the public-input
 # layout the SDK and the contract also implement, the source citations the doc comments
 # carry, the constraints those citations reach, and the Lean names the prose claims
@@ -19,6 +20,11 @@ python3 scripts/check-prime.py
 
 step "Build and proof check"
 lake build
+
+step "Kernel re-check"
+./scripts/prune-stale-build.sh
+lake env leanchecker
+echo "OK: leanchecker replayed every Lelantos module."
 
 step "No admitted proofs"
 if grep -rn '\bsorry\b' Lelantos/ Lelantos.lean; then

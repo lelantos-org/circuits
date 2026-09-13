@@ -12,3 +12,4 @@ assets
 # one leaves a __pycache__ beside them.
 __pycache__/
 *.pyc
+.DS_Store
