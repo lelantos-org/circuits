@@ -215,7 +215,7 @@ export function flattenBatch(input: FlattenBatchInput): Field[] {
  * hardness, but degenerates on its own: `ValueTimesGen(0, gen)` is the curve
  * identity for every `gen`, so at `leaf_public_in[k] === 0` the equality reduces
  * to `cv_dep[k] == rcv[k]·H` and `leaf_asset[k]` retains only a 64-bit range
- * check — and a range check is not a pin. Step 7a of the circuit closes that per
+ * check — and a range check is not a pin. Step 6a of the circuit closes that per
  * slot: on an active deposit leaf, `leaf_asset == 0` exactly when
  * `leaf_public_in == 0`, so a worthless leaf's asset is pinned to a constant and
  * a valued one's is pinned by the binding.

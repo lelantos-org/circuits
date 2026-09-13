@@ -10,10 +10,15 @@ import Lelantos.Model.Jubjub
 import Lelantos.Gadgets.Comparators
 import Lelantos.Gadgets.Common
 import Lelantos.Gadgets.Note
+
+-- The quaternary tree the tree gadgets are proved against: no signals, only the tree an append
+-- produces and the insert it is made of. Built on the hash definitions above.
+import Lelantos.Spec.QuatTree
+
 import Lelantos.Gadgets.PolyEval
 import Lelantos.Gadgets.Balance
 import Lelantos.Gadgets.Merkle
-import Lelantos.Gadgets.Insert
+import Lelantos.Gadgets.BatchAppend
 import Lelantos.Gadgets.ValueCommit
 import Lelantos.Gadgets.PointBalance
 
@@ -36,7 +41,8 @@ import Lelantos.Proofs.Rejection
 # `Lelantos` — a machine-checked soundness proof for the transact circuit
 
 Importing this module brings in the whole development. The layers are strictly ordered:
-`Model` depends on nothing else here, `Gadgets` on `Model`, `Circuit` on both, and `Proofs`
-on the finished circuit. `Meta` sits outside that chain — it imports this module and reports
+`Model` depends on nothing else here, `Gadgets` on `Model`, `Spec` on the hash definitions in
+`Gadgets.Note` and `Gadgets.Common` (and the tree gadgets on `Spec`), `Circuit` on the gadgets,
+and `Proofs` on the finished circuit. `Meta` sits outside that chain — it imports this module and reports
 on it, which is why `lakefile.toml` names it as a separate build target.
 -/

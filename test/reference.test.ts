@@ -39,7 +39,9 @@ import {
     hornerEval,
     BN254_FR,
     FMD_DEFAULT_GAMMA,
+    type Field,
 } from "./helpers";
+import { prefillLeaf } from "./lib/batch";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -98,56 +100,72 @@ describe("reference / merkle path recomputation", function () {
         }
     });
 
-    // `fillConstant` seeds the node cache instead of hashing every internal
-    // node, so it is only sound while it agrees with a naive fill of the same
-    // leaves — including the frontier, which reads the seeded siblings.
-    it("fillConstant agrees with a naive constant fill (root and frontier)", () => {
-        const C = 0xdeadn;
-        for (const depth of [1, 2, 3]) {
-            const capacity = 4 ** depth;
-            for (let n = 0; n <= capacity; n++) {
-                const naive = new MerkleTree(P, depth);
-                for (let i = 0; i < n; i++) naive.insert(C);
+    // `fillBlocks` seeds the node cache instead of hashing every internal node, so
+    // it is only sound while it agrees with a naive fill of the same leaves —
+    // including the frontier, which reads the seeded siblings. Checked with one
+    // constant everywhere and with the per-slot constants batch witnesses use,
+    // where the frontier slots of a level must also differ.
+    const fills: [string, (level: number, index: number) => Field][] = [
+        ["one constant", () => 0xdeadn],
+        ["prefillLeaf", prefillLeaf],
+    ];
 
-                const fast = new MerkleTree(P, depth);
-                fast.fillConstant(n, C);
+    for (const [name, valueOf] of fills) {
+        it(`fillBlocks (${name}) agrees with a naive fill of the same leaves`, () => {
+            for (const depth of [1, 2, 3]) {
+                const capacity = 4 ** depth;
+                for (let n = 0; n <= capacity; n++) {
+                    const fast = new MerkleTree(P, depth);
+                    fast.fillBlocks(n, valueOf);
+                    const naive = new MerkleTree(P, depth);
+                    for (const leaf of fast.leaves) naive.insert(leaf);
 
-                const where = `depth ${depth}, n ${n}`;
-                expect(fast.root(), `root at ${where}`).to.equal(naive.root());
-                expect(fast.frontier(), `frontier at ${where}`).to.deep.equal(naive.frontier());
+                    const where = `depth ${depth}, n ${n}`;
+                    expect(fast.leaves.length, `leaf count at ${where}`).to.equal(n);
+                    expect(fast.root(), `root at ${where}`).to.equal(naive.root());
+                    expect(fast.frontier(), `frontier at ${where}`).to.deep.equal(naive.frontier());
 
-                // The prefill is only ever a base for further inserts, so the
-                // post-insert state has to agree too.
-                if (n < capacity) {
-                    naive.insert(7n);
-                    fast.insert(7n);
-                    expect(fast.root(), `root after insert at ${where}`).to.equal(naive.root());
-                    expect(fast.frontier(), `frontier after insert at ${where}`)
-                        .to.deep.equal(naive.frontier());
+                    // The prefill is only ever a base for further inserts, so the
+                    // post-insert state has to agree too.
+                    if (n < capacity) {
+                        naive.insert(7n);
+                        fast.insert(7n);
+                        expect(fast.root(), `root after insert at ${where}`).to.equal(naive.root());
+                        expect(fast.frontier(), `frontier after insert at ${where}`)
+                            .to.deep.equal(naive.frontier());
+                    }
                 }
             }
+        });
+
+        // A naive fill at this depth is ~350k hashes, so this checks the boundary
+        // counts rather than every n.
+        it(`fillBlocks (${name}) agrees with a naive fill at depth 10 boundary counts`, () => {
+            for (const n of [0, 1, 3, 4, 5, 15, 16, 17, 63, 64, 21, 1023, 1024, 4097]) {
+                const fast = new MerkleTree(P, 10);
+                fast.fillBlocks(n, valueOf);
+                const naive = new MerkleTree(P, 10);
+                for (const leaf of fast.leaves) naive.insert(leaf);
+                expect(fast.root(), `root at n ${n}`).to.equal(naive.root());
+                expect(fast.frontier(), `frontier at n ${n}`).to.deep.equal(naive.frontier());
+            }
+        });
+    }
+
+    it("prefillLeaf gives every filled frontier slot a distinct value", () => {
+        for (const n of [21, 4 ** 5 - 3, 4 ** 10 - 1]) {
+            const tree = new MerkleTree(P, 10);
+            tree.fillBlocks(n, prefillLeaf);
+            const filled = tree.frontier().flat().filter(v => v !== 0n);
+            expect(new Set(filled).size, `distinct slots at n ${n}`).to.equal(filled.length);
         }
     });
 
-    // A naive fill at this depth is ~350k hashes, so this checks the boundary
-    // counts rather than every n.
-    it("fillConstant agrees with a naive fill at depth 10 boundary counts", () => {
-        const C = 0xdeadn;
-        for (const n of [0, 1, 3, 4, 5, 15, 16, 17, 63, 64, 21, 1023, 1024, 4097]) {
-            const naive = new MerkleTree(P, 10);
-            for (let i = 0; i < n; i++) naive.insert(C);
-            const fast = new MerkleTree(P, 10);
-            fast.fillConstant(n, C);
-            expect(fast.root(), `root at n ${n}`).to.equal(naive.root());
-            expect(fast.frontier(), `frontier at n ${n}`).to.deep.equal(naive.frontier());
-        }
-    });
-
-    it("fillConstant rejects a count outside 0..4^depth", () => {
+    it("fillBlocks rejects a count outside 0..4^depth", () => {
         const tree = new MerkleTree(P, 3);
-        expect(() => tree.fillConstant(-1, 1n)).to.throw(RangeError);
-        expect(() => tree.fillConstant(65, 1n)).to.throw(RangeError);
-        expect(() => tree.fillConstant(1.5, 1n)).to.throw(RangeError);
+        for (const n of [-1, 65, 1.5]) {
+            expect(() => tree.fillBlocks(n, () => 1n)).to.throw(RangeError);
+        }
     });
 
     it("cacheKeyStride grows past the depth-10 value", () => {

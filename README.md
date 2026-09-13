@@ -56,17 +56,20 @@ R1CS totals on BN254 (`snarkjs r1cs info`):
 | Circuit | Constraints | Wires | Private inputs |
 |---|---:|---:|---:|
 | `Transact(11, 4, 6)` | 100,320 | 100,473 | 323 |
-| `TreeUpdateBatch(11, 8)` | 113,527 | 113,378 | 93 |
+| `TreeUpdateBatch(11, 8)` | 55,190 | 55,103 | 93 |
 
-Both sit in the 2^17 FFT domain. snarkjs sizes that domain from
-`nConstraints + nPubInputs + nOutputs` and requires the sum to be at most
-`2^17 - 1`, so the ceiling on the constraint count is **131,069**: the transact
-circuit clears it by 30,749 and the batch circuit by 17,542. `just budget` pins
-both to their exact counts in [budget.json](budget.json), so growth lands as a
-reviewable diff rather than a silent doubling of proving time.
+snarkjs sizes the FFT domain from `nConstraints + nPubInputs + nOutputs` and
+requires the sum to be at most `domain - 1`, so with one public input and one
+public output the ceiling on the constraint count is `domain - 3`. `Transact`
+sits in **2^17** (ceiling 131,069) and clears it by 30,765. `TreeUpdateBatch`
+sits in **2^16** (ceiling 65,533) and clears it by 10,343. `just budget` pins
+both to their exact counts and domains in [budget.json](budget.json), so growth
+lands as a reviewable diff rather than a silent doubling of proving time.
 
-`TreeUpdateBatch` is the tighter of the two and is what a further widening
-breaks first: a leaf slot costs roughly 12k constraints.
+The two share a tree depth but not a ptau. `TreeUpdateBatch` inserts its leaves
+in one batched build, so its tree work grows with depth rather than leaf count:
+a depth level costs 2,534 constraints and a leaf slot 3,626. 2^16 therefore
+holds through depth 15 at `MAX_L = 8`; `MAX_L = 16` (84,199) would need 2^17.
 
 ## Asset id registration
 
@@ -111,8 +114,10 @@ hypothesis, never an axiom, and a build-time guard rejects any axiom outside
 [lean/expected/axioms.txt](lean/expected/axioms.txt). Every soundness result is
 paired with a satisfying assignment, so none is vacuous.
 
-Not covered: `FrontierRoot`, the `BabyCheck` on `cv_dep`, uniqueness of a
-deposit leaf's opening (see *Asset id registration*), and the model-to-source
+Not covered: the `BabyCheck` on `cv_dep`, uniqueness of a
+deposit leaf's opening (see *Asset id registration*), the `EMPTY_SUBTREE`
+constants (the batch result assumes they form the empty-subtree chain, which
+`test/merkle.test.ts` checks numerically), and the model-to-source
 correspondence, which is a hand-maintained table. See
 [lean/README.md](lean/README.md) § *What is not proved*.
 

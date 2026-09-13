@@ -19,7 +19,7 @@ A constraint line is **transcribed** when some citation of at most `NARROW` line
 contains it. Twenty is where the data separates: a citation of twenty lines or fewer
 names one constraint, or one contiguous wiring block that a single model field
 abstracts (`:225-243`, the nineteen `pe.<x> <== …` lines behind `PolyEvalSat`). A
-wider one names a template — `insert.circom:24-95`, `merkle.circom:19-72` — and the
+wider one names a template — `merkle.circom:19-72`, `batch_append.circom:107-249` — and the
 model field carrying it describes the template rather than transcribing its lines, so
 it is not evidence about any particular line inside.
 
@@ -29,10 +29,10 @@ exactly as `check-axioms.sh` pins the trusted base. A new constraint that nothin
 transcribes shows up in that diff, and the reviewer either cites it or accepts it
 into the expectation with the rest.
 
-Recording rather than forbidding is deliberate. Three parts of the circuit are
-covered on purpose by a pointer or by nothing — `frontier_root.circom` is not
-modelled at all, `fixed_base_mul.circom` collapses into the `escalarMul` axiom pair,
-and `EmptySubtreeHashes` is a free parameter in Lean — and a hand-written allowlist
+Recording rather than forbidding is deliberate. Two parts of the circuit are
+covered on purpose by a pointer or by nothing — `fixed_base_mul.circom` collapses
+into the `escalarMul` axiom pair, and `EmptySubtreeHashes` is a free parameter in
+Lean — and a hand-written allowlist
 for those would need maintaining in step with a second hand-written list of reasons.
 The expectation file is that list, generated.
 

@@ -130,7 +130,8 @@
   },
   "tree_update_batch": {
     "sym": "build/tree_update_batch.sym",
-    "shape": { "MAX_L": 8, "DEPTH": 11, "COUNT_BITS": 3, "IDX_BITS": 22, "BITS64": 64 },
+    "shape": { "MAX_L": 8, "DEPTH": 11, "COUNT_BITS": 3, "IDX_BITS": 22, "BITS64": 64,
+                "BATCH_NODES": 29 },
     "present": {
       "BatchSignals.oldRoot": "main.old_root",
       "BatchSignals.newRoot": "main.new_root",
@@ -143,9 +144,9 @@
       "BatchSignals.isDeposit": "main.is_deposit[{k<MAX_L}]",
       "BatchSignals.frontierIn": "main.frontier_in[{d<DEPTH}][0]",
       "BatchSignals.rcv": "main.rcv[{k<MAX_L}]",
-      "BatchSignals.cntBits": "main.cnt_bits.out[{b<COUNT_BITS}]",
-      "BatchSignals.ltBits": "main.lt[{k<MAX_L}].n2b.out[0]",
-      "BatchSignals.active": "main.active[{k<MAX_L}]",
+      "BatchAppendSignals.cntBits": "main.append.cnt_bits.out[{b<COUNT_BITS}]",
+      "BatchAppendSignals.ltBits": "main.append.lt[{k<MAX_L}].n2b.out[0]",
+      "BatchAppendSignals.active": "main.append.active[{k<MAX_L}]",
       "BatchSignals.leaves": "main.leaves[{k<MAX_L}]",
       "BatchSignals.activeDep": "main.active_dep[{k<MAX_L}]",
       "BatchSignals.gen": "main.asset_gen[{k<MAX_L}].gen[0]",
@@ -153,26 +154,29 @@
       "BatchSignals.expected": "main.expected[{k<MAX_L}].xout",
       "BatchSignals.assetIsZero": "main.leaf_asset_nz[{k<MAX_L}].out",
       "BatchSignals.pubInIsZero": "main.pub_in_nz[{k<MAX_L}].out",
-      "BatchSignals.startIdxBits": "main.frontier_root.start_index_bits[{b<IDX_BITS}]",
-      "BatchSignals.idxIn": "main.idx_in[{k<MAX_L}]",
-      "BatchSignals.idxBits": "main.idx_bits[{k<MAX_L}].out[{b<IDX_BITS}]",
-      "BatchSignals.idxDig": "main.idx_dig[{k<MAX_L}][{d<DEPTH}]",
-      "BatchSignals.insRoot": "main.ins[{k<MAX_L}].root",
-      "BatchSignals.insCur": "main.ins[{k<MAX_L}].cur[1]"
+      "BatchAppendSignals.idxBits": "main.append.idx_bits.out[{b<IDX_BITS}]",
+      "BatchAppendSignals.lastIdxBits": "main.append.last_idx_bits.out[{b<IDX_BITS}]",
+      "BatchAppendSignals.bb": "main.append.bb[{d<DEPTH}]",
+      "BatchAppendSignals.node": "main.append.node[{t<BATCH_NODES}]"
     },
     "absent": {
-      "BatchSignals.runningRoot": {
-        "was": "main.running_root[0]",
-        "why": "`running_root[0] <== old_root` and `new_root === running_root[MAX_L]` merge both ends of the chain with the public inputs. The interior survives, which is what `batch_advances_by_count` walks."
+      "BatchAppendSignals.oldNode": {
+        "was": "main.append.old_node[0]",
+        "why": "`old_node[0] <== 0` pins the base of the old-root path to a constant, and `old_node[DEPTH]` folds into `old_root` through `old_root === append.old_root`. `old_node[1..DEPTH-1]` survive."
       },
-      "BatchSignals.fr": {
-        "was": "main.fr[0][0][0]",
-        "why": "`fr[0][lvl][s] <== frontier_in[lvl][s]` merges the base of the frontier chain with the input. `fr[1..MAX_L]` survive."
+      "BatchAppendSignals.oldRoot": {
+        "was": "main.append.old_root",
+        "why": "`old_root === append.old_root` merges the gadget's old root with the public input."
+      },
+      "BatchAppendSignals.newRoot": {
+        "was": "main.append.new_root",
+        "why": "`new_root === append.new_root` merges the gadget's new root, and with it the last window node `node[29]`, with the public input. The `BATCH_NODES` bound of 29 pins that fold."
       }
     },
     "aliases": {
-      "BatchSignals.runningRoot": "main.running_root[1]",
-      "BatchSignals.fr": "main.fr[1][{d<DEPTH}][0]"
+      "BatchAppendSignals.oldNode": "main.append.old_node[1]",
+      "BatchAppendSignals.oldRoot": "main.old_root",
+      "BatchAppendSignals.newRoot": "main.new_root"
     }
   }
 }

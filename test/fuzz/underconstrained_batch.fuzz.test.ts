@@ -42,12 +42,11 @@ import {
     type SearchContext,
 } from "../lib/underconstrained_suite";
 import { formatReport, sweepSingleSignal } from "../lib/underconstrained";
-import { explain } from "../lib/explain";
 import { widthHistogram } from "../lib/bit_groups";
 import { buildHonest, depositPairs, seededLeaf, simpleLeaf, type BatchWitness } from "../lib/batch";
 import { treeUpdateBatchInputJson } from "../lib/inputs";
 import { Jubjub, Poseidon } from "../helpers";
-import { MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
+import { BATCH_DEPTH, MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
 import { fcParamsFor } from "./arbitraries";
 import { buildJubjub } from "../lib/harness";
 
@@ -109,38 +108,19 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
     });
 
 
-    // An explainer that accepted everything would turn every witness-level test
-    // below green while checking nothing — the vacuity trap the 4x6 suite's bit
-    // detector fell into on its first draft. So verify the precondition is
-    // load-bearing: take a finding the explainer accepts, break only the fact it
-    // rests on, and require it to refuse.
-    it("a frontier explanation is refused once its precondition stops holding", async () => {
-        const w = buildHonest(P, 21, [simpleLeaf({ J, P, val: 42n, isDeposit: 1 })]);
-        const witness = await witnessFor(w);
-        const findings = sweepSingleSignal(ctx.view, witness, ctx.symbols)
-            .filter(f => /frontier_in\[\d+\]\[\d+\]$/.test(f.support[0].name));
-
-        expect(findings.length, "no frontier slot was reported free, so this proves nothing")
-            .to.be.greaterThan(0);
-
-        for (const f of findings) {
-            expect(explain(f, witness, ctx.symbols), `${f.support[0].name}: the honest witness ` +
-                "must be explainable, or the explainer is not matching at all").to.not.equal(null);
-
-            // Falsify the precondition and nothing else: clear the digit
-            // selector, so this slot is no longer the one the rebuild occupies.
-            // A slot free at a digit that READS it is a forged-root primitive
-            // and must stay unexplained.
-            const m = /^(.*)frontier_in\[(\d+)\]\[(\d+)\]$/.exec(f.support[0].name)!;
-            const sIndex = ctx.symbols.indexOf(`${m[1]}frontier_root.s[${m[2]}][${m[3]}]`);
-            expect(sIndex, "the selector must survive --O2 for the precondition to be checkable")
-                .to.not.equal(undefined);
-
-            const doctored = witness.slice();
-            doctored[sIndex!] = 0n;
-            expect(explain(f, doctored, ctx.symbols), `${f.support[0].name}: the explanation ` +
-                "survived its own precondition being false, so it is not checking it")
-                .to.equal(null);
+    // BatchAppend pins every frontier slot neither root reads to zero, so no
+    // frontier signal may be free at any digit pattern. The sweep
+    // below would already fail on one, since nothing explains it; this names the
+    // property directly, at the patterns where the unpinned circuit was loosest.
+    // start_index = 0 has every digit 0, where all 33 slots used to be free.
+    it("no frontier slot is free, at any digit pattern", async () => {
+        for (const start of [0, 21, 4 ** 5 - 3, 4 ** 11 - 1]) {
+            const w = buildHonest(P, start, [simpleLeaf({ J, P, val: 42n, isDeposit: 1 })]);
+            const witness = await witnessFor(w);
+            const free = sweepSingleSignal(ctx.view, witness, ctx.symbols)
+                .filter(f => /frontier_in\[\d+\]\[\d+\]$/.test(f.support[0].name))
+                .map(f => f.support[0].name);
+            expect(free, `start_index = ${start}: free frontier slots`).to.deep.equal([]);
         }
     });
 
@@ -182,7 +162,7 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
     it("a full flush of principal/fee pairs at fbps = 0 has no second witness", async () => {
         // The configuration that used to supply four free 64-bit dials on
         // `leaf_asset`: every fee note worthless, so every odd slot's deposit
-        // binding is degenerate. Step 7a is what leaves nothing free here, and
+        // binding is degenerate. Step 6a is what leaves nothing free here, and
         // this is the witness that would show it if it did not.
         //
         // Also the all-slots-active case. What the searches report depends on
@@ -194,19 +174,37 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
 
     it("a batch at a non-trivial frontier has no second witness", async () => {
         // start_index = 21 = 0b010101 gives non-zero digits at the three lowest
-        // levels, so FrontierRoot takes its pre/eq branches rather than reading
-        // an all-empty frontier.
+        // levels, so both roots read filled frontier slots rather than an
+        // all-empty frontier.
         await assertNoSecond(
             "frontier21",
             buildHonest(P, 21, [simpleLeaf({ J, P, val: 42n, isDeposit: 1 })]),
         );
     });
 
+    it("a full batch straddling a deep boundary has no second witness", async () => {
+        // 4^5 - 3: the run crosses a level-5 boundary, so every level up to 5
+        // uses both slots of its window and the level-1 window all three, with
+        // filled frontier slots below. The other scenarios start at 0 or 21,
+        // where the upper windows hold one real node and one empty subtree.
+        const leaves = Array.from({ length: MAX_L }, (_, i) => seededLeaf(P, J, i, i % 2 === 0 ? 0 : 1));
+        await assertNoSecond("straddle4^5", buildHonest(P, 4 ** 5 - 3, leaves));
+    });
+
+    it("a batch on the last index of the tree has no second witness", async () => {
+        // Every digit is 3: all 33 frontier slots are filled and read, the
+        // opposite extreme from start 0, and the capacity check is tight.
+        await assertNoSecond(
+            "lastIndex",
+            buildHonest(P, 4 ** BATCH_DEPTH - 1, [simpleLeaf({ J, P, val: 42n, isDeposit: 1 })]),
+        );
+    });
+
     it("a single zero-value fee note has no second witness", async () => {
         // The degenerate slot in isolation: at leaf_public_in == 0 the binding
         // reduces to cv_dep == rcv·H and the asset generator leaves the system,
-        // so `leaf_asset` is held only by step 7a's canonicalisation of it to 0.
-        // Slot position is irrelevant — 7a is per-slot and refers to no
+        // so `leaf_asset` is held only by step 6a's canonicalisation of it to 0.
+        // Slot position is irrelevant — 6a is per-slot and refers to no
         // neighbour, so a worthless leaf is legal anywhere in the batch.
         await assertNoSecond(
             "zeroValueFee",
@@ -218,14 +216,19 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
         await fc.assert(
             fc.asyncProperty(
                 fc.integer({ min: 1, max: MAX_L }),
-                fc.integer({ min: 0, max: 64 }),
+                // Mostly shallow, where the frontier changes shape fastest, and
+                // sometimes anywhere in the production-depth tree.
+                fc.oneof(
+                    { weight: 3, arbitrary: fc.integer({ min: 0, max: 64 }) },
+                    { weight: 1, arbitrary: fc.integer({ min: 0, max: 4 ** BATCH_DEPTH - MAX_L }) },
+                ),
                 fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
                 fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
                 async (count, prefill, flags, worthless) => {
-                    // Any interleaving is satisfiable: step 7a is per-slot and
+                    // Any interleaving is satisfiable: step 6a is per-slot and
                     // refers to no neighbour. A deposit leaf is drawn worthless
                     // at asset 0 on half the draws — at ANY slot, since the
-                    // degenerate-binding case 7a governs is not tied to parity.
+                    // degenerate-binding case 6a governs is not tied to parity.
                     const leaves = Array.from({ length: count }, (_, i) =>
                         flags[i] === 1 && worthless[i] === 1
                             ? seededLeaf(P, J, i, 1, 0n, 0n)

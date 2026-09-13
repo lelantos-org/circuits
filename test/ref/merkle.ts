@@ -25,6 +25,11 @@ export function cacheKeyStride(depth: number): number {
     return 2 ** (2 * depth - 2);
 }
 
+/** Digit `level` of `n` in base 4: the slot `n` occupies under its level-`level + 1` parent. */
+export function quatDigit(n: number, level: number): number {
+    return Math.floor(n / ARITY ** level) % ARITY;
+}
+
 export interface MerkleProof {
     pathElements: Field[][];
     pathIndices: number[];
@@ -82,46 +87,52 @@ export class MerkleTree {
     }
 
     /**
-     * Replace the leaf array with `n` copies of `c`, seeding the node cache so
-     * a subsequent `root()` / `frontier()` / small number of `insert`s costs
-     * O(depth · ARITY) hashes rather than the ~(4^depth − 1)/3 a distinct-leaf
-     * fill of the same size costs.
+     * Replace the leaf array with `n` leaves laid out in frontier blocks, seeding
+     * the node cache so a subsequent `root()` / `frontier()` / small number of
+     * `insert`s costs O(depth² · ARITY) hashes rather than the ~(4^depth − 1)/3 a
+     * distinct-leaf fill of the same size costs.
      *
-     * A full subtree of `c` depends only on its level, so `constChain` here
-     * plays the role `zeros` plays for the empty subtree. `nodeAt` descends
-     * through exactly one partial node per level; the other nodes it reads are
-     * that node's lower-indexed siblings, seeded below, and its higher-indexed
-     * ones, which short-circuit to `zeros`. `frontier()` reads the same seeded
-     * siblings, so both agree with a naive fill (`reference.test.ts` checks it).
+     * The first `n` positions split into the full subtrees `frontier()` reports:
+     * at each level, the filled siblings `firstSibling..partial-1` of the first
+     * node not wholly below `n`. Every leaf of block `(level, index)` is
+     * `valueOf(level, index)`, so the block's root is that constant hashed up
+     * `level` times, and is seeded directly; blocks sharing a constant share the
+     * chain, so a fill with `v` distinct constants costs `v · depth` hashes.
+     * `nodeAt` descends through exactly one
+     * partial node per level; everything else it reads is a seeded block or an
+     * empty subtree, so `root()` and `frontier()` agree with a naive fill of the
+     * same leaves (`reference.test.ts` checks it).
      *
-     * Every filled frontier slot at a given level is equal under this fill, so
-     * a caller needing the siblings at one level to differ must use `insert` or
-     * `setLeaves` and pay the full cost.
+     * With a distinct constant per block the frontier slots at one level differ,
+     * which is what lets a production-depth witness see a misrouted slot.
      */
-    fillConstant(n: number, c: Field): void {
+    fillBlocks(n: number, valueOf: (level: number, index: number) => Field): void {
         if (!Number.isInteger(n) || n < 0 || n > ARITY ** this.depth) {
-            throw new RangeError(`fillConstant: n must be an integer in 0..${ARITY ** this.depth}, got ${n}`);
+            throw new RangeError(`fillBlocks: n must be an integer in 0..${ARITY ** this.depth}, got ${n}`);
         }
-        this.leaves = new Array<Field>(n).fill(c);
+        this.leaves = new Array<Field>(n);
         this.nodeCache.clear();
-        if (n === 0) return;
 
-        // constChain[lvl] = root of a full level-lvl subtree of `c` leaves.
-        const constChain: Field[] = [c];
-        for (let lvl = 1; lvl <= this.depth; lvl++) {
-            const child = constChain[lvl - 1];
-            constChain.push(this.hashNode(child, child, child, child));
-        }
+        // chains.get(c)[l] is the root of a level-l block of constant c.
+        const chains = new Map<Field, Field[]>();
+        const blockRoot = (c: Field, lvl: number): Field => {
+            let chain = chains.get(c);
+            if (chain === undefined) chains.set(c, (chain = [c]));
+            while (chain.length <= lvl) {
+                const top = chain[chain.length - 1];
+                chain.push(this.hashNode(top, top, top, top));
+            }
+            return chain[lvl];
+        };
 
-        // `partial` is the first level-lvl node not wholly below `n`: index
-        // i < partial spans [i·stride, (i+1)·stride) with (i+1)·stride ≤ n, so
-        // it is a full subtree of `c`. The root (lvl == depth) is left to
-        // `nodeAt`; level 0 is read straight out of `leaves`.
-        for (let lvl = 1; lvl < this.depth; lvl++) {
-            const partial = Math.floor(n / this.strides[lvl]);
+        for (let lvl = this.depth; lvl >= 0; lvl--) {
+            const stride = this.strides[lvl];
+            const partial = Math.floor(n / stride);
             const firstSibling = Math.floor(partial / ARITY) * ARITY;
             for (let idx = firstSibling; idx < partial; idx++) {
-                this.nodeCache.set(this.cacheKey(lvl, idx), constChain[lvl]);
+                const c = valueOf(lvl, idx);
+                this.leaves.fill(c, idx * stride, (idx + 1) * stride);
+                if (lvl > 0) this.nodeCache.set(this.cacheKey(lvl, idx), blockRoot(c, lvl));
             }
         }
     }
@@ -143,7 +154,7 @@ export class MerkleTree {
         const out: Field[][] = [];
         for (let lvl = 0; lvl < this.depth; lvl++) {
             const stride = this.strides[lvl];
-            const slot = Math.floor(N / stride) % ARITY;
+            const slot = quatDigit(N, lvl);
             const parentIdx = Math.floor(N / (stride * ARITY));
             const slots: Field[] = [];
             for (let k = 0; k < 3; k++) {

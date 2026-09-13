@@ -136,31 +136,36 @@ skips the root comparison on a dummy slot, so an all-dummy witness leaves
 `merkleRoot` read by nothing — a free coefficient. The circuit rejects it and
 `TxWellFormed.someRealInput` is the consequence.
 
-### `tree_update_batch.circom`### `tree_update_batch.circom`
+### `tree_update_batch.circom`
 
-`Circuit/TreeUpdateBatch.lean` splits the constraint system in two: `BatchChainSat` (the
-append machinery) and `BatchDepositSat` (the per-leaf deposit binding). The split is
-load-bearing for the trusted base — only the deposit half mentions the curve, so every
-chain result below depends on `p_prime` alone.
+`Circuit/TreeUpdateBatch.lean` splits the constraint system in two: `BatchChainSat` (leaves,
+the tree, padding) and `BatchDepositSat` (the per-leaf deposit binding). The split is
+load-bearing for the trusted base — only the deposit half mentions the curve, so every chain
+result below depends on `p_prime` alone. The tree itself is `BatchAppend`
+(`Gadgets/BatchAppend.lean`), proved against the specification in `Spec/QuatTree.lean`; the
+construction is explained once, in the header of `src/lib/batch_append.circom`. Every
+result takes a `BatchShape`, the numeric side conditions of an instance.
 
 | Theorem | Where | Statement |
 |---|---|---|
 | `batch_count_range` | `Circuit/TreeUpdateBatch.lean` | `actual_count ∈ [1, MAX_L]`; `0` is excluded because it would force a decomposition of `p − 1` |
 | `batch_active_spec` | `Circuit/TreeUpdateBatch.lean` | `active[k]` is the indicator of `k < actual_count`, hence a contiguous prefix |
 | `batch_padding_zero` | `Circuit/TreeUpdateBatch.lean` | every field of an inactive leaf is zero, so padding cannot smuggle values into the compressed PIs |
-| `batch_step_inserts` | `Circuit/TreeUpdateBatch.lean` | an active step is a genuine `InsertsTo` of that leaf over the running frontier |
-| `batch_step_stalls` | `Circuit/TreeUpdateBatch.lean` | an inactive step carries the running state through unchanged |
-| `batch_advances_by_count` | `Circuit/TreeUpdateBatch.lean` | **both halves at once: every step below `actual_count` is a real insert, and `new_root` is the running root at `actual_count`** — the formal content of "odd counts work" |
-| `batch_advances_by_count_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(11, 8)`, `COUNT_BITS = 3` |
-| `batch_active_index` | `Circuit/TreeUpdateBatch.lean` | **an active slot's insert digits are the digits of `start_index + k`**, and that position is below `4^DEPTH` |
-| `batch_advances_at_positions` | `Circuit/TreeUpdateBatch.lean` | …so leaf `k` is appended at tree position `start_index + k`, for every `k` below `actual_count` and no other |
-| `batch_advances_at_positions_deployed` | `Circuit/TreeUpdateBatch.lean` | …at `TreeUpdateBatch(11, 8)` |
+| `batch_capacity` | `Circuit/TreeUpdateBatch.lean` | `start_index + actual_count ≤ 4^DEPTH`, from one range check on the last inserted index |
+| `batch_frontier_canonical` | `Circuit/TreeUpdateBatch.lean` | every `frontier_in` slot at or above its level's digit is zero — the witness has no frontier signal no root reads |
+| `batch_old_root` | `Circuit/TreeUpdateBatch.lean` | **`old_root` is `batchTree … 0 …`, the tree holding `start_index` leaves with this frontier** |
+| `batch_advances_by_count` | `Circuit/TreeUpdateBatch.lean` | **`new_root` is that tree after appending exactly the first `actual_count` leaves** — the formal content of "odd counts work" |
+| `batch_advances_at_positions` | `Circuit/TreeUpdateBatch.lean` | …the same root as `appendRoot`, a run of single-leaf `InsertsTo` steps at positions `start_index + k` |
+| `batch_new_root_determined` † | `Circuit/TreeUpdateBatch.lean` | **two proofs from the same `old_root`, `start_index`, `actual_count`, `cms` and `cv_dep` reach the same `new_root`**, whatever private frontier each used |
 | `batchPiSlot_batchSlotIndex` | `Circuit/TreeUpdateBatch.lean` | the batch coefficient layout inverts, so `expected/layout-batch-8.txt` is derived from the definition rather than a second copy |
-| `batch_bounds_deployed` / `batch_depth_bound_deployed` | `Circuit/TreeUpdateBatch.lean` | the three side conditions are simultaneously satisfiable at the deployed shape, so the results above are not conditional on an impossible hypothesis |
+| `BatchShape.deployed` | `Circuit/TreeUpdateBatch.lean` | the numeric side conditions hold at `TreeUpdateBatch(11, 8)`, `COUNT_BITS = 3`; `ZerosCoherent` is the one hypothesis it does not discharge, and `batch_advances_witness` discharges it together with `BatchChainSat` on one assignment |
 | `batch_deposit_opens` | `Circuit/TreeUpdateBatch.lean` | an active deposit leaf's `cv_dep` opens to exactly `leaf_public_in` units of `leaf_asset` |
-| `quaternaryInsertLevel_sound` | `Gadgets/Insert.lean` | the level arithmetic is the fill table: `cur` at the digit, frontier left, empty-subtree hash right — and the frontier update is a *different* mux, also proved |
-| `quaternaryInsert_sound` | `Gadgets/Insert.lean` | a satisfying assignment is an `InsertsTo`, with every digit quaternary |
-| `InsertsTo.unique` | `Gadgets/Insert.lean` | the insert is a **function** of `(leaf, digits, frontier)` — same inputs, same root and frontier |
+| `batchAppend_sound` | `Gadgets/BatchAppend.lean` | the run fits the tree and the gadget's two roots are `batchTree` at counts `0` and `actual_count`: `batchAppend_old_root`, `batchAppend_new_root` |
+| `batchAppend_frontier_zero` | `Gadgets/BatchAppend.lean` | the frontier pin zeroes exactly the slots no digit reads, which is what the linear frontier terms of both roots rely on |
+| `batchWindow_covers` | `Gadgets/BatchAppend.lean` | the fixed window is wide enough for every start position and every count up to `MAX_L` |
+| `batchTree_eq_appendRoot` | `Spec/QuatTree.lean` | the tree after the append is the root a run of single-leaf `InsertsTo` steps reaches (`append_insertsTo`), by the frontier invariant `seqFr_inv` |
+| `batchTree_frontier_inj` † | `Spec/QuatTree.lean` | the tree before the append pins every frontier slot it reads |
+| `InsertsTo.unique` | `Spec/QuatTree.lean` | the insert is a **function** of `(leaf, digits, frontier)` — same inputs, same root and frontier |
 | `lessThan_sound` | `Gadgets/Comparators.lean` | circomlib `LessThan(n)` is the comparison indicator, given both operands are `n`-bit |
 
 `InsertsTo` is the abstract meaning of an append, the counterpart of `MerkleMember`, and
@@ -168,25 +173,35 @@ chain result below depends on `p_prime` alone.
 the chain is merely witnessed, and only Poseidon collision resistance ties it to the root
 (`merkleMember_inj`, a † row). Here `chain 0 = leaf` plus the step equation determine every
 node outright, so the root is pinned by plain induction — **no hash assumption**, which is
-why none of the batch rows carry a †.
+why the batch rows carry no † except the two that are about the private frontier.
 
-`batch_active_spec` is the one to read. `batch_advances_by_count` has two halves — every
-step below `actual_count` is a real insert, and nothing is folded in past it — and neither
-half alone says what is wanted: both would hold of a non-monotone `active` that appended
-leaf `k` at tree position `start_index + k` while position `start_index + k − 1` was never
-filled. It is the *contiguity* of the active prefix that rules that out. The statement never
-mentions the parity of `actual_count`, which is the whole point of the leaf-granular
-design.
+**Both roots, one frontier.** `BatchAppend` computes the old root and the new root from the
+same `frontier_in`. `batchAppend_old_root` and `batchAppend_new_root` show they are `batchTree` at
+counts `0` and `actual_count` — a declarative definition of the tree, with no windows or
+selectors in it — and `batchTree_eq_appendRoot` shows the second is the root a run of
+single-leaf inserts reaches, so the batch result can be read in the `InsertsTo` vocabulary of
+one insert at a time. The tree lemmas behind it are `batchTree_frozen` (a completed
+subtree never changes), `batchTree_empty` (past the run the tree is empty) and
+`batchTree_congr` (the tree reads the frontier only where it is filled).
 
-`batch_advances_at_positions` is what makes the sentence above about *positions* rather
-than about slots. `batch_advances_by_count` inserts each leaf at the digits the witness
-supplied and says nothing about which tree position those digits name; `idx_in`, `idx_bits`
-and `idx_dig` sat in the model with no theorem consuming them, so a witness free to choose
-`idx_dig` could have folded every leaf into one slot. `batch_active_index` closes it: it
-reads the digits back off the `Num2Bits(2·DEPTH)` decomposition — uniqueness of a binary
-decomposition (`bitNat_eq_digit`), then the pairing into quaternary digits
-(`quatDigit_eq_bits`) — and lands on `start_index + k` as a natural below `4^DEPTH`.
-`start_index_bits` is what stops `start_index` wrapping the modulus on the way.
+**The frontier is private, and still bound.** `batchTree_frontier_inj` descends from the root:
+the old root's preimage is its four children, the child at the digit is the next node down, and
+the children below the digit *are* the frontier. So under Poseidon collision resistance the
+public `old_root` determines every frontier slot a root reads, and `batch_new_root_determined`
+concludes that `new_root` is a function of the public statement. That is the binding the
+circuit relies on to stop a relayer pairing a real `old_root` with a forged frontier.
+
+`batch_active_spec` is still the one to read for the leaves. `BatchAppend` zeroes an inactive
+leaf slot by multiplying it with `active[k]` and reads the run as a contiguous prefix of its
+window, so a non-monotone `active` would drop a leaf from the middle of the run while later
+positions still filled. Nothing mentions the parity of `actual_count`, which is the whole point
+of the leaf-granular design.
+
+**One hypothesis about a table.** The advance results assume `ZerosCoherent zeros`: the
+`EMPTY_SUBTREE` constants are the empty-subtree chain. The reason is in the header of
+`src/lib/batch_append.circom`. The hypothesis is about a compile-time table, not the prover;
+`ZerosCoherent.eq_emptyChain` shows it determines the table, and `batch_advances_witness`
+discharges it on the completeness assignment.
 
 `batch_deposit_opens` is stated per leaf, with no aggregate anywhere in it. An aggregate
 form binding only `cv_dep[2i] + cv_dep[2i+1]` would fix `Σvalue` modulo the subgroup order
@@ -302,18 +317,14 @@ development may derive conservation from the point equation.
 
 * **Groth16 knowledge soundness.** The theorems concern R1CS satisfaction, not the on-chain
   verifier. Bridging that gap is a separate, much larger development.
-* **`FrontierRoot` (`src/lib/frontier_root.circom`).** The batch chain results take
-  `frontier_in` as given: they say what the circuit does *with* the frontier, not that the
-  frontier is the honest one for `old_root`. The constraint `old_root === frontier_root.root`
-  is what stops a relayer pairing a real `old_root` with a forged frontier — a permanent-DoS
-  vector — and it is modelled nowhere. This is the largest remaining gap in the batch proof.
-
-  Its `Num2Bits(2·DEPTH)` on `start_index` **is** modelled
-  (`BatchChainSat.start_index_bits`), because `batch_active_index` needs it: without a
-  range check on `start_index` the gated index `active[k] · (start_index + k)` decomposes
-  to some natural, but not to `start_index.val + k`, and the position claim collapses.
-  That is one constraint of `frontier_root.circom`'s twenty-nine, and it says nothing about
-  the frontier.
+* ~~**The old root.**~~ Now covered: `batch_old_root` models the old-root path the circuit
+  computes, and `batch_new_root_determined` shows the public `old_root` binds the private
+  frontier under collision resistance. This was the largest gap in the batch proof while the
+  old root was a separate, unmodelled `FrontierRoot` template.
+* **The `EMPTY_SUBTREE` constants.** The batch advance results assume `ZerosCoherent`, that
+  the fills form the empty-subtree chain. Lean treats Poseidon as opaque and cannot check the
+  eleven numeric constants against it; `test/merkle.test.ts` recomputes the chain with
+  circomlibjs and asserts every entry.
 * **Uniqueness of a deposit leaf's opening.** `batch_deposit_opens` gives existence, not
   uniqueness, and uniqueness is false in general: the Pedersen asset generators are known
   multiples of one base, so `v · m(a) == v' · m(a')` with both values under `2^64` lets a
@@ -322,7 +333,7 @@ development may derive conservation from the point equation.
   `scripts/check-asset-ids.ts` computes the bound over an id set and
   `test/check_asset_ids.test.ts` pins the gate; both live outside Lean because the argument
   is about `m(·)`, which the model deliberately keeps opaque.
-* **`BabyCheck` on `cv_dep` (`tree_update_batch.circom` step 6).** The development has no
+* **`BabyCheck` on `cv_dep` (`tree_update_batch.circom` step 5).** The development has no
   curve equation, only the opaque `coords` / `babyAdd` interface, so "the point is on the
   curve" is not expressible. `batch_deposit_opens` gets its point structure from the
   value-commitment gadget instead.
@@ -450,7 +461,7 @@ outside it: it imports the finished development and reports on it, which is why
 ```mermaid
 flowchart BT
     MODEL["<b>Model</b><br/>Field · Bits · Poseidon · Jubjub<br/><i>ambient objects; no circom counterpart</i>"]
-    GADGETS["<b>Gadgets</b><br/>Comparators · Common · Note · PolyEval<br/>Balance · Merkle · Insert · ValueCommit · PointBalance<br/><i>one module per circom template</i>"]
+    GADGETS["<b>Gadgets</b><br/>Comparators · Common · Note · PolyEval<br/>Balance · Merkle · BatchAppend · ValueCommit · PointBalance<br/><i>one module per circom template</i>"]
     CIRCUIT["<b>Circuit</b><br/>Spent · Output · Witness · Transact · TreeUpdateBatch<br/><i>the circuits themselves</i>"]
     PROOFS["<b>Proofs</b><br/>Completeness · BatchCompleteness · Rejection<br/><i>results about the finished system</i>"]
     META["<b>Meta</b><br/>Assumptions · AxiomGuard"]
@@ -477,18 +488,20 @@ lean/
       PolyEval             Horner soundness and Schwartz-Zippel binding
       Balance              RangeCheck64, DummyZeroValue, per-asset conservation
       Merkle               MerkleLevel4 / MerkleRoot / MerkleProofOrDummy
-      Insert               QuaternaryInsert and the frontier update
+      BatchAppend          both roots of a batch, the count, prefix and capacity checks
       ValueCommit          ValueScalarMul, MulH, opening cv to the note's value
       PointBalance         the proved negative result
+    Spec/                  what the tree gadgets are proved against; no signals
+      QuatTree             ZerosCoherent, InsertsTo, batchTree, the run of inserts, frontier injectivity
     Circuit/               the circuits themselves
       Spent                SpentNote
       Output               OutputNote
       Witness              TxWitness and the 69-slot public-input layout
       Transact             TransactSat, TxWellFormed, TxBinding, transact_sound
-      TreeUpdateBatch      BatchChainSat, BatchDepositSat, the batch chain results
+      TreeUpdateBatch      BatchChainSat, BatchDepositSat, the batch advance results
     Proofs/                results about the finished system
       Completeness         concrete satisfying assignments for transact (non-vacuity)
-      BatchCompleteness    the same for tree_update_batch, at a partially-filled batch
+      BatchCompleteness    the same for tree_update_batch, partially filled, empty and filled frontiers
       Rejection            malformed transactions that provably have none
     Meta/                  about the development rather than the circuit
       Assumptions          the trusted base, documented and printed

@@ -231,7 +231,7 @@ export async function buildBatchVectors() {
             // The deposit-binding fields were demoted once and it was unsound:
             // they are signals of this circuit, and hashing a signal into `z`
             // binds nothing, since the prover reads `z` before choosing the
-            // witness. Step 7a of `tree_update_batch.circom` is what pins them
+            // witness. Step 6a of `tree_update_batch.circom` is what pins them
             // where the deposit binding degenerates.
             challengeOnly: [] as string[],
         },

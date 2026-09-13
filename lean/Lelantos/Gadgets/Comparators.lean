@@ -72,7 +72,7 @@ theorem indN_le_one (P : Prop) [Decidable P] : indN P ≤ 1 := by
 /-! ## `LessThan`
 
 circomlib `LessThan(n)` (`comparators.circom:89-99`) is the comparator
-`src/tree_update_batch.circom:74` uses to derive `active[k] = (k < actual_count)`:
+`src/lib/batch_append.circom:134-139` uses to derive `active[k] = (k < actual_count)`:
 
     component n2b = Num2Bits(n + 1);
     n2b.in <== in[0] + (1 << n) - in[1];

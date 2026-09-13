@@ -88,7 +88,7 @@ export function simpleLeaf(opts: {
 /**
  * A leaf derived entirely from `seed`, for property tests needing k distinct
  * leaves. `val` and `asset` override the seeded ones where a shape needs
- * specific values — a worthless fee note needs both at zero (step 7a).
+ * specific values — a worthless fee note needs both at zero (step 6a).
  */
 export function seededLeaf(
     P: Poseidon,
@@ -111,18 +111,35 @@ export function seededLeaf(
 }
 
 /**
- * Throwaway value for every pre-batch leaf.
+ * Throwaway value for the pre-batch leaves of frontier block `(level, index)`.
  *
- * A single constant rather than a distinct leaf per slot, so `fillConstant`
- * builds the prefill in O(depth) hashes instead of one per leaf; a
- * production-depth prefill is otherwise too slow for the fuzz suites.
- *
- * All filled frontier slots at one level are equal under this fill, so an
- * intra-level permutation of the frontier is invisible to a witness built from
- * this tree. `frontier_root.test.ts` covers permutation at depth 3 over a
- * distinct-leaf tree.
+ * One of three constants, by the block's slot under its parent, so `fillBlocks`
+ * builds a production-depth prefill from three hash chains instead of one hash
+ * per leaf. The frontier slot `(level, k)` then holds constant `k` hashed up
+ * `level` times: distinct across the slots of a level and across levels, so a
+ * misrouted slot changes a root.
  */
-const PREFILL_LEAF: Field = 0xdeadn;
+export function prefillLeaf(_level: number, index: number): Field {
+    return 0xdead0000n + BigInt(index % 4);
+}
+
+/**
+ * Start positions at both edges of every digit's block at every level, plus the two ends of
+ * a depth-`depth` tree: each digit value appears at each level, next to a carry and away
+ * from one. Tests that only need each (level, digit) shape once use these instead of every
+ * start.
+ */
+export function representativeStarts(depth: number): number[] {
+    const capacity = 4 ** depth;
+    const starts = new Set([0, capacity - 1]);
+    for (let d = 0; d < depth; d++) {
+        for (let r = 0; r < 4; r++) {
+            starts.add(r * 4 ** d);
+            starts.add((r + 1) * 4 ** d - 1);
+        }
+    }
+    return [...starts].filter(s => s < capacity).sort((a, b) => a - b);
+}
 
 /**
  * An honest batch: `prefilled` throwaway leaves already in the tree, then
@@ -135,7 +152,7 @@ export function buildHonest(
     leaves: LeafWitness[],
 ): BatchWitness {
     const tree = new MerkleTree(P, BATCH_DEPTH);
-    tree.fillConstant(prefilled, PREFILL_LEAF);
+    tree.fillBlocks(prefilled, prefillLeaf);
     const oldRoot = tree.root();
     const frontier = tree.frontier();
 
@@ -214,13 +231,13 @@ export function bindFiatShamir(w: BatchWitness, calldata: TreeUpdateBatchPublicA
 /**
  * `count` leaves in the layout MASP's deposit path emits: slot 2i is a
  * principal and slot 2i+1 its fee note. The circuit does not require this —
- * step 7a is per-slot — but it is the shape a flush actually produces.
+ * step 6a is per-slot — but it is the shape a flush actually produces.
  *
  * Fee notes carry zero: that is the fbps = 0 flush, both the permitted shape
  * (`_validateDeposit`: "The fee note's value may be zero") and the one that used
  * to supply the free 64-bit dials, so it is the shape worth generating.
  *
- * Fee notes are at asset 0 as well as value 0, which is what step 7a requires
+ * Fee notes are at asset 0 as well as value 0, which is what step 6a requires
  * of a leaf the binding cannot see.
  */
 export function depositPairs(P: Poseidon, J: Jubjub, count: number): LeafWitness[] {

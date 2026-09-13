@@ -1,10 +1,10 @@
 // Fuzz coverage for frontier binding at production depth.
 //
-// `lib/frontier_root.circom` rebinds `frontier_in` to public `old_root`, so a
-// relayer cannot pair a real `oldRoot` with a forged frontier.
-// `frontier_root.test.ts` covers a depth-3 wrapper over canned indices; this
-// file drives the full `tree_update_batch` circuit at the production DEPTH over
-// random:
+// `BatchAppend` (`lib/batch_append.circom`) rebuilds `old_root` from
+// `frontier_in`, so a relayer cannot pair a real `oldRoot` with a forged
+// frontier. `batch_append.test.ts` covers the gadget at depths 2 and 4 over
+// every start; this file drives the full `tree_update_batch` circuit at the
+// production DEPTH over random:
 //   - edge-digit `start_index` patterns (digits ∈ {0, 3}: minimal or maximal
 //     slot fill at each level);
 //   - active-leaf counts k ∈ [1, MAX_L], odd counts included, so every padding
@@ -18,7 +18,7 @@
 //
 // Each fast-check trial builds two production-depth batch witnesses. The
 // prefilled tree behind them reaches ~4^DEPTH leaves, so `buildHonest` relies on
-// `MerkleTree.fillConstant` to build it in O(depth) hashes; a distinct-leaf fill
+// `MerkleTree.fillBlocks` to build it from a few hash chains; a distinct-leaf fill
 // costs ~40s per trial and blows the suite timeout. Run count follows the shared
 // `FUZZ` env (`light` / `medium` / `heavy`).
 
@@ -58,7 +58,7 @@ function tamperableLevels(digits: number[]): number[] {
     return out;
 }
 
-describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
+describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
     this.timeout(TIMEOUT_HEAVY);
 
     const ctx = useCircuit(WRAPPER);
@@ -96,7 +96,7 @@ describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
             // Which of the 3 filled slots at the chosen level to perturb.
             fc.integer({ min: 0, max: 2 }),
             // isDeposit per active leaf (Pedersen binding path vs spend skip).
-            // Per-leaf rather than per-batch: step 7a is a per-slot constraint
+            // Per-leaf rather than per-batch: step 6a is a per-slot constraint
             // with no reference to a neighbour, so any interleaving of deposit
             // and spend leaves is satisfiable and worth generating.
             fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
@@ -126,8 +126,8 @@ describe(`frontier_root [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
                 // No Fiat-Shamir rebind: the frontier is private, so it is in
                 // neither the challenge preimage nor the evaluated prefix (see
                 // `treeUpdateBatchChallenge` and `treeUpdateBatchCoeffs`), and
-                // the only possible failure is FrontierRoot's
-                // `old_root === rebuilt` check rather than a (z, y) mismatch.
+                // the only possible failure is the
+                // `old_root === append.old_root` check rather than a (z, y) mismatch.
                 await expectWitnessFails(
                     ctx.circuit,
                     treeUpdateBatchInputJson(tampered),

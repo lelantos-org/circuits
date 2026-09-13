@@ -1,16 +1,13 @@
 pragma circom 2.2.3;
 
-include "lib/insert.circom";
+include "lib/batch_append.circom";
 include "lib/poly_eval.circom";
 include "lib/tags.circom";
 include "lib/asset_gen.circom";
 include "lib/value_commit.circom";
 include "lib/balance.circom";
-include "lib/frontier_root.circom";
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/babyjub.circom";
-include "../node_modules/circomlib/circuits/bitify.circom";
-include "../node_modules/circomlib/circuits/comparators.circom";
 
 // Relayer proof advancing the commitment tree from old_root to new_root by
 // inserting actual_count leaves at start_index.
@@ -47,7 +44,7 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // is_deposit[k] == 0 skips the binding; the transact circuit proves conservation
 // for spends. Asset id 0 is rejected on a deposit leaf that carries value, since
 // SpentNote refuses that id on every real note and the leaf would be
-// unspendable; on a zero-value leaf it is instead REQUIRED, see step 7a.
+// unspendable; on a zero-value leaf it is instead REQUIRED, see step 6a.
 //
 // PolyEval coefficient layout. Must match
 // PubInputs.sol :: compress(TreeUpdateBatch):
@@ -68,14 +65,14 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // signals of this circuit, and hashing a signal into z binds nothing — the
 // prover reads z before choosing a witness and may hand the verifier one that
 // disagrees with the calldata z was hashed from. Only a constraint pins them;
-// the deposit binding in step 7, and step 7a where it degenerates, are those
+// the deposit binding in step 6, and step 6a where it degenerates, are those
 // constraints. See BatchCompress in lib/poly_eval.circom and src/README.md § 2a.
 //
-// Capacity: the per-slot index range check is gated on active[k], so the bound
-// is start_index + actual_count - 1 < 4^DEPTH, over the leaves actually
-// inserted.
+// The tree itself — count and activity, position and capacity, the frontier and
+// both roots — is lib/batch_append.circom, whose header explains it. In
+// particular a prover MUST supply zero in the frontier slots no digit reads.
 //
-// Soundness obligations left to the contract. FrontierRoot binds frontier_in to
+// Soundness obligations left to the contract. BatchAppend binds frontier_in to
 // old_root but cannot bind start_index: a tree holding n leaves and one holding
 // n leaves plus trailing empties have the same root, so a (frontier, root) pair
 // is consistent with more than one index. The consumer must enforce, as MASP.sol
@@ -97,9 +94,9 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 //   5. publicIn != 0 on every principal deposit, so a leaf that carries value
 //      also carries an asset the binding pins. The circuit does not require it:
 //      it accepts a zero-value deposit leaf and canonicalises its leaf_asset to
-//      0 (step 7a), which is sound because that asset reaches nothing. MASP
+//      0 (step 6a), which is sound because that asset reaches nothing. MASP
 //      enforces it anyway via `MustHaveDeposit` in _validateDeposit.
-//   6. leaf_asset[k] == 0 on every zero-value deposit leaf, matching step 7a.
+//   6. leaf_asset[k] == 0 on every zero-value deposit leaf, matching step 6a.
 //      MASP._drainDeposit sets it for the fee note it emits; a consumer that
 //      forwards a non-zero asset on a worthless leaf produces a batch no prover
 //      can satisfy.
@@ -124,52 +121,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     signal input frontier_in[DEPTH][3];
     signal input rcv[MAX_L];              // rcv_dep of leaf k
 
-    // 1. Range-check actual_count in [1, MAX_L] via Num2Bits(actual_count - 1),
-    //    which bounds it by 2^COUNT_BITS. COUNT_BITS is derived from MAX_L so
-    //    the two cannot diverge; the assert enforces the power-of-two
-    //    requirement the derivation cannot.
-    var COUNT_BITS = 0;
-    var count_span = MAX_L;
-    while (count_span > 1) {
-        count_span = count_span \ 2;
-        COUNT_BITS++;
-    }
-    assert((1 << COUNT_BITS) == MAX_L);
-    component cnt_bits = Num2Bits(COUNT_BITS);
-    cnt_bits.in <== actual_count - 1;
-
-    // 2. active[k] = (k < actual_count).
-    component lt[MAX_L];
-    signal active[MAX_L];
-    for (var k = 0; k < MAX_L; k++) {
-        lt[k] = LessThan(COUNT_BITS + 1);
-        lt[k].in[0] <== k;
-        lt[k].in[1] <== actual_count;
-        active[k] <== lt[k].out;
-    }
-
-    // 3. Zero every field of an inactive leaf. These fields feed PolyEval, so
-    //    otherwise a prover injects arbitrary values into inactive slots.
-    for (var k = 0; k < MAX_L; k++) {
-        (1 - active[k]) * cms[k]            === 0;
-        (1 - active[k]) * cv_dep[k][0]      === 0;
-        (1 - active[k]) * cv_dep[k][1]      === 0;
-        (1 - active[k]) * leaf_asset[k]     === 0;
-        (1 - active[k]) * leaf_public_in[k] === 0;
-        (1 - active[k]) * is_deposit[k]     === 0;
-        (1 - active[k]) * rcv[k]            === 0;
-    }
-
-    // 4. Booleanize is_deposit[k] and zero the deposit-only fields on spend
-    //    leaves, so a relayer cannot place a nonzero leaf_asset or
-    //    leaf_public_in into the public inputs of a batch carrying no deposit.
-    for (var k = 0; k < MAX_L; k++) {
-        is_deposit[k] * (1 - is_deposit[k]) === 0;
-        (1 - is_deposit[k]) * leaf_asset[k]     === 0;
-        (1 - is_deposit[k]) * leaf_public_in[k] === 0;
-    }
-
-    // 5. leaf_k = Poseidon(TAG_LEAF, cm_k, cv_dep_k_x, cv_dep_k_y).
+    // 1. leaf_k = Poseidon(TAG_LEAF, cm_k, cv_dep_k_x, cv_dep_k_y).
     component leaf_h[MAX_L];
     signal leaves[MAX_L];
     for (var k = 0; k < MAX_L; k++) {
@@ -183,7 +135,45 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
         leaves[k] <== leaf_h[k].out;
     }
 
-    // 6. cv_dep must lie on Baby-Jubjub. For spend leaves this is the only
+    // 2. The tree: actual_count in [1, MAX_L], the activity prefix, start_index
+    //    and the whole run inside the tree, the frontier pin, and the roots
+    //    before and after the append. See lib/batch_append.circom.
+    component append = BatchAppend(DEPTH, MAX_L);
+    append.start_index <== start_index;
+    append.actual_count <== actual_count;
+    for (var k = 0; k < MAX_L; k++) {
+        append.leaves[k] <== leaves[k];
+    }
+    for (var d = 0; d < DEPTH; d++) {
+        for (var s = 0; s < 3; s++) {
+            append.frontier_in[d][s] <== frontier_in[d][s];
+        }
+    }
+    old_root === append.old_root;
+    new_root === append.new_root;
+
+    // 3. Zero every field of an inactive leaf. These fields feed PolyEval, so
+    //    otherwise a prover injects arbitrary values into inactive slots.
+    for (var k = 0; k < MAX_L; k++) {
+        (1 - append.active[k]) * cms[k]            === 0;
+        (1 - append.active[k]) * cv_dep[k][0]      === 0;
+        (1 - append.active[k]) * cv_dep[k][1]      === 0;
+        (1 - append.active[k]) * leaf_asset[k]     === 0;
+        (1 - append.active[k]) * leaf_public_in[k] === 0;
+        (1 - append.active[k]) * is_deposit[k]     === 0;
+        (1 - append.active[k]) * rcv[k]            === 0;
+    }
+
+    // 4. Booleanize is_deposit[k] and zero the deposit-only fields on spend
+    //    leaves, so a relayer cannot place a nonzero leaf_asset or
+    //    leaf_public_in into the public inputs of a batch carrying no deposit.
+    for (var k = 0; k < MAX_L; k++) {
+        is_deposit[k] * (1 - is_deposit[k]) === 0;
+        (1 - is_deposit[k]) * leaf_asset[k]     === 0;
+        (1 - is_deposit[k]) * leaf_public_in[k] === 0;
+    }
+
+    // 5. cv_dep must lie on Baby-Jubjub. For spend leaves this is the only
     //    per-point cv_dep constraint here: an off-curve point produces a note no
     //    on-curve ValueCommit can respend. Inactive slots hold (0, 0), which is
     //    off-curve, so (1 - active) shifts y to check (0, 1).
@@ -191,10 +181,10 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     for (var k = 0; k < MAX_L; k++) {
         cv_on_curve[k] = BabyCheck();
         cv_on_curve[k].x <== cv_dep[k][0];
-        cv_on_curve[k].y <== cv_dep[k][1] + (1 - active[k]);
+        cv_on_curve[k].y <== cv_dep[k][1] + (1 - append.active[k]);
     }
 
-    // 7. Per-leaf deposit binding, gated by active[k]·is_deposit[k]. The
+    // 6. Per-leaf deposit binding, gated by append.active[k]·is_deposit[k]. The
     //    equality pins cv_dep[k] to leaf_public_in units of leaf_asset.
     component asset_gen[MAX_L];
     component pub_in_mul[MAX_L];
@@ -205,7 +195,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 
     component pub_in_nz[MAX_L];
     for (var k = 0; k < MAX_L; k++) {
-        active_dep[k] <== active[k] * is_deposit[k];
+        active_dep[k] <== append.active[k] * is_deposit[k];
 
         leaf_asset_nz[k] = IsZero();
         leaf_asset_nz[k].in <== leaf_asset[k];
@@ -235,7 +225,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
         pub_in_nz[k] = IsZero();
         pub_in_nz[k].in <== leaf_public_in[k];
 
-        // 7a. Pin leaf_asset[k] in the one case the equality above cannot.
+        // 6a. Pin leaf_asset[k] in the one case the equality above cannot.
         //
         // That equality pins leaf_asset[k] only while the V^leaf_asset[k] term
         // survives: ValueTimesGen(0, gen) is the curve identity for EVERY gen,
@@ -263,7 +253,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
         // Both directions are the one statement `asset == 0 iff value == 0`,
         // which is why this is a single constraint rather than a pair.
         //
-        // Left gated on active_dep[k] even though steps 3 and 5 already force
+        // Left gated on active_dep[k] even though steps 3 and 4 already force
         // both fields to zero on every inactive and spend slot, so an ungated
         // equality would hold there for free and would save the product. The
         // gate is what keeps the two IsZero outputs distinct signals: ungated,
@@ -282,88 +272,7 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
         active_dep[k] * (leaf_asset_nz[k].out - pub_in_nz[k].out) === 0;
     }
 
-    // 8. Bind frontier_in to old_root.
-    var BITS = 2 * DEPTH;
-    component start_index_bits = Num2Bits(BITS);
-    start_index_bits.in <== start_index;
-
-    component frontier_root = FrontierRoot(DEPTH);
-    for (var b = 0; b < BITS; b++) {
-        frontier_root.start_index_bits[b] <== start_index_bits.out[b];
-    }
-    for (var d = 0; d < DEPTH; d++) {
-        for (var s = 0; s < 3; s++) {
-            frontier_root.frontier_in[d][s] <== frontier_in[d][s];
-        }
-    }
-    old_root === frontier_root.root;
-
-    // 9. Sequential single-leaf inserts; active[k] selects whether the leaf
-    //    propagates.
-    component idx_bits[MAX_L];
-    signal idx_in[MAX_L];
-    signal idx_dig[MAX_L][DEPTH];
-
-    component ins[MAX_L];
-
-    // Running state: fr[0] = frontier_in, running_root[0] = old_root.
-    signal fr[MAX_L + 1][DEPTH][3];
-    signal running_root[MAX_L + 1];
-
-    for (var lvl = 0; lvl < DEPTH; lvl++) {
-        for (var s = 0; s < 3; s++) {
-            fr[0][lvl][s] <== frontier_in[lvl][s];
-        }
-    }
-    running_root[0] <== old_root;
-
-    signal mux_fr_a[MAX_L][DEPTH][3];
-    signal mux_fr_b[MAX_L][DEPTH][3];
-    signal mux_root_a[MAX_L];
-    signal mux_root_b[MAX_L];
-
-    for (var k = 0; k < MAX_L; k++) {
-        // Insertion index, range-checked to 2·DEPTH bits and gated on active[k].
-        // An inactive slot's insert is muxed away below, so range-checking its
-        // index would bound capacity alone and put the top MAX_L - 1 leaves of
-        // the tree out of reach. An inactive slot decomposes 0; its digits are
-        // discarded with the insert.
-        idx_in[k] <== active[k] * (start_index + k);
-        idx_bits[k] = Num2Bits(BITS);
-        idx_bits[k].in <== idx_in[k];
-
-        for (var d = 0; d < DEPTH; d++) {
-            idx_dig[k][d] <== idx_bits[k].out[2 * d] + 2 * idx_bits[k].out[2 * d + 1];
-        }
-
-        // Insert leaves[k] over fr[k].
-        ins[k] = QuaternaryInsert(DEPTH);
-        ins[k].leaf <== leaves[k];
-        for (var d = 0; d < DEPTH; d++) {
-            ins[k].idx_digit[d] <== idx_dig[k][d];
-            for (var s = 0; s < 3; s++) {
-                ins[k].frontier_in[d][s] <== fr[k][d][s];
-            }
-        }
-
-        // active[k] ? ins outputs : carry the previous state forward.
-        for (var d = 0; d < DEPTH; d++) {
-            for (var s = 0; s < 3; s++) {
-                mux_fr_a[k][d][s] <== active[k] * ins[k].frontier_out[d][s];
-                mux_fr_b[k][d][s] <== (1 - active[k]) * fr[k][d][s];
-                fr[k + 1][d][s]   <== mux_fr_a[k][d][s] + mux_fr_b[k][d][s];
-            }
-        }
-
-        mux_root_a[k]       <== active[k] * ins[k].root;
-        mux_root_b[k]       <== (1 - active[k]) * running_root[k];
-        running_root[k + 1] <== mux_root_a[k] + mux_root_b[k];
-    }
-
-    // 10. Bind new_root.
-    new_root === running_root[MAX_L];
-
-    // 11. Public-input compression → (y, z).
+    // 7. Public-input compression → (y, z).
     component pe = BatchCompress(MAX_L);
     pe.z <== z;
     pe.old_root <== old_root;
@@ -390,10 +299,9 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 // not a power of two, so the floor is 8. Only flushBatch uses the slack,
 // carrying four two-leaf deposits per batch.
 //
-// Budget: this circuit grows on both axes at once — four more leaf slots at
-// roughly 12k constraints each, plus a depth level across all eight — so it,
-// not the transact circuit, decides whether 2^17 holds. Run `just budget` for
-// the measured count.
+// Budget: BatchAppend grows with depth rather than leaf count, so a leaf slot
+// costs nearly all of its deposit binding. Run `just budget` for the measured
+// count and domain.
 //
 // Changing either parameter requires a new ceremony and a contract change,
 // since the public-input layout is 4 + 6·MAX_L.

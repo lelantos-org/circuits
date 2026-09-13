@@ -62,18 +62,23 @@ jobs:
       - name: Setup circom
         uses: ./.github/actions/setup-circom
 
-      # Both circuits are past the 2^16 domain — Transact(11,4,6) at 100,320
-      # constraints and TreeUpdateBatch(11,8) at 113,502 — so 2^17 is the only
-      # ptau either ceremony needs. `just` fetches it from
-      # lelantos-org/ptau and checks the digest on every run, cache hits
-      # included; the key carries that digest so a cache entry holding anything
-      # else misses and refetches instead of failing the build until someone
-      # purges it by hand.
+      # Each ceremony has its own ptau: Transact(11,4,6) at 100,304 constraints
+      # needs 2^17, TreeUpdateBatch(11,8) at 55,190 fits 2^16. `just` fetches
+      # both from lelantos-org/ptau and checks the digest on every run, cache
+      # hits included; each key carries that digest so a cache entry holding
+      # anything else misses and refetches instead of failing the build until
+      # someone purges it by hand.
       - name: Cache ptau-17
         uses: actions/cache@v4
         with:
           path: ptau/powersOfTau28_hez_final_17.ptau
           key: ptau-17-6b662a324867139fb1a20a324d90b6ff61856dfb23f59326909f14b0e2483ae0
+
+      - name: Cache ptau-16
+        uses: actions/cache@v4
+        with:
+          path: ptau/powersOfTau28_hez_final_16.ptau
+          key: ptau-16-1c401abb57c9ce531370f3015c3e75c0892e0f32b8b1e94ace0f6682d9695922
 
       - name: Install npm dependencies
         run: npm ci
@@ -177,7 +182,8 @@ jobs:
             its ceremony-paired batch verifier at `TreeUpdateBatch(11, 8)`; the
             two share a tree depth and must be installed together.
 
-            Both are built on the 2^17 ptau. Note `4x6` has no `PubInputs.sol`
+            `4x6` is built on the 2^17 ptau and `tree_update_batch` on the 2^16
+            ptau. Note `4x6` has no `PubInputs.sol`
             compress overload yet — it needs one at 69 slots, with a 50-word
             calldata prefix — so nothing verifies it on-chain today.
 

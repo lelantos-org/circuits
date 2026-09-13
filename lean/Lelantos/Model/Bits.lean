@@ -88,7 +88,7 @@ theorem cast_bitsNat {n : ℕ} {bs : ℕ → F} (h : ∀ i, i < n → IsBit (bs 
 `bitsNat` sends a bit vector to the natural it denotes. `bitNat_eq_digit` is the inverse
 direction: the decomposition is unique, so bit `i` of that natural is the bit the assignment
 supplied. Nothing downstream can read an individual bit without it — `num2Bits_sound` pins
-only the *sum*, and a statement about one bit (or, in `Gadgets.Insert`, about one quaternary
+only the *sum*, and a statement about one bit (or, in `Gadgets.BatchAppend`, about one quaternary
 digit) needs the bits back.
 -/
 
@@ -129,13 +129,29 @@ theorem bitNat_eq_digit {bs : ℕ → F} {n i : ℕ} (hi : i < n) :
 /-! ## Quaternary digits
 
 The quaternary tree reads its path one *digit* at a time, and the circuits produce that
-digit by pairing two bits of a `Num2Bits` output — `idx_dig[k][d] <== out[2d] + 2·out[2d+1]`
-(`src/tree_update_batch.circom:336`), the same shape as `src/lib/common.circom:21`. -/
+digit by pairing bits `2d` and `2d + 1` of a `Num2Bits` output — the pair
+`idx_bits.out[2 * d]`, `idx_bits.out[2 * d + 1]` that `src/lib/batch_append.circom:154-158`
+turns into a one-hot digit selector, the same shape as `src/lib/common.circom:21`. -/
 
 /-- Digit `d` of `m` in base 4. -/
 def quatDigit (m d : ℕ) : ℕ := m / 4 ^ d % 4
 
 theorem quatDigit_lt (m d : ℕ) : quatDigit m d < 4 := Nat.mod_lt _ (by norm_num)
+
+theorem four_pow_pos (d : ℕ) : 0 < 4 ^ d := by positivity
+
+/-- A quaternary level spans two bits. -/
+theorem four_pow_eq_two_pow (d : ℕ) : (4 : ℕ) ^ d = 2 ^ (2 * d) := by
+  rw [show (4 : ℕ) = 2 ^ 2 by norm_num, ← pow_mul]
+
+/-- Dividing by `4^(d+1)` is dividing by `4^d`, then by four. -/
+theorem div_four_pow_succ (m d : ℕ) : m / 4 ^ (d + 1) = m / 4 ^ d / 4 := by
+  rw [pow_succ, Nat.div_div_eq_div_mul]
+
+/-- A level's position splits into its parent's position and its digit. -/
+theorem div_four_pow_split (m d : ℕ) : m / 4 ^ d = 4 * (m / 4 ^ (d + 1)) + quatDigit m d := by
+  rw [div_four_pow_succ, quatDigit]
+  exact (Nat.div_add_mod (m / 4 ^ d) 4).symm
 
 /-- **The paired bits are the quaternary digit.** With `bitNat_eq_digit` this is what turns
 a `Num2Bits(2·depth)` decomposition of an index into the digit vector the insert consumes.
@@ -144,11 +160,9 @@ theorem quatDigit_eq_bits {bs : ℕ → F} {n d : ℕ} (h : 2 * d + 1 < n) :
     quatDigit (bitsNat bs n) d = bitNat (bs (2 * d)) + 2 * bitNat (bs (2 * d + 1)) := by
   have h0 := bitNat_eq_digit (bs := bs) (n := n) (i := 2 * d) (by omega)
   have h1 := bitNat_eq_digit (bs := bs) (n := n) (i := 2 * d + 1) (by omega)
-  have hpow : (4 : ℕ) ^ d = 2 ^ (2 * d) := by
-    rw [show (4 : ℕ) = 2 ^ 2 by norm_num, ← pow_mul, Nat.mul_comm]
   have hdiv : bitsNat bs n / 2 ^ (2 * d + 1) = bitsNat bs n / 2 ^ (2 * d) / 2 := by
     rw [pow_succ, Nat.div_div_eq_div_mul]
-  rw [quatDigit, hpow, ← h0, ← h1, hdiv]
+  rw [quatDigit, four_pow_eq_two_pow, ← h0, ← h1, hdiv]
   omega
 
 /-! ## The constraint system -/

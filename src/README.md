@@ -31,8 +31,8 @@ at 46 coefficients and a production ceremony.
 > naturals, the coefficient-pinning argument of §2a and the faerie-gold defence of §7
 > are proved in Lean 4 under [`lean/`](../lean/README.md). The known-discrete-log
 > weakness of §5 is formalised as a *negative* result, `pointBalance_not_sound`,
-> so conservation cannot be re-derived from the point balance. `FrontierRoot` and
-> the `BabyCheck` on `cv_dep` are not modelled. See
+> so conservation cannot be re-derived from the point balance. The
+> `BabyCheck` on `cv_dep` is not modelled. See
 > [`lean/README.md`](../lean/README.md) for coverage and
 > [`lean/FIDELITY.md`](../lean/FIDELITY.md) for how closely the model tracks this
 > source.
@@ -247,15 +247,15 @@ evaluated into `y` *and* pinned by a constraint.
 
 | Block | Width | First slot | Pinned by |
 |---|---:|---|---|
-| `old_root` | 1 | `0` | `old_root === FrontierRoot(frontier_in, start_index)` |
-| `new_root` | 1 | `1` | `new_root === running_root[MAX_L]` |
+| `old_root` | 1 | `0` | `old_root === BatchAppend(…).old_root`, rebuilt from `frontier_in` at `start_index` |
+| `new_root` | 1 | `1` | `new_root === BatchAppend(…).new_root`, from the same frontier |
 | `start_index` | 1 | `2` | `Num2Bits(2·DEPTH)`, then the frontier digits |
-| `actual_count` | 1 | `3` | `Num2Bits(COUNT_BITS)`, then `active[k]` and the insert chain |
+| `actual_count` | 1 | `3` | `Num2Bits(COUNT_BITS)`, then `active[k]` and the append window |
 | `cms` | `MAX_L` | `4` | `Poseidon(TAG_LEAF, …)` into `new_root` |
 | `cv_dep`, row-major | `2·MAX_L` | `4 + MAX_L` | `BabyCheck`, and the same leaf hash |
-| `leaf_asset` | `MAX_L` | `4 + 3·MAX_L` | the deposit binding, plus step 7a below |
+| `leaf_asset` | `MAX_L` | `4 + 3·MAX_L` | the deposit binding, plus step 6a below |
 | `leaf_public_in` | `MAX_L` | `4 + 4·MAX_L` | `Num2Bits(64)` and the deposit binding |
-| `is_deposit` | `MAX_L` | `4 + 5·MAX_L` | booleanity, the step-5 zeroings, and `active_dep` |
+| `is_deposit` | `MAX_L` | `4 + 5·MAX_L` | booleanity, the step-4 zeroings, and `active_dep` |
 
 **The deposit-binding fields, and why they need one extra constraint.** The
 per-leaf equality
@@ -342,14 +342,14 @@ that before choosing a fix — the two obvious ones were tried and rejected, and
 The batch shape is not affected: `rcv[k]` there cannot be derived or committed,
 because `tree_update_batch` never opens a leaf — it sees `cms[k]` and `cv_dep[k]`
 and not the note behind them. Its knobs are already non-separable for a different
-reason, since each also feeds `new_root` through the insert chain.
+reason, since each also feeds `new_root` through `BatchAppend`.
 
 **Do not demote these three to challenge-only.** It was tried, and it is
 exploitable in two independent ways: with `is_deposit` free a `flushBatch`
 caller escrows one unit and commits a leaf bound by nothing but `BabyCheck`, and
 with `leaf_public_in` free the binding certifies a prover-chosen amount. Both
 produce a verifying proof against the production key. Promoting them back
-*without* step 7a is the other failure, the 256-bit dial above.
+*without* step 6a is the other failure, the 256-bit dial above.
 `test/tree_update_batch.test.ts :: divergent witness` holds both directions.
 
 **Verifier signature.** `snarkjs zkey export solidityverifier` emits
@@ -703,7 +703,7 @@ Before invoking the Groth16 verifier the on-chain wrapper MUST:
 
 For the paired batch proof the contract must additionally pin three things.
 
-`start_index == committedCount`. `FrontierRoot` binds the frontier to `old_root`
+`start_index == committedCount`. `BatchAppend` binds the frontier to `old_root`
 but cannot bind the index, since a tree with trailing empty leaves has the same
 root as one without them, so replaying a valid batch at a lower index would
 overwrite committed leaves.
@@ -716,7 +716,7 @@ leaf commits a leaf whose `cv_dep` is constrained by nothing but `BabyCheck`.
 `MASP._drainDeposit` and `MASP._validateRequest` cover every active slot on
 their respective paths.
 
-`leaf_asset[k] == 0` on every zero-value deposit leaf, matching step 7a (§2a).
+`leaf_asset[k] == 0` on every zero-value deposit leaf, matching step 6a (§2a).
 `MASP._drainDeposit` sets it on the fee note it emits; a consumer that forwards a
 non-zero asset on a worthless leaf produces a batch no prover can satisfy. The
 circuit is otherwise indifferent to how deposits are laid out across the batch.
@@ -763,18 +763,22 @@ one public output, `y`.
 | Circuit | Constraints | Wires | Private inputs |
 |---|---:|---:|---:|
 | `Transact(11, 4, 6)` | 100,320 | 100,473 | 323 |
-| `TreeUpdateBatch(11, 8)` | 113,527 | 113,378 | 93 |
+| `TreeUpdateBatch(11, 8)` | 55,190 | 55,103 | 93 |
 
-Both need the **2^17** domain, so setup fetches `powersOfTau28_hez_final_17`.
-snarkjs sizes the domain from `nConstraints + nPubInputs + nOutputs` and requires
-that sum to be at most `2^17 - 1`, so the ceiling on the constraint count is
-**131,069**. The transact circuit clears it by 30,749 and the batch circuit by
-17,542. `just budget` pins both to their exact counts in
-[`budget.json`](../budget.json), and `groth16 setup` fails outright above the
-ptau as a second line of defence.
+The two circuits use different domains. `Transact` is set up on **2^17**
+(`powersOfTau28_hez_final_17`), `TreeUpdateBatch` on **2^16**
+(`powersOfTau28_hez_final_16`). snarkjs sizes the domain from
+`nConstraints + nPubInputs + nOutputs` and requires that sum to be at most
+`domain - 1`, so the ceiling on the constraint count is `domain - 3`: **131,069**
+for the transact circuit, which clears it by 30,765, and **65,533** for the batch
+circuit, which clears it by 10,343. `just budget` pins both to their exact counts
+and domains in [`budget.json`](../budget.json), and `groth16 setup` fails
+outright above the ptau as a second line of defence.
 
-`TreeUpdateBatch` is the tighter of the two and decides whether 2^17 holds. A
-leaf slot costs roughly 12k constraints, so `MAX_L = 16` would not fit.
+Measured, a depth level costs `TreeUpdateBatch` 2,534 constraints and a leaf slot
+3,626. So 2^16 holds through depth 15 at `MAX_L = 8` (65,326, once `EMPTY_SUBTREE`
+is extended past `d = 11`). `MAX_L = 16` is 84,199 and would move it back to 2^17;
+`MAX_L = 32` is 143,072 and fits neither.
 
 `MAX_L = 8` is the floor rather than a tuning choice: `COUNT_BITS` requires a
 power of two, and a spend emits `TRANSACT_OUT = 6` leaves that must fit one
@@ -807,11 +811,12 @@ Merkle levels, nullifiers, leaf hashes and key derivation; `PerAssetValueBalance
 is about 200 constraints, `PerAssetPointBalance` about 70, and the `PolyEval(46)`
 Horner chain about 46. FMD clue signals cost nothing (§7a).
 
-`TreeUpdateBatch` is dominated by `MAX_L` single-leaf inserts across `DEPTH`
-Merkle levels of `Poseidon(5)`, plus the `MAX_L` deposit-binding equalities, each
-a `HashToAssetGen`, a `ValueScalarMul`, a `MulH` and a `BabyAdd` with an `IsZero`
-rejecting asset id 0. `FrontierRoot` adds about 8.7k. `BatchCompress` is
-negligible.
+`TreeUpdateBatch` is dominated by the `MAX_L` deposit-binding equalities, each a
+`HashToAssetGen`, a `ValueScalarMul`, a `MulH` and a `BabyAdd` with an `IsZero`
+rejecting asset id 0. The tree is `BatchAppend`: one `Poseidon(5)` per
+level rebuilding `old_root` from the frontier, and one per node the batch changes
+for `new_root` — 11 + 22 at `MAX_L = 8`, against the 11 + 88 a chain of
+single-leaf inserts spends. Both folds read the frontier as plain linear terms. `BatchCompress` is negligible.
 
 ---
 
@@ -830,8 +835,7 @@ negligible.
 | [`lib/fixed_base_mul.circom`](lib/fixed_base_mul.circom) | Windowed fixed-base multiplication and its compile-time tables |
 | [`lib/asset_gen.circom`](lib/asset_gen.circom) | `HashToAssetGen`, Pedersen hash-to-curve |
 | [`lib/merkle.circom`](lib/merkle.circom) | Quaternary level, root, dummy-aware membership |
-| [`lib/insert.circom`](lib/insert.circom) | Single-leaf incremental insert with frontier IO |
-| [`lib/frontier_root.circom`](lib/frontier_root.circom) | `FrontierRoot`, rebuilding `old_root` from the frontier |
+| [`lib/batch_append.circom`](lib/batch_append.circom) | `BatchAppend`: count, capacity, frontier pin, and both roots of the batched append |
 | [`lib/poly_eval.circom`](lib/poly_eval.circom) | `PolyEval`, `TransactCompressN`, `BatchCompress` |
 | [`lib/common.circom`](lib/common.circom) | `PathIndexSelectors`, `EmptySubtreeHashes` |
 | [`lib/tags.circom`](lib/tags.circom) | Domain-separation tags and `2^64` |
@@ -843,7 +847,7 @@ negligible.
 | [`../test/transact/`](../test/transact/) | Transact suites by concern: balance, multi-asset, tamper, PolyEval binding, `rho` |
 | [`../test/tree_update_batch.test.ts`](../test/tree_update_batch.test.ts) | Deposit binding, odd counts, frontier binding, padding, capacity |
 | [`../test/formal/`](../test/formal/) | Pins the slot order against the Lean dump and `_pubSignals = [y, z]` |
-| [`../test/fuzz/`](../test/fuzz/) | Property-based suites over Transact, Merkle, FrontierRoot, PolyEval, FixedBaseMul |
+| [`../test/fuzz/`](../test/fuzz/) | Property-based suites over Transact, Merkle, frontier binding, PolyEval, FixedBaseMul |
 | [`../test/fixtures/`](../test/fixtures/) | Small-parameter wrappers instantiating library templates |
 
 | Script | Role |

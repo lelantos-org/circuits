@@ -142,7 +142,7 @@ describe("formal model / batch public-input layout parity", () => {
         // `leaf_public_in` and `is_deposit` are signals of the circuit, so a
         // prover can hand the verifier a witness whose copies disagree with the
         // calldata `z` was hashed from. Only evaluating them into `y` — plus the
-        // constraint in step 7a that pins them where the binding degenerates —
+        // constraint in step 6a that pins them where the binding degenerates —
         // closes that.
         //
         // Their POSITION is checked too: the contract re-masks the two uint64

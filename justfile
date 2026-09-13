@@ -10,13 +10,12 @@ PTAU_DIR := ROOT / "ptau"
 # byte-identical copies as release assets, which are unauthenticated and not
 # metered against any bandwidth quota.
 PTAU_URL_BASE := "https://github.com/lelantos-org/ptau/releases/download/hermez"
-# Both circuits are on the 2^17 ceremony: Transact(11,4,6) is 100,320 constraints
-# and TreeUpdateBatch(11,8) is 113,502, so neither fits 2^16. snarkjs picks the
-# domain from `nConstraints + nPubInputs + nOutputs`, which caps a 2^16 ceremony
-# at 65,533 constraints. See `budget` below.
+# Transact(11,4,6) is on the 2^17 ceremony at 100,304 constraints, which does not
+# fit 2^16. TreeUpdateBatch(11,8) is on the 2^16 ceremony at 55,190. snarkjs
+# picks the domain from `nConstraints + nPubInputs + nOutputs`, which caps a 2^16
+# ceremony at 65,533 constraints and a 2^17 one at 131,069. See `budget` below.
 #
-# `_setup` takes the ptau as an argument; PTAU16 is available for a smaller
-# circuit and is not referenced by any recipe.
+# `_setup` takes the ptau as an argument, so each shape names its own.
 PTAU16 := "powersOfTau28_hez_final_16.ptau"
 PTAU17 := "powersOfTau28_hez_final_17.ptau"
 
@@ -111,16 +110,16 @@ _ensure-build-circuit:
             --root "{{TOOLS}}/build-circuit"; \
     fi
 
-# tree_update_batch at MAX_L=8, depth 11 is the tighter of the two circuits:
-# 113,527 constraints against a 131,069 ceiling on the 2^17 domain (snarkjs
-# sizes the domain from nConstraints + nPubInputs + nOutputs and needs the sum
-# below 2^17). A leaf slot costs roughly 12k constraints, so a further widening
-# breaks this bound first. `just budget` pins the domain so growth past it fails
-# CI; `groth16 setup` is a second check on the same bound, failing outright when
-# the constraint count exceeds the ptau.
+# tree_update_batch at MAX_L=8, depth 11 is 55,190 constraints against a 65,533
+# ceiling on the 2^16 domain (snarkjs sizes the domain from nConstraints +
+# nPubInputs + nOutputs and needs the sum below 2^16). A leaf slot costs 3,626
+# and a depth level 2,534, so 2^16 holds through depth 15 at MAX_L=8, and MAX_L=16
+# needs 2^17 again. `just budget` pins the domain so growth past it fails CI;
+# `groth16 setup` is a second check on the same bound, failing outright when the
+# constraint count exceeds the ptau.
 
 # Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
-setup-batch: (_setup "tree_update_batch" PTAU17)
+setup-batch: (_setup "tree_update_batch" PTAU16)
 
 # The four snarkjs calls every phase-2 setup makes, written once so the ptau
 # cannot drift between shapes. `groth16 setup` fails outright when the
@@ -353,7 +352,7 @@ vectors-consumers-check:
 #       output is propagated. Sites:
 #         - SpentNote/OutputNote: only the cv branch's `vc_dep.rH` is threaded
 #           out; the deposit-branch rH is bound internally by ValueCommit.
-#         - QuaternaryInsertLevel/MerkleLevel4: the `PathIndexSelectors`
+#         - MerkleLevel4: the `PathIndexSelectors`
 #           selectors output is consumed; `bits` is the redundant view.
 
 # Static analysis over src/lib and the top-level circuits (needs circomspect).
@@ -442,6 +441,42 @@ picus CIRCUIT="4x6" STRONG="":
         9)  echo "==> {{CIRCUIT}}: UNDER-CONSTRAINED"; exit 1 ;;
         0)  echo "==> {{CIRCUIT}}: unknown — Picus could not decide (timeout or unsupported)"; exit 1 ;;
         *)  echo "==> {{CIRCUIT}}: Picus error (exit $code)"; exit 1 ;;
+    esac
+
+# `picus tree_update_batch` can only be run at weak safety — IsZero's inverse hint
+# is free by design when its input is zero — and weak safety over the whole circuit
+# speaks only for its single output, `y`. `BatchAppend` alone has no hints, so it
+# is checked at strong safety at the deployed shape: every signal, both roots
+# among them, is a function of `start_index`, `actual_count`, `leaves` and
+# `frontier_in`.
+
+# Strong-safety Picus over a standalone BatchAppend(DEPTH, MAX_L) (needs Docker).
+picus-batch-append DEPTH="11" MAX_L="8":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v docker >/dev/null || { echo "docker not found"; exit 1; }
+    if docker image inspect picus:arm64 >/dev/null 2>&1; then
+        image=picus:arm64
+    elif docker image inspect picus:local >/dev/null 2>&1; then
+        image=picus:local
+    else
+        echo "no Picus image. Build one: just picus-image (native arm64)"
+        exit 1
+    fi
+    dir="{{BUILD}}/picus-batch-append"
+    name="batch_append_{{DEPTH}}_{{MAX_L}}"
+    mkdir -p "$dir"
+    printf 'pragma circom 2.2.3;\ninclude "%s";\ncomponent main = BatchAppend({{DEPTH}}, {{MAX_L}});\n' \
+        "{{ROOT}}/src/lib/batch_append.circom" > "$dir/$name.circom"
+    circom "$dir/$name.circom" --r1cs --sym --O0 -o "$dir" -l "{{ROOT}}/node_modules"
+    code=0
+    docker run --rm -v "$dir:/data" "$image" \
+        ./run-picus --solver z3 --timeout 10000 --strong "/data/$name.r1cs" || code=$?
+    case "$code" in
+        8)  echo "==> $name: properly constrained (strong)" ;;
+        9)  echo "==> $name: UNDER-CONSTRAINED"; exit 1 ;;
+        0)  echo "==> $name: unknown — Picus could not decide"; exit 1 ;;
+        *)  echo "==> $name: Picus error (exit $code)"; exit 1 ;;
     esac
 
 # Continues past a failing circuit so one result does not hide the others, then

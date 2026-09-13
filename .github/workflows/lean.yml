@@ -95,7 +95,7 @@ jobs:
       # The other direction over the same scan: whether the citations, taken
       # together, reach every `===` and `<==` the circom emits. A constraint no
       # citation names is one the model may simply not have. The residue —
-      # `frontier_root`, `fixed_base_mul`, `EmptySubtreeHashes` — is pinned in
+      # `fixed_base_mul`, `EmptySubtreeHashes` — is pinned in
       # `expected/coverage.txt` and diffed, the way the trusted base is.
       - name: Constraint coverage unchanged
         run: python3 scripts/check-coverage.py

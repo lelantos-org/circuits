@@ -14,7 +14,8 @@ const CIRCUITS = path.join(__dirname, "..");
 const SCRIPT = path.join(CIRCUITS, "scripts", "check-budget.mjs");
 
 // Coverage for the constraint-budget gate, which keeps a per-slot gadget change
-// from pushing tree_update_batch out of its 2^17 FFT domain.
+// from pushing a circuit out of its FFT domain: 2^17 for 4x6, 2^16 for
+// tree_update_batch.
 //
 // Each case builds a throwaway root laid out the way the script expects
 // (<root>/scripts, <root>/build, <root>/src, <root>/budget.json) and runs the

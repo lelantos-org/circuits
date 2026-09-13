@@ -95,21 +95,22 @@ section immediately above for why "safe by that table" is not the same as harmle
 
 Every `===` / `<==` written in `src/lib/*.circom` — the transitive closure of `src/4x6.circom`
 and `src/tree_update_batch.circom`, minus `node_modules/circomlib` — appears
-in the tables below, with **three** stated exceptions, all of them repo-owned code that is
+in the tables below, with **two** stated exceptions, both of them repo-owned code that is
 collapsed rather than transcribed:
 
-1. `src/lib/frontier_root.circom` is not modelled at all, so its 29 constraint lines have no
-   rows here. `README.md` calls this the largest remaining gap in the batch proof.
-2. `src/lib/fixed_base_mul.circom` — `FixedBaseMulBits` / `FixedBaseMul`, ~270 lines and 748
+1. `src/lib/fixed_base_mul.circom` — `FixedBaseMulBits` / `FixedBaseMul`, ~270 lines and 748
    constraints — is collapsed into the `escalarMul` / `escalarMul_spec` axiom pair
    (`Lelantos/Model/Jubjub.lean`). Note this is **not** covered by the circomlib carve-out
    below: `MulH` deliberately does not use circomlib's `EscalarMulFix`
    (`src/lib/value_commit.circom`), so this is the repo's own gadget behind an axiom.
-3. `EmptySubtreeHashes` / `EMPTY_SUBTREE` (`src/lib/common.circom`) has no rows. In Lean
-   `zeros : ℕ → F` is a free parameter (`Gadgets/Insert.lean`,
-   `Circuit/TreeUpdateBatch.lean`), never tied to the eleven hard-coded constants. This is
-   the safe direction — `InsertsTo` says "whatever fill the witness supplied" rather than
-   "the empty subtree" — but it is a gap, not a transcription.
+2. `EmptySubtreeHashes` / `EMPTY_SUBTREE` (`src/lib/common.circom`) has no rows. In Lean
+   `zeros : ℕ → F` is a free parameter, never tied to the eleven hard-coded constants, and
+   the constraint systems accept any fill, which is the safe direction. The batch results,
+   however, assume `ZerosCoherent` (`Gadgets/Common.lean`) — that the fills are the
+   empty-subtree chain — for the reason the header of `src/lib/batch_append.circom` gives.
+   Lean cannot evaluate Poseidon, so the chain is a hypothesis, not a transcription;
+   `test/merkle.test.ts` pins the constants to it numerically, and
+   `ZerosCoherent.eq_emptyChain` shows the hypothesis determines the table.
 
 See "What is not proved" in [README.md](README.md). `src/4x6.circom` is the only transact
 top-level the repository ships, instantiating `Transact(11, 4, 6)`; the smaller shapes that
@@ -158,10 +159,11 @@ the prose claims exist. Comments hold no identifiers the compiler resolves, so a
 theorem — or one described in a module note and never written — is invisible to `lake
 build`. Both existed: a theorem named transact_y_not_binding was cited three times as the
 result showing `y` does not determine the transaction, and one named activeIdx_eq was cited
-as the lemma consuming `BatchChainSat.idx_bits`. (Neither name is written in backticks here,
-because backticks are what the checker reads as a claim.) Neither had been written, and in the second case the constraint it
-was supposed to justify was consumed by nothing at all — see `batch_active_index`, which is
-that lemma.
+as the lemma consuming the chained circuit's per-slot index decomposition. (Neither name is
+written in backticks here, because backticks are what the checker reads as a claim.) Neither
+had been written, and in the second case the constraint it was supposed to justify was
+consumed by nothing at all. The lemma that closed it was later removed along with the chain
+it described; `batch_capacity` consumes the one range check that replaced it.
 
 ### `src/lib/balance.circom`
 
@@ -219,78 +221,97 @@ assetMul 3 = 2 · assetMul 2`) is checked against the real gadget at runtime by
 | `merkle:121` `diff <== root' - root` | `MerkleProofOrDummySat.diff_def` |
 | `merkle:122` `(1-is_dummy)*diff === 0` | `MerkleProofOrDummySat.matches_root` |
 
-### `src/lib/insert.circom`
+### `src/lib/batch_append.circom`
+
+The construction is explained in that file's header; the rows are its constraints. Every
+`BatchAppend` signal lives in `BatchAppendSignals`, and the numeric side conditions of an
+instance in `BatchShape`.
 
 | circom | Lean |
 |---|---|
-| `:34-35` `PathIndexSelectors(idx_digit)` | `QuaternaryInsertLevelSat.selectors` |
-| `:41-43` `c0 = s0·cur + (1-s0)·f[0]` | `QuaternaryInsertLevelSat.c0_def` |
-| `:50-53` `c1 = s0·z + s1·cur + (s2+s3)·f[1]` | `QuaternaryInsertLevelSat.c1_def` |
-| `:60-63` `c2 = (s0+s1)·z + s2·cur + s3·f[2]` | `QuaternaryInsertLevelSat.c2_def` |
-| `:69-71` `c3 = (s0+s1+s2)·z + s3·cur` | `QuaternaryInsertLevelSat.c3_def` |
-| `:73-78` `cur_next = Poseidon(TAG_MERKLE, c0..c3)` | `QuaternaryInsertLevelSat.out_def` |
-| `:94-96` `frontier_out[0..2]` | `QuaternaryInsertLevelSat.fout0_def` … `fout2_def` |
-| `:112` `cur[0] <== leaf` | `QuaternaryInsertSat.base` |
-| `:114-126` level chain | `QuaternaryInsertSat.level` |
-| `:128` `root <== cur[DEPTH]` | `QuaternaryInsertSat.top` |
+| `:58-71` `BATCH_WINDOW` | `batchWindow`; `batchWindow_eq_circom` against the literal clamp |
+| `:76-85` `BATCH_SRC`, `p = 4 * j + k - r` | `batchSrc`; `batchSrc_eq_circom` against the signed `ℤ` computation |
+| `:89-105` `BATCH_NPROD` | none needed — it only sizes `prod`, and `assert(pi == NPROD)` fails compilation on a mismatch |
+| `:116` `assert(EMPTY_SUBTREE(0) == 0)` | `ZerosCoherent`, first conjunct — a hypothesis, see exception 2 |
+| `:130` `assert((1 << COUNT_BITS) == MAX_L)` | `BatchShape.pow_count` |
+| `:131-132` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchAppendSat.count_bits` |
+| `:134-140` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchAppendSat.active_def` |
+| `:145-146` `Num2Bits(BITS)(start_index)` | `BatchAppendSat.index_bits` |
+| `:147-148` `last_idx_bits.in <== start_index + actual_count - 1` | `BatchAppendSat.last_idx_bits` |
+| `:154` `bb[d] <== idx_bits.out[2 * d] * idx_bits.out[2 * d + 1]` | `BatchAppendSat.bb_def` / `bitPairs` |
+| `:155-158` `s[d][0..3]` over the bits and `bb` | `batchSel`, `appendSel` |
+| `:162-170` `(1 - read) * frontier_in[d][k] === 0` | `BatchAppendSat.frontier_pin` / `batchRead` |
+| `:176` `old_node[0] <== 0` | `BatchAppendSat.old_base` |
+| `:179` `old_h[d].inputs[0] <== tag` | `BatchAppendSat.old_def` via `merkleNode` |
+| `:180-188` `old_prod[d][k] <== s[d][k] * old_node[d]` with the frontier and empty-subtree terms | `BatchAppendSat.old_def` via `oldChild` |
+| `:191` `old_node[d + 1] <== old_h[d].out` | `BatchAppendSat.old_def` |
+| `:193` `old_root <== old_node[DEPTH]` | `BatchAppendSat.old_root_def` |
+| `:204` `assert(W[DEPTH] == 1)` | `batchWindow_top` |
+| `:208` `node[OFF[0] + t] <== active[t] * leaves[t]` | `BatchAppendSat.leaf_def` |
+| `:223` `h[hi].inputs[0] <== tag` | `BatchAppendSat.node_def` via `merkleNode` |
+| `:226-241` `prod[pi] <== s[d][r] * node[OFF[d] + src]` with the frontier and empty-subtree terms | `BatchAppendSat.node_def` via `batchChild` |
+| `:243` `node[OFF[d + 1] + j] <== h[hi].out` | `BatchAppendSat.node_def` |
+| `:248` `new_root <== node[OFF[DEPTH]]` | `BatchAppendSat.new_root_def` |
 
-The child mux and the frontier mux are transcribed as separate fields on purpose: they differ
-at slots 1 and 2 (`(s2+s3)·f[1]` versus `(1-s1)·f[1]`), which the circom comment at `:81-87`
-flags. Collapsing them in the model would make a real edit invisible.
+`oldChild` and `batchChild` state the children exactly as the circuit sums them: the frontier
+slot as a linear term, then one term per digit — a selector product with a window node or the
+running node, or the selector times the empty subtree. `oldChild` collects the empty-subtree
+digits into one coefficient, as the circuit's `below` does, and `batchChild` visits the digits
+in the circuit's own order, so every assignment satisfying the constraints satisfies
+`old_def` and `node_def`. The linear frontier term is the circuit's own, not a model
+simplification — what makes it the frontier slot the digit selects is the pin, and
+`batchAppend_frontier_zero` is where that is proved.
+
+`node d t` is two-dimensional in Lean and the flat `node[OFF[d] + t]` in the circuit, with
+`OFF[d] = Σ_{e<d} W[e]` (`batchWindow_deployed` evaluates the widths). `signal-map.json` can
+only check that `main.append.node[0..28]` exist; the `OFF` correspondence is this paragraph,
+and it is injective because every read and write stays below its level's width (`batchSrc`
+names a node only below `w`, `leaf_def` has `t < maxL`, `node_def` has `j < W[d+1]`).
+
+Note the shape of the `last_idx_bits` row. The circuit range-checks one index, the last
+inserted one, so the model must too: a bound over `start_index + k` for every slot would put a
+constraint in the model that the circuit does not impose — the dangerous direction of the
+table at the top of this file — and would be false of an honest batch ending on the final
+index of the tree. `batchAppend_witness` shows the whole system is satisfiable at every start,
+count and canonical frontier, so `frontier_pin` is not over-strict either.
 
 ### `src/tree_update_batch.circom`
 
 Split across two Lean structures — `BatchChainSat` and `BatchDepositSat` — so that the
-append results reach no curve axiom.
+append results reach no curve axiom. `EMPTY_SUBTREE` is a parameter of the constraint system,
+not a signal, so it is an argument of `BatchChainSat` rather than a field of `BatchSignals`.
 
 | circom | Lean |
 |---|---|
-| `:138-139` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchChainSat.count_bits` |
-| `:145-148` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchChainSat.active_def` |
-| `:154` `(1-active)*cms === 0` | `BatchChainSat.pad_cm` |
-| `:155-156` `(1-active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
-| `:157-160` `(1-active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
-| `:167` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
-| `:168-169` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
-| `:176-183` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
-| `:192-194` `BabyCheck(cv_dep.x, cv_dep.y + (1-active))` | **absent** — no curve equation in the model |
-| `:208` `active_dep <== active * is_deposit` | `BatchDepositSat.active_dep_def` |
-| `IsZero(leaf_asset)` | `BatchDepositSat.asset_isZero` |
-| `IsZero(leaf_public_in)` | `BatchDepositSat.public_in_isZero` |
-| step 7a `active_dep * (IsZero(leaf_asset).out - IsZero(leaf_public_in).out) === 0` | `BatchDepositSat.asset_matches_value` |
-| `:213-214` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
-| `:217-220` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
-| `:223-224` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
-| `:226-231` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
-| `:232-233` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
-| `:287-288` `Num2Bits(2·DEPTH)(start_index)` | `BatchChainSat.start_index_bits` — the one line of step 8 that is modelled, because `batch_active_index` needs `start_index < 4^DEPTH` |
-| `:290-299` `FrontierRoot` and `old_root === frontier_root.root` | **absent** — see README |
-| `:331` `idx_in <== active * (start_index + k)` | `BatchChainSat.idx_in_def` |
-| `:332-333` `Num2Bits(2·DEPTH)(idx_in)` | `BatchChainSat.idx_bits` |
-| `:335-337` `idx_dig` from the bit pairs | `BatchChainSat.idx_dig` |
-| `:340-347` `QuaternaryInsert(DEPTH)` per leaf | `BatchChainSat.insert` |
-| `:313-315` `fr[0] <== frontier_in` | `BatchChainSat.fr_base` |
-| `:318` `running_root[0] <== old_root` | `BatchChainSat.root_base` |
-| `:352-354` frontier mux | `BatchChainSat.fr_mux` |
-| `:358-360` root mux | `BatchChainSat.root_mux` |
-| `:364` `new_root === running_root[MAX_L]` | `BatchChainSat.new_root_def` |
-| `:367-380` `BatchCompress(MAX_L)` | `batchPiSlot` / `batchSlotValue`, dumped to `expected/layout-batch-8.txt` by `dump-layout.sh`. The Horner chain itself is `polyEval_sound`, proved generically |
+| `:128-135` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
+| `:141-151` `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, `leaves`, `frontier_in` | `BatchChainSat.append` |
+| `:152` `old_root === append.old_root` | `BatchChainSat.old_root_def` |
+| `:153` `new_root === append.new_root` | `BatchChainSat.new_root_def` |
+| `:158` `(1-append.active)*cms === 0` | `BatchChainSat.pad_cm` |
+| `:159-160` `(1-append.active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
+| `:161-164` `(1-append.active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
+| `:171` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
+| `:172-173` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
+| `:180-185` `BabyCheck(cv_dep.x, cv_dep.y + (1-append.active))` | **absent** — no curve equation in the model |
+| `:198` `active_dep <== append.active * is_deposit` | `BatchDepositSat.active_dep_def` |
+| `:200-201` `IsZero(leaf_asset)` | `BatchDepositSat.asset_isZero` |
+| `:225-226` `IsZero(leaf_public_in)` | `BatchDepositSat.public_in_isZero` |
+| `:272` step 6a `active_dep * (leaf_asset_nz.out - pub_in_nz.out) === 0` | `BatchDepositSat.asset_matches_value` |
+| `:203-204` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
+| `:207-210` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
+| `:213-214` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
+| `:216-220` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
+| `:222-223` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
+| `:276-289` `BatchCompress(MAX_L)` | `batchPiSlot` / `batchSlotValue`, dumped to `expected/layout-batch-8.txt` by `dump-layout.sh`. The Horner chain itself is `polyEval_sound`, proved generically |
 
-Two rows are deliberately empty. `BabyCheck` and `FrontierRoot` are genuine gaps, not
-simplifications, and both are listed in the README — though `FrontierRoot`'s own
-`Num2Bits(2·DEPTH)` on `start_index` is modelled, since the position result depends on it.
+One row is deliberately empty: `BabyCheck` is a genuine gap, listed in the README. The old
+root used to be a second — `FrontierRoot` was not modelled — and is now `batch_old_root`.
 
-`BatchCompress` used to be the third. The Horner chain was always covered generically by
+`BatchCompress` used to be a gap too. The Horner chain was always covered generically by
 `polyEval_sound` / `polyEval_binding`, but the *order* of the 52 coefficients was not, and
 `test/formal/batch_layout_parity.test.ts` anchored it on the published vector — the file the
 SDK and the contracts fixture also read, so a drift the generator agreed with was invisible
 in all three. `batchPiSlot` is now that anchor.
-
-Note the shape of the `idx_bits` row. The circuit range-checks `active[k] · (start_index + k)`,
-so the model must too: stating it over `start_index + k` for every slot would put a
-constraint in the model that the circuit does not impose — the dangerous direction of the
-table at the top of this file — and would additionally be false of a batch whose last active
-leaf sits at the final index of the tree, which the circuit accepts.
 
 ### `src/lib/note.circom`
 
@@ -350,7 +371,7 @@ Two things about building it are worth recording, because they are the parts tha
 obvious. The first is that **`TransactSat` is not executable**: `poseidon`, `babyAdd`,
 `escalarMul`, `coords` and `assetGen` are opaque or axiomatised, so there is nothing to run.
 The resolution is not to make them computable but to split every field in two — the
-arithmetic ones (`dummy_zero`, `idx_dig`, the balance chains, the muxes, `Num2BitsSat`,
+arithmetic ones (`dummy_zero`, `count_bits`, the balance chains, the muxes, `Num2BitsSat`,
 `PolyEvalSat`) evaluate directly, and the gadget ones do not evaluate at all. For those,
 what the model claims is a *wiring* fact: that `cm_def`'s arguments are the values on
 `main.spent[0].cm.h.inputs[0..3]` and its result is the value on `.out`. That is checkable,
@@ -415,12 +436,12 @@ model field abstracts, a wider one naming a whole template. A line reached only 
 template-wide citation is **pointer-only**: evidence about the template, not about that
 line. A line nothing reaches is **uncited**.
 
-358 of 493 constraints are transcribed. The residue is pinned in `expected/coverage.txt` and
+329 of 431 constraints are transcribed. The residue is pinned in `expected/coverage.txt` and
 diffed the way `check-axioms.sh` pins the trusted base, so a new uncited constraint appears
-in review rather than in nobody's eye. The uncited part of it is currently *exactly* the
-three exceptions Defence 1 states — `frontier_root.circom`, `fixed_base_mul.circom` and
-`EmptySubtreeHashes` — which is the first time that claim has been checked rather than
-asserted.
+in review rather than in nobody's eye. The uncited part of it is *exactly* the two exceptions
+Defence 1 states — `fixed_base_mul.circom` and `EmptySubtreeHashes`. It was three while the
+old root lived in an unmodelled `frontier_root.circom`, whose 29 uncited lines went when
+`BatchAppend` absorbed it.
 
 Writing it found two things beyond drifted line numbers. `merkle.circom`'s
 `root <== cur[depth]` was cited three lines off, and — the more interesting one — the

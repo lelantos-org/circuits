@@ -81,57 +81,11 @@ export const isZeroHint: Explainer = (f, witness, symbols) => {
     return null;
 };
 
-/**
- * `frontier_in[d][k]` at the level's own digit, where the running rebuild sits.
- *
- * `FrontierRoot` (src/lib/frontier_root.circom) fills child slot `k` of level
- * `d` from one of three sources, chosen by the one-hot digit selector `s[d][*]`:
- *
- *     k <  digit : frontier_in[d][k]   (a filled left sibling)
- *     k == digit : cur[d]              (the running rebuild)
- *     k >  digit : zeros[d]            (an empty right subtree)
- *
- * The frontier contribution to each slot is a PRODUCT with the selectors for
- * the digits strictly above it — `c1_post[d] <== (s[d][2] + s[d][3]) *
- * frontier_in[d][1]`, and so on. At `digit == k` every one of those selectors is
- * zero, so the whole product vanishes and `frontier_in[d][k]` multiplies nothing
- * anywhere in the system. It is free because the tree has no value to put there:
- * that position is occupied by the node being rebuilt.
- *
- * Exactly one slot per level qualifies, and only while `digit_d < 3` — slot 3 is
- * never a frontier slot, so at `digit_d == 3` all three are read and none is
- * free. This is what makes the freedom self-limiting rather than a hole: it
- * cannot move `old_root`, because the slots that DO feed the Poseidon preimage
- * at that level are a different set.
- *
- * PRECONDITION, checked against the witness: `s[d][k] == 1`, i.e. this level's
- * digit really is `k`. A frontier slot free at any OTHER digit would mean a slot
- * the rebuild reads is going unconstrained, which is a forged-root primitive and
- * must stay unexplained.
- */
-export const frontierRunningSlot: Explainer = (f, witness, symbols) => {
-    // Total freedom only; a single alternative value is a different phenomenon.
-    if (f.kind !== "unconstrained") return null;
-    if (f.support.length !== 1) return null;
-
-    const { name } = f.support[0];
-    const m = /^(.*)frontier_in\[(\d+)\]\[(\d+)\]$/.exec(name);
-    if (m === null) return null;
-    const [, prefix, level, slot] = m;
-
-    // The selector that decides it. Refuse rather than assume a layout if the
-    // compiler folded it away — same rule as `isZeroHint`.
-    const sIndex = symbols.indexOf(`${prefix}frontier_root.s[${level}][${slot}]`);
-    if (sIndex === undefined) return null;
-
-    return witness[sIndex] === 1n
-        ? `FrontierRoot running slot: digit_${level} = ${slot}, so frontier_in[${level}][${slot}] ` +
-              "multiplies a zero selector and the rebuild reads cur instead"
-        : null;
-};
+// No explainer for a free `frontier_in[d][k]`: `BatchAppend` pins every unread slot to zero,
+// so a free frontier slot is always a regression and must stay unexplained.
 
 /** Every explanation the suites accept. */
-export const EXPLAINERS: readonly Explainer[] = [isZeroHint, frontierRunningSlot];
+export const EXPLAINERS: readonly Explainer[] = [isZeroHint];
 
 /** The first explanation that accounts for `f`, or null if none does. */
 export function explain(

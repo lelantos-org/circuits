@@ -54,6 +54,12 @@ def nullifierOf (nk rho cm : F) : F := poseidon [TAG_NF, nk, rho, cm]
 `src/lib/merkle.circom:66-74`. -/
 def merkleNode (c : ℕ → F) : F := poseidon [TAG_MERKLE, c 0, c 1, c 2, c 3]
 
+/-- `Poseidon` reads four children, so agreeing on those four is agreeing. -/
+theorem merkleNode_congr {a b : ℕ → F} (h : ∀ c, c < 4 → a c = b c) :
+    merkleNode a = merkleNode b := by
+  simp only [merkleNode, h 0 (by norm_num), h 1 (by norm_num), h 2 (by norm_num),
+    h 3 (by norm_num)]
+
 /-- The leaf hash binding a commitment to its deposit value commitment —
 `src/lib/spent.circom:82`. -/
 def leafHash (cm x y : F) : F := poseidon [TAG_LEAF, cm, x, y]
