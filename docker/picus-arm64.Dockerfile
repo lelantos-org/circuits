@@ -2,11 +2,11 @@
 #
 # The upstream `veridise/picus:base` is published as a single amd64 manifest, so
 # `docker build https://github.com/Veridise/Picus.git` produces an image that runs under
-# emulation on Apple Silicon. This rebuilds the same environment from arm64 parts.
+# emulation on Apple Silicon. This builds the equivalent environment from arm64 components.
 #
-# Only the z3 backend is provided — cvc4/cvc5 ship no arm64 Linux binaries — which is why
-# the `picus` recipe passes `--solver z3`. circom is not installed either: the recipe
-# compiles the R1CS on the host and mounts it in.
+# Only the z3 backend is provided (cvc4/cvc5 ship no arm64 Linux binaries), so the
+# `picus` recipe passes `--solver z3`. circom is not installed; the recipe compiles the
+# R1CS on the host and mounts it.
 FROM --platform=linux/arm64 ubuntu:24.04
 
 ARG PICUS_REF=main
@@ -35,10 +35,10 @@ WORKDIR /Picus
 
 # Dependencies declared by Picus' info.rkt.
 #
-# Rosette's pre-installer downloads its own Z3 and has no aarch64 Linux case, which fails
-# the install outright. It skips the download when <pkg>/bin/z3 is already a symlink, so
-# the install is split: unpack with --no-setup, point that symlink at the Z3 above, then
-# run setup (which is when pre-installers fire).
+# Rosette's pre-installer downloads its own Z3 and has no aarch64 Linux case, so the
+# install fails. It skips the download when <pkg>/bin/z3 is already a symlink, so the
+# install is split: unpack with --no-setup, point that symlink at the Z3 above, then run
+# setup (which runs the pre-installers).
 RUN raco pkg install --auto --batch --no-setup --skip-installed rosette csv-reading graph \
  && rosette_bin="$(racket -e '(require pkg/lib) (display (pkg-directory "rosette"))')/bin" \
  && mkdir -p "$rosette_bin" \

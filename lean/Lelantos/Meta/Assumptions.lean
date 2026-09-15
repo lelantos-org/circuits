@@ -3,13 +3,12 @@ import Lelantos
 /-!
 # The trusted base
 
-Everything this development assumes, in one place. The authoritative list is not this
-prose — it is `#print axioms`, checked against `lean/expected/axioms.txt` by
-`lean/scripts/check-axioms.sh` in CI.
+Everything this development assumes. The authoritative list is the `#print axioms` output,
+checked against `lean/expected/axioms.txt` by `lean/scripts/check-axioms.sh` in CI.
 
-That check covers the theorems named below. `Lelantos.Meta.AxiomGuard` covers the rest: it walks
-every declaration in the namespace at build time and rejects any axiom outside the trusted
-base, so an axiom cannot enter through a theorem nobody remembered to list here.
+That check covers the theorems named below. `Lelantos.Meta.AxiomGuard` walks every
+declaration in the namespace at build time and rejects any axiom outside the trusted base,
+including axioms reached only through theorems not listed here.
 
 Run `lake env lean Lelantos/Meta/Assumptions.lean` to print the current dependency sets.
 
@@ -28,73 +27,67 @@ size bound (`2^64`, `2^66`, `2^128`, `2^252 < p`) that the proofs consume.
 | Axiom | Content | Status |
 |---|---|---|
 | `coords` / `coords_injective` | distinct subgroup elements have distinct affine coordinates | True of any affine embedding of a curve group. Reaches no headline theorem — see below |
-| `babyAdd` / `babyAdd_spec` | circomlib `BabyAdd` computes the group law | Packages the completeness of the twisted Edwards addition law on Baby Jubjub (`a` square, `d` non-square), which is what makes the two `<--` divisions at `babyjub.circom:45,48` well-constrained |
-| `escalarMul` / `escalarMul_spec` | `EscalarMulAny` / `FixedBaseMul` compute `k • P` | gadget semantics; one uninterpreted symbol covers both, so replacing the fixed-base gadget is invisible here |
+| `babyAdd` / `babyAdd_spec` | circomlib `BabyAdd` computes the group law | Packages the completeness of the twisted Edwards addition law on Baby Jubjub (`a` square, `d` non-square), which makes the two `<--` divisions at `babyjub.circom:45,48` well-constrained |
+| `escalarMul` / `escalarMul_spec` | `EscalarMulAny` / `FixedBaseMul` compute `k • P` | Gadget semantics; one uninterpreted symbol covers both, so the choice of fixed-base gadget is not visible here |
 | `H`, `BASE0` | the two Pedersen bases | Constants |
-| `assetMul` | `HashToAssetGen` is a known multiple of `BASE0` | **Deliberately models a weakness, not a strength** — see `pointBalance_not_sound` |
+| `assetMul` | `HashToAssetGen` is a known multiple of `BASE0` | Models a weakness (known discrete logs) — see `pointBalance_not_sound` |
 | `assetMul_arith` | `assetMul 1 + assetMul 3 = 2 · assetMul 2` | Follows from circomlib's signed 4-bit window encoding mapping asset ids 1,2,3 to multipliers 2,3,4; checked at runtime by `test/transact/multi_asset.test.ts` |
 
 `propext`, `Classical.choice` and `Quot.sound` are Lean's own; they are not assumptions
 about the circuit.
 
-`coords_injective` appears in **no** entry of `lean/expected/axioms.txt`, and that is
-informative rather than an oversight. Its only consumer is `perAssetPointBalance_group`, which
-reads the point equation back as a group equality; nothing consumes *that*, because
-`pointBalance_not_sound` proves nothing may be derived from the point equation. The
-counterexample itself travels the other way, through `perAssetPointBalance_of_group`, which
-needs `babyAdd_spec` and not injectivity. So the axiom is load-bearing for nothing at all,
-and that is the intended state. Should it ever surface in a positive theorem's axiom set,
-some proof has begun deriving conservation from the point balance — which this development
-forbids. Treat that diff as a bug report, not a regeneration.
+`coords_injective` appears in no entry of `lean/expected/axioms.txt`. Its only consumer is
+`perAssetPointBalance_group`, which reads the point equation back as a group equality and
+has no consumers, because `pointBalance_not_sound` shows nothing may be derived from the
+point equation. The counterexample goes the other way, through
+`perAssetPointBalance_of_group`, which needs `babyAdd_spec` and not injectivity. If the axiom
+appears in a positive theorem's axiom set, some proof derives conservation from the point
+balance; treat that diff as a bug, not as an expectation to regenerate.
 
-## Poseidon is deliberately *not* in that table
+## Poseidon is not in that table
 
 There is no hash axiom. `Function.Injective poseidon` is refutable
-(`Lelantos.poseidon_not_injective`), so assuming it makes the development contradictory and
-every theorem — `transact_sound` included — provable and empty. If a change to this
-development adds an axiom asserting `Function.Injective poseidon` to the list below, the
-correct response is to remove the axiom, not to regenerate the expectation.
+(`Lelantos.poseidon_not_injective`), so assuming it makes the development inconsistent and
+every theorem, `transact_sound` included, vacuous. An axiom asserting
+`Function.Injective poseidon` must be removed, not added to the expectation.
 
-Collision resistance is instead an explicit hypothesis `¬ PoseidonCollision` on the theorems
-that need it, and `Lelantos.poseidon_collision` proves that hypothesis unsatisfiable. So
+Collision resistance is an explicit hypothesis `¬ PoseidonCollision` on the theorems that
+need it, and `Lelantos.poseidon_collision` proves that hypothesis unsatisfiable. So
 `nullifier_binds_cm`, `noteCommitment_inj`, `merkleMember_inj` and `Lelantos.TxBinding` are
-assumed rather than proved: they carry no axiom precisely because they carry the assumption
-in their statement. A non-vacuous treatment needs a concrete-security formulation (explicit
+assumed rather than proved: they carry no axiom because they carry the assumption in their
+statement. A non-vacuous treatment needs a concrete-security formulation (explicit
 adversary, advantage bound) and is out of scope; `lean/README.md` lists it under what is
 not proved.
 
-Everything else — `transact_sound`, conservation, the range checks, `PolyEval` — is
-independent of it.
+`transact_sound`, conservation, the range checks and `PolyEval` are independent of it.
 
-## Not assumptions — obligations
+## Obligations, not assumptions
 
 `Lelantos.ContractObligations` records what the circuit cannot enforce and the contract
-must: nullifier freshness, `z` being the challenge of *this witness's* coefficient vector,
+must: nullifier freshness, `z` being the challenge of this witness's coefficient vector,
 the `chain_id` / `recipient_address` checks, and the aux-digest recomputation. No theorem
-here assumes any of them; they are listed so that a reader cannot mistake the circuit's
-guarantees for the system's.
+here assumes any of them; they are listed to separate the circuit's guarantees from the
+system's.
 
-Three of the four are stubs — `True`, naming a check without stating it, because what they
-range over has no counterpart in this development. `challenge_binds_witness` is not: with
-that obligation dropped the compressed public input carries no information at all, so a stub
-there was not a harmless placeholder but a hole where the load-bearing hypothesis should be.
-A stub is a claim made outside Lean; treat the remaining three the same way.
+Three of the four are stubs (`True`, naming a check without stating it) because what they
+range over has no counterpart in this development. `challenge_binds_witness` is stated in
+full: without it the compressed public input carries no information. A stub is a claim
+made outside Lean.
 
 ## Notable non-dependencies
 
-`perAssetValueBalance_nat` and `polyEval_binding` — the two results carrying the most
-weight — depend on **`p_prime` alone**. Neither uses a cryptographic assumption. That is
-the point of `PerAssetValueBalance`: conservation is integer arithmetic, not a group
-argument.
+`perAssetValueBalance_nat` and `polyEval_binding` depend on `p_prime` alone and use no
+cryptographic assumption: conservation in `PerAssetValueBalance` is integer arithmetic,
+not a group argument.
 
-`polyEval_forge` — the result that says what an unpinned coefficient would buy an attacker
-— reduces to `p_prime` alone. Nothing about the hash, and no adversary model: the forgery
-is one linear equation, solved. It is why the layout carries only pinned slots.
+`polyEval_forge`, which describes what an unpinned coefficient would allow an attacker,
+also reduces to `p_prime` alone: the forgery is one linear equation. It is the reason the
+layout carries only pinned slots.
 
-`transact_sound` additionally pulls in `babyAdd_spec` and `escalarMul_spec`, because
-`SpentReal.cvOpens` / `OutputWellFormed.cvOpens` state what `cv` commits to and that is a
-statement about the curve gadgets. Nothing about the hash: the split into `TxWellFormed`
-and `TxBinding` is what keeps it that way.
+`transact_sound` additionally depends on `babyAdd_spec` and `escalarMul_spec`, because
+`SpentReal.cvOpens` / `OutputWellFormed.cvOpens` state what `cv` commits to, which is a
+statement about the curve gadgets. The split into `TxWellFormed` and `TxBinding` keeps it
+free of hash assumptions.
 -/
 
 #print axioms Lelantos.transact_sound

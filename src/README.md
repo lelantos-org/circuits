@@ -99,20 +99,22 @@ balance is enforced in-circuit.
 ## 2. I/O surface
 
 The verifier sees two field elements: `z`, the Fiat-Shamir challenge, and `y`,
-the Horner evaluation. The `9 + 3·N_IN + 8·N_OUT` logical public inputs are bound
+the Horner evaluation. The `10 + 3·N_IN + 8·N_OUT` logical public inputs are bound
 into `(z, y)`; see §2a for the split between the 46 the circuit evaluates and the
-23 it only hashes.
+24 it only hashes.
 
 | Signal | Kind | Purpose |
 |---|---|---|
-| `z` | public input | Fiat-Shamir challenge supplied by the contract, over all 69 words |
+| `z` | public input | Fiat-Shamir challenge supplied by the contract, over all 70 words |
 | `y` | public output | `Σ_k coeffs[k] · z^k` over the 46 pinned coefficients |
 
-Logical public inputs, with widths at `Transact(11, 4, 6)` totalling 69. The
+Logical public inputs, in calldata order, with widths at `Transact(11, 4, 6)`
+totalling 70. The
 **bound by** column is the mechanism, and it is load-bearing: a coefficient the
 circuit does not constrain is a free variable a prover solves `y = Σ c_k z^k`
-with, since it reads `z` before choosing a witness. The bottom eight rows are
-therefore not circuit signals at all — they reach the proof through `z` only.
+with, since it reads `z` before choosing a witness. The rows marked
+**challenge** are therefore not circuit signals at all — they reach the proof
+through `z` only.
 
 | Signal | Width | Bound by | Purpose |
 |---|---:|---|---|
@@ -123,11 +125,12 @@ therefore not circuit signals at all — they reach the proof through `z` only.
 | `public_in`, `public_out` | 2 | coefficient | Transparent deposit and withdrawal |
 | `in_cv[N_IN][2]` | 8 | coefficient | Value commitments, input side |
 | `out_cv[N_OUT][2]` | 12 | coefficient | Value commitments, output side |
+| `out_cv_dep[N_OUT][2]` | 12 | coefficient | Deposit-anchored value commitment, exposed so `tree_update_batch` binds the same `cv_dep` baked into the leaf |
 | `recipient_address` | 1 | challenge | Withdrawal target (`uint160`) |
 | `chain_id` | 1 | challenge | Replay protection |
-| `payer_address` | 1 | challenge | Transparent depositor (`uint160`); `0` when no deposit |
-| `relayer_address` | 1 | challenge | Relayer payout target (`uint160`); `0` when self-submitted |
-| `out_cv_dep[N_OUT][2]` | 12 | coefficient | Deposit-anchored value commitment, exposed so `tree_update_batch` binds the same `cv_dep` baked into the leaf |
+| `payer_address` | 1 | challenge | Who may drive a satellite that consumes the spend (`SwapWrapper`); nonzero |
+| `relayer_address` | 1 | challenge | Must equal the pool's `msg.sender` |
+| `intent_hash` | 1 | challenge | Hash of the swap intent `SwapWrapper` checks (output note, floor, venue, deadline, refund owner); `0` for other spends. A full word, not an address |
 | `out_clue_Rx`, `out_clue_Ry` | 12 | challenge | FMD clue point `R = r·G_8` per output |
 | `out_clue_bits[N_OUT]` | 6 | challenge | Packed FMD clue bits per output; the contract masks with `CLUE_BITS_MASK = 0x3FFF` |
 | `out_aux_digest` | 1 | challenge | `keccak256(abi.encode(aux)) mod r`; the contract MUST recompute it |
@@ -148,7 +151,7 @@ Two vectors, not one. The **challenge preimage** is every logical public input;
 the **coefficient vector** is the subset the circuit constrains.
 
 ```
-z = keccak256(abi.encode(challenge)) mod r        69 words at 4x6
+z = keccak256(abi.encode(challenge)) mod r        70 words at 4x6
 y = coeffs[0] + coeffs[1]·z + … + coeffs[M-1]·z^(M-1)   46 words at 4x6
 ```
 
@@ -171,16 +174,16 @@ elsewhere in the circuit:
 Total `4 + 3·N_IN + 5·N_OUT`, which is 46 at `Transact(11, 4, 6)`.
 
 **Challenge-only words** — hashed into `z`, never evaluated, and constrained
-nowhere in the circuit. They occupy the calldata block between `out_cv` and
-`out_cv_dep`, then follow the struct:
+nowhere in the circuit. They close the calldata struct, after every
+coefficient, then follow it:
 
 | Block | Width |
 |---|---:|
-| `recipient`, `chain_id`, `payer`, `relayer` | 4 |
+| `recipient`, `chain_id`, `payer`, `relayer`, `intent_hash` | 5 |
 | `(clue_Rx, clue_Ry, clue_bits)` per output | `3·N_OUT` |
 | `out_aux_digest` | 1 |
 
-Total `9 + 3·N_IN + 8·N_OUT` challenge words, 69 at this shape, of which 23 are
+Total `10 + 3·N_IN + 8·N_OUT` challenge words, 70 at this shape, of which 24 are
 hashed only.
 
 The layout is pinned twice. `scripts/gen-vectors.ts` refuses to publish
@@ -664,9 +667,9 @@ Before invoking the Groth16 verifier the on-chain wrapper MUST:
 
 1. **Fiat-Shamir.** Flatten the logical public inputs in the canonical order
    (§2a), derive `z = H(transcript) mod r` for a domain-separated `H` over **all
-   69 words**, compute `y = Σ coeffs[k]·z^k mod r` over **the 46 coefficients**,
+   70 words**, compute `y = Σ coeffs[k]·z^k mod r` over **the 46 coefficients**,
    and pass `[y, z]` in that order. `z` MUST be a deterministic function of every
-   word, including the 23 the polynomial skips — that is the only thing binding
+   word, including the 24 the polynomial skips — that is the only thing binding
    them. Evaluating a word the circuit does not constrain is the opposite error
    and breaks soundness outright; see §2a.
 2. **Canonical slots.** Either `require(slot < r)` for every logical public
@@ -687,8 +690,9 @@ Before invoking the Groth16 verifier the on-chain wrapper MUST:
 7. `require(nullifier[i] != nullifier[k])` for every pair `i < k`, with no
    exception for zero. That is six pairs at four input slots; the count is
    quadratic in `N_IN`.
-8. Type `recipient_address`, `payer_address` and `relayer_address` as `address`,
-   passing `uint256(uint160(addr))`, with `address(0)` for unused slots.
+8. Type `recipient_address`, `payer_address` and `relayer_address` as
+   `address`, passing `uint256(uint160(addr))`, with `address(0)` for unused
+   slots. `intent_hash` is a full `uint256`, hashed as given.
 9. `require(merkleRoots[merkle_root])`.
 10. Per input slot: `require(!spent[nullifier[i]]); spent[nullifier[i]] = true;`,
     with no sentinel skip.

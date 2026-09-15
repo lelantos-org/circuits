@@ -1,21 +1,21 @@
-// Negative-test generator: search an honest witness for a SECOND witness the
-// same R1CS accepts.
+// Negative-test generator: search from an honest witness for a second witness
+// the same R1CS accepts.
 //
-// The tamper suites mutate the circuit's INPUT object and require the witness
-// calculator to reject. That tests the generator. This tests the constraint
-// system, which is the only thing a Groth16 proof binds:
+// The tamper suites mutate the circuit's input object and require the witness
+// calculator to reject, which tests the generator. This module tests the
+// constraint system, which is what a Groth16 proof binds:
 //
 //     w  = honest witness            (satisfies the R1CS)
 //     w' = w + t·v                   (does it still satisfy, for some t != 0?)
 //
-// If some `w' != w` satisfies, the statement has more than one witness. What
-// that means depends on WHERE they differ — see `Severity` below.
+// If some `w' != w` satisfies, the statement has more than one witness. The
+// consequence depends on where they differ; see `Severity` below.
 //
-// ===== the one primitive =====
+// ===== the primitive =====
 //
-// Everything here reduces to one question: given a DIRECTION `v` in witness
-// space, which step sizes `t` keep `w + t·v` satisfying? Each constraint that
-// notices `v` becomes a quadratic in `t`. Writing `Ak = A·w` and `Av = A·v`,
+// Both searches reduce to one question: given a direction `v` in witness space,
+// which step sizes `t` keep `w + t·v` satisfying? Each constraint affected by
+// `v` becomes a quadratic in `t`. Writing `Ak = A·w` and `Av = A·v`,
 //
 //     f(t) = (Ak + t·Av)(Bk + t·Bv) - (Ck + t·Cv)
 //          = (Av·Bv)·t^2 + (Ak·Bv + Bk·Av - Cv)·t + (Ak·Bk - Ck)
@@ -29,38 +29,37 @@
 //   q2 != 0          also `t = -q1/q2`, unless that is 0 again (double root)
 //
 // Intersecting over every constraint that touches `v`'s support is exact: no
-// sampling, no tolerance. `sweepDirection` is that, and the two searches below
-// differ only in which directions they feed it.
+// sampling, no tolerance. `sweepDirection` implements this, and the two
+// searches below differ only in which directions they pass to it.
 //
 // ===== the two searches =====
 //
-// SINGLE-SIGNAL (`sweepSingleSignal`) walks the unit vectors — one per witness
-// entry — and so decides, for all ~100k of them, whether any second value is
-// admissible with everything else held fixed. Exhaustive and cheap, because
-// changing one entry can only disturb constraints that mention it.
+// Single-signal (`sweepSingleSignal`) walks the unit vectors, one per witness
+// entry, and decides for all ~100k whether any second value is admissible with
+// everything else held fixed. It is exhaustive and cheap, because changing one
+// entry can only affect constraints that mention it.
 //
-// MULTI-SIGNAL (`sweepGroups`) covers what unit vectors cannot: signals that
-// must move TOGETHER, which is how the interesting underconstraints present —
-// a bit vector re-decomposed, a quotient/remainder pair slid in step, both
-// coordinates of a curve point, a hint and the value it feeds. For a group `S`
-// of signals it builds the Jacobian of the system restricted to `S`,
+// Multi-signal (`sweepGroups`) covers signals that must move together, which
+// unit vectors cannot: a bit vector re-decomposed, a quotient/remainder pair
+// shifted in step, both coordinates of a curve point, a hint and the value it
+// feeds. For a group `S` of signals it builds the Jacobian of the system
+// restricted to `S`,
 //
 //     J[k][s] = A_k[s]·Bk + B_k[s]·Ak - C_k[s]
 //
 // and takes its null space. A null vector is a direction in which every
-// constraint's LINEAR response vanishes at once — precisely the directions a
-// unit-vector sweep cannot see, since along them each individual signal is
-// still pinned by the others. `sweepDirection` then decides each one exactly.
+// constraint's linear response vanishes at once; a unit-vector sweep misses
+// these, since along them each individual signal is pinned by the others.
+// `sweepDirection` then decides each one exactly.
 //
-// ===== what it still cannot decide =====
+// ===== limits =====
 //
-// The group search holds everything OUTSIDE the group fixed, so it finds
-// freedom internal to a gadget, not freedom that requires half the circuit to
-// move with it. Groups come from the `.sym` component tree and from individual
-// constraints' signal sets, both capped by size, so a conspiracy spanning
-// unrelated components is out of reach. `just picus` decides the general case.
-// Read a clean run as "these directions are pinned", not as "the circuit is
-// sound".
+// The group search holds everything outside the group fixed, so it finds
+// freedom internal to a gadget, not freedom that requires much of the circuit
+// to move with it. Groups come from the `.sym` component tree and from
+// individual constraints' signal sets, both capped by size, so freedom spanning
+// unrelated components is out of reach; `just picus` decides the general case.
+// A clean run means "these directions are pinned", not "the circuit is sound".
 
 import {
     fadd,
@@ -78,11 +77,11 @@ import {
 /**
  * How a second witness differs from the honest one.
  *
- * `break` is the one that matters: some entry that moves is an output or a
- * public input, so a prover holding this witness proves a DIFFERENT public
- * statement with a verifying proof. `malleable` means the public statement is
- * untouched and only hidden state moved — not a value break on its own, but it
- * is the signature of a missing constraint, so new occurrences want a human.
+ * `break`: some entry that moves is an output or a public input, so a prover
+ * holding this witness proves a different public statement with a verifying
+ * proof. `malleable`: the public statement is unchanged and only hidden state
+ * moves. That is not a value break on its own, but indicates a missing
+ * constraint, so new occurrences require manual review.
  */
 export type Severity = "break" | "malleable";
 
@@ -101,8 +100,8 @@ export interface Finding {
     support: SupportEntry[];
     /**
      * Stable key for the baseline: the support's `.sym` names with array indices
-     * collapsed, deduplicated and joined. Which SLOT trips depends on the
-     * witness; which family does not.
+     * collapsed, deduplicated and joined. Which slot trips depends on the
+     * witness; the family does not.
      */
     family: string;
     region: Region;
@@ -131,8 +130,8 @@ export type DirectionResult =
 /** `lc · v` over a sparse direction. */
 function dotDirection(lc: LinearCombination, v: Direction): bigint {
     let acc = 0n;
-    // Iterating the direction rather than the linear combination: `v` has a
-    // handful of entries and an `lc` can have thousands.
+    // Iterates the direction rather than the linear combination: `v` has a few
+    // entries and an `lc` can have thousands.
     for (const [index, delta] of v) {
         const coef = lc[String(index)];
         if (coef !== undefined) acc += coef * delta;
@@ -141,10 +140,10 @@ function dotDirection(lc: LinearCombination, v: Direction): bigint {
 }
 
 /**
- * Exactly which steps `t` keep `w + t·v` satisfying the whole system.
+ * The exact set of steps `t` that keep `w + t·v` satisfying the whole system.
  *
- * `witness` must already satisfy — every root here is computed on the
- * assumption that `t = 0` is one, and it is only a root because `w` is honest.
+ * `witness` must already satisfy: every root here assumes `t = 0` is a root,
+ * which holds only because `w` is honest.
  */
 export function sweepDirection(
     view: R1csView,
@@ -208,9 +207,9 @@ export interface SweepOptions {
 /**
  * Every single-signal second witness, exactly.
  *
- * Exhaustive over the witness vector. A signal no constraint mentions at all is
- * reported without any algebra — the compiler kept an entry the system never
- * looks at.
+ * Exhaustive over the witness vector. A signal no constraint mentions is
+ * reported without algebra: the compiler kept an entry the system does not
+ * reference.
  */
 export function sweepSingleSignal(
     view: R1csView,
@@ -220,7 +219,7 @@ export function sweepSingleSignal(
 ): Finding[] {
     const findings: Finding[] = [];
     const indices = opts.indices ?? range(1, view.nVars);
-    // Rewritten per signal rather than reallocated once per witness entry.
+    // Reused across signals rather than reallocated per witness entry.
     const v: Direction = new Map();
 
     for (const s of indices) {
@@ -253,8 +252,8 @@ export function sweepSingleSignal(
  * A set of witness indices to search jointly, with a label for the report.
  *
  * Groups come from `componentGroups` and `constraintGroups`; both are heuristics
- * for "signals that might have to move together", and neither needs to be right
- * — a group whose Jacobian has full column rank simply yields nothing.
+ * for "signals that might have to move together", and neither needs to be
+ * precise, since a group whose Jacobian has full column rank yields nothing.
  */
 export interface Group {
     label: string;
@@ -280,12 +279,12 @@ export const DEFAULT_MAX_GROUP_CONSTRAINTS = 4096;
  *
  * For each group this builds the Jacobian of the system restricted to the
  * group's columns and walks its null space. A null vector is a direction whose
- * first-order effect on every constraint cancels — which is exactly the case a
- * unit-vector sweep is blind to, because along such a direction each individual
- * signal really is pinned by the others.
+ * first-order effect on every constraint cancels; a unit-vector sweep misses
+ * these, because along such a direction each individual signal is pinned by the
+ * others.
  *
- * Findings whose support is a single signal are dropped: those are the unit
- * sweep's territory and it has already reported them exactly.
+ * Findings whose support is a single signal are dropped: the unit sweep reports
+ * those exactly.
  */
 export function sweepGroups(
     view: R1csView,
@@ -322,7 +321,7 @@ export function sweepGroups(
             for (let i = 0; i < signals.length; i++) {
                 if (vec[i] !== 0n) entries.push([signals[i], vec[i]]);
             }
-            // A one-signal direction is a unit vector in disguise.
+            // A one-signal direction is a unit vector.
             if (entries.length < 2) continue;
 
             const key = entries.map(([i, d]) => `${i}:${d}`).join(",");
@@ -348,11 +347,11 @@ export function sweepGroups(
 /**
  * `A_k·w` and `B_k·w` for every constraint, evaluated once per witness.
  *
- * The Jacobian needs both for each row it builds, and they depend on the
- * constraint and the witness only — not on which group is being searched. A
- * group covers ~10 constraints and the sources propose more groups than there
- * are constraints, so computing them inside `jacobian` re-evaluated each one
- * about eleven times.
+ * The Jacobian needs both for each row, and they depend only on the constraint
+ * and the witness, not on the group being searched. A group covers ~10
+ * constraints and the sources propose more groups than there are constraints,
+ * so computing them inside `jacobian` would evaluate each one about eleven
+ * times.
  */
 interface ConstraintSides {
     a: bigint[];
@@ -386,8 +385,8 @@ function jacobian(
     rows: number[],
     signals: number[],
 ): bigint[][] {
-    // Signal indices key the sparse linear combinations as strings; converting
-    // once per column rather than once per cell.
+    // Signal indices key the sparse linear combinations as strings; convert once
+    // per column rather than once per cell.
     const keys = signals.map(String);
     return rows.map(k => {
         const [A, B, C] = view.constraints[k];
@@ -455,9 +454,9 @@ function nullSpace(m: bigint[][], cols: number): bigint[][] {
 /**
  * One group per `.sym` component: the signals whose names share a parent path.
  *
- * This is the gadget tree as circom wrote it, so a group is an `IsZero`, one
- * `Num2Bits`, one curve addition — exactly the scopes inside which signals are
- * meant to move together.
+ * This is the gadget tree as circom emits it, so a group is one `IsZero`, one
+ * `Num2Bits`, one curve addition: the scopes within which signals move
+ * together.
  */
 export function componentGroups(symbols: SymbolTable): Group[] {
     const byComponent = new Map<string, number[]>();
@@ -475,8 +474,8 @@ export function componentGroups(symbols: SymbolTable): Group[] {
  * One group per constraint: the signals that constraint mentions.
  *
  * Complements `componentGroups`, which cannot see a coupling that crosses a
- * component boundary — an equality wiring one gadget's output to another's
- * input lives in no single component but is one constraint.
+ * component boundary: an equality wiring one gadget's output to another's input
+ * belongs to no single component but is one constraint.
  */
 export function constraintGroups(view: R1csView): Group[] {
     const groups: Group[] = [];
@@ -498,12 +497,12 @@ export function constraintGroups(view: R1csView): Group[] {
 // ===== the whole search =====
 
 /**
- * Every group the two sources between them propose.
+ * Every group proposed by the two sources.
  *
- * The component tree is the gadget as circom wrote it; a single constraint's
- * signal set catches a pair wired ACROSS gadgets, which belongs to no one
- * component. Neither source has to be right — a group whose Jacobian has full
- * column rank simply yields nothing.
+ * The component tree is the gadget as circom emits it; a single constraint's
+ * signal set covers a pair wired across gadgets, which belongs to no single
+ * component. Neither source needs to be precise, since a group whose Jacobian
+ * has full column rank yields nothing.
  */
 export function allGroups(view: R1csView, symbols: SymbolTable): Group[] {
     return [...componentGroups(symbols), ...constraintGroups(view)];
@@ -513,8 +512,8 @@ export function allGroups(view: R1csView, symbols: SymbolTable): Group[] {
  * Both witness-level searches over one honest witness.
  *
  * `witness` must already satisfy the system: every root computed below assumes
- * `t = 0` is one, and it is only a root because the witness is honest. Callers
- * are expected to have asserted `view.firstViolation(witness) === -1` first.
+ * `t = 0` is a root, which holds only for an honest witness. Callers assert
+ * `view.firstViolation(witness) === -1` first.
  */
 export function searchWitness(
     view: R1csView,
@@ -579,12 +578,11 @@ export function applyFinding(witness: bigint[], f: Finding): bigint[] {
 }
 
 /**
- * Substitute a finding's step and re-check the WHOLE system.
+ * Substitute a finding's step and re-check the whole system.
  *
- * The algebra above is exact, so this should never refute a finding — which is
- * the point of running it. It is the independent check that the quadratic
- * reasoning matches what a verifier actually evaluates, and it costs one full
- * pass per finding rather than per direction.
+ * The algebra above is exact, so this is not expected to refute a finding. It
+ * independently checks that the quadratic reasoning matches what a verifier
+ * evaluates, at one full pass per finding rather than per direction.
  *
  * Returns the index of the constraint that rejected, or -1 when the mutated
  * witness satisfies (i.e. the finding is real).

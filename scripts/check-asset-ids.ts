@@ -5,11 +5,11 @@
 //
 //     cv_dep[k] == leaf_public_in[k] · V^leaf_asset[k] + rcv[k] · H
 //
-// That is the only thing tying a deposit leaf to an (asset, value) pair: `cms[k]`
-// is depositor-chosen and carries no transact proof. The equality is binding
-// only if `value · V^asset` determines `(asset, value)`, which does not hold in
-// general, because `HashToAssetGen` is circomlib `Pedersen` over a 72-bit
-// message, which fits one segment and so reduces to
+// This equality alone binds a deposit leaf to an (asset, value) pair: `cms[k]`
+// is depositor-chosen and carries no transact proof. It is binding only if
+// `value · V^asset` determines `(asset, value)`, which does not hold in
+// general: `HashToAssetGen` is circomlib `Pedersen` over a 72-bit message,
+// which fits one segment and reduces to
 //
 //     V^a = m(a) · BASE0
 //
@@ -25,20 +25,20 @@
 //     v = |m(a')| / g,   v' = |m(a)| / g,   g = gcd(|m(a)|, |m(a')|)
 //
 // with every other solution a multiple of it. A pair is safe exactly when that
-// minimal solution already overflows 2^64. Signs matter: `v · m(a)` and
-// `v' · m(a')` agree in sign for positive values, so opposite-signed multipliers
-// never collide.
+// minimal solution exceeds 2^64. For positive values `v · m(a)` and `v' · m(a')`
+// share the sign of their multipliers, so opposite-signed multipliers never
+// collide.
 //
-// A colliding pair lets a depositor pay `v` units of the cheap asset while
-// committing `cm` to `(a', v')`, then spend the leaf later as the expensive
-// one: `SpentNote` recomputes the same `cv_dep` and sees a well-formed note.
-// Both ids must be registered for this to be reachable, which is what this gate
-// checks. `AssetRegistry.addAsset` takes an arbitrary caller-chosen `uint64`,
-// so nothing else constrains the id space.
+// A colliding pair lets a depositor pay `v` units of the lower-value asset while
+// committing `cm` to `(a', v')`, then spend the leaf as the higher-value one:
+// `SpentNote` recomputes the same `cv_dep` and accepts the note. Exploitation
+// requires both ids to be registered, which this check guards against.
+// `AssetRegistry.addAsset` accepts an arbitrary caller-chosen `uint64`, so the
+// id space is otherwise unconstrained.
 //
-// Run over every id the deployment intends to register, BEFORE registering it.
-// Small sequential ids are separated by a wide margin; the risk lies in
-// hash-like or otherwise unstructured ids.
+// Run over every id the deployment intends to register, before registering it.
+// Small sequential ids are separated by a wide margin; hash-like or otherwise
+// unstructured ids carry the collision risk.
 //
 // Usage:
 //   check-asset-ids.ts <id>...            ids as decimal or 0x-hex
@@ -61,8 +61,8 @@ const WINDOWS = MESSAGE_BITS / WINDOW_BITS;
  *
  * circomlib's `Segment` accumulates `Window4` outputs, each contributing
  * `(1 + b0 + 2·b1 + 4·b2) · (b3 ? -1 : +1)` against a base advanced by 2^5 per
- * window. `verifyModel` below checks this against the compiled gadget, so a
- * circomlib change surfaces here instead of weakening the bound unnoticed.
+ * window. `verifyModel` checks this against the compiled gadget, so a change to
+ * circomlib's encoding fails the check rather than invalidating the bound.
  */
 export function assetMultiplier(assetId: bigint): bigint {
     const bits: number[] = [];
@@ -101,8 +101,8 @@ function modInverse(a: bigint, n: bigint): bigint {
 /**
  * Assert `assetMultiplier` agrees with the compiled gadget on every id in play.
  *
- * BASE0 is recovered from `V^0`, whose multiplier the model also supplies, so
- * the check is a round trip through circomlibjs rather than a restated constant.
+ * BASE0 is derived from `V^0` and its modelled multiplier, so the check is a
+ * round trip through circomlibjs rather than a comparison with a hardcoded constant.
  */
 function verifyModel(J: Jubjub, ids: bigint[]): void {
     const ell = BABYJUB_SUBGROUP_ORDER;
@@ -157,9 +157,8 @@ async function main(argv: string[]): Promise<number> {
 
     let ids: bigint[];
     if (selfTest) {
-        // A pair with a shared divisor between the two multipliers. Both ids are
-        // valid uint64 and both minimal values are under 2^64, so the gate must
-        // flag it.
+        // A pair whose multipliers share a common divisor. Both ids are valid uint64
+        // and both minimal values are below 2^64, so the pair must be flagged.
         ids = [0x067f8028c470047cn, 0x067f8028c472818bn];
     } else if (fileFlag !== -1) {
         const raw = readFileSync(argv[fileFlag + 1], "utf8");
@@ -230,9 +229,8 @@ async function main(argv: string[]): Promise<number> {
     return bad.length ? 1 : 0;
 }
 
-// Only when run as a command: `test/check_asset_ids.test.ts` imports
-// `assetMultiplier` and `classifyPair` from here, and an unguarded call would
-// run the CLI, exiting the process during test collection.
+// Run the CLI only when executed directly; `test/check_asset_ids.test.ts` imports
+// `assetMultiplier` and `classifyPair`, and must not trigger `process.exit`.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     process.exit(await main(process.argv.slice(2)));
 }

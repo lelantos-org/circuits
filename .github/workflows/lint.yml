@@ -19,14 +19,14 @@ jobs:
     permissions:
       contents: read
     env:
-      # Pinned: floating versions would shift the reviewed suppression
-      # baseline documented in the justfile `lint` recipe.
+      # Pinned so the reviewed suppression baseline in the justfile `lint`
+      # recipe stays valid.
       CIRCOMSPECT_VERSION: 0.9.0
     steps:
       - uses: actions/checkout@v4
 
-      # circom: 'false' — circomspect reads the sources directly and this job
-      # never compiles a circuit.
+      # circom: 'false', since circomspect reads the sources directly and this
+      # job compiles no circuit.
       - name: Setup toolchain
         uses: ./.github/actions/setup
         with:
@@ -63,9 +63,8 @@ jobs:
       # are suppressed via --allow flags, with rationale in the justfile `lint`
       # recipe.
       #
-      # This step blocks. CIRCOMSPECT_VERSION is pinned above, so a new finding
-      # cannot come from an upstream release, only from a circuit change. A
-      # known-safe finding belongs in the justfile baseline with its rationale
-      # rather than muted here.
+      # This step is blocking. With CIRCOMSPECT_VERSION pinned, new findings come
+      # only from circuit changes. Known-safe findings are waived in the justfile
+      # baseline with a rationale, not here.
       - name: Run circomspect
         run: just lint

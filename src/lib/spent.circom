@@ -21,7 +21,7 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 //
 // rH is exposed for PerAssetPointBalance.
 template SpentNote(DEPTH) {
-    // ---- private witness ----
+    // ===== PRIVATE =====
     signal input asset_id;
     signal input value;
     signal input pk;
@@ -34,12 +34,12 @@ template SpentNote(DEPTH) {
     signal input path_indices[DEPTH];
     signal input is_dummy;
 
-    // ---- public binding ----
+    // ===== PUBLIC BINDING =====
     signal input root;
     signal input nullifier;
     signal input cv[2];
 
-    // ---- exposed to caller ----
+    // ===== OUTPUTS =====
     signal output rH[2];
 
     // 1. nsk → ivk → pk.

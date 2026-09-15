@@ -8,12 +8,11 @@ include "common.circom";
 
 // BatchAppend(DEPTH, MAX_L): the quaternary commitment tree before and after
 // appending the first actual_count of MAX_L leaves at start_index, both roots
-// computed from one frontier. This header is the one place the construction is
-// explained; tree_update_batch.circom, the Lean model
-// (lean/Lelantos/Gadgets/BatchAppend.lean) and the docs point here.
+// computed from one frontier. This header is the reference description of the
+// construction; tree_update_batch.circom, the Lean model
+// (lean/Lelantos/Gadgets/BatchAppend.lean) and the docs refer to it.
 //
-// WHAT THE TEMPLATE OWNS. Everything its correctness rests on is enforced
-// inside, so it is safe to instantiate on its own:
+// ENFORCED INTERNALLY, so the template is sound when instantiated on its own:
 //   * actual_count in [1, MAX_L]: Num2Bits(COUNT_BITS) on actual_count - 1,
 //     with MAX_L a power of two.
 //   * active[k] = (k < actual_count): LessThan, exported for the caller.
@@ -25,11 +24,11 @@ include "common.circom";
 // is a linear combination of the digit's two bits and bb[d], their product.
 //
 // FRONTIER. frontier_in[d][k] for k < r_d is the filled left sibling at level d.
-// The slots k >= r_d hold nothing, and are pinned to zero:
+// Slots k >= r_d are unused and pinned to zero:
 //     (1 - read) · frontier_in[d][k] === 0,   read = Σ_{r > k} s[d][r].
 // Under the pin frontier_in[d][k] = read · frontier_in[d][k], so both roots below
-// add a frontier slot as a plain linear term instead of a selector product. A
-// prover MUST supply zero in the unread slots; the in-repo writers do
+// add a frontier slot as a linear term instead of a selector product. A prover
+// MUST supply zero in the unread slots, as the in-repo writers do
 // (Frontier::slots, MerkleTree::frontier, sdk merkle.ts frontier()).
 //
 // OLD ROOT. The running node along start_index, from an empty leaf:
@@ -50,8 +49,8 @@ include "common.circom";
 //     p >= W[d]               EMPTY_SUBTREE(d)
 // Leaf slot t holds active[t] · leaves[t], so an inactive slot is
 // EMPTY_SUBTREE(0) = 0, and a window slot past hi_d reads only empty children and
-// hashes to EMPTY_SUBTREE(d + 1). That keeps the fixed shape correct for every
-// count, and it is the one step that needs the EMPTY_SUBTREE table to be the
+// hashes to EMPTY_SUBTREE(d + 1). This keeps the fixed shape correct for every
+// count, and is the only step that requires the EMPTY_SUBTREE table to be the
 // empty-subtree chain (ZerosCoherent in the Lean model).
 
 // Worst-case number of nodes n consecutive leaves change at level d <= DEPTH.

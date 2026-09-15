@@ -1,21 +1,19 @@
 // Distinct-value builders for the layout-parity suites.
 //
-// A layout test proves an ORDER, so it needs one distinguishable value per slot:
+// A layout test checks an order, so it needs one distinguishable value per slot:
 // assign a unique sentinel to each named slot, run the flattener, and require
-// the result to reproduce the published order. Any transposition then shows up
-// as a mismatch instead of two equal words coincidentally agreeing.
+// the result to reproduce the published order. A transposition then shows up as
+// a mismatch rather than two equal words agreeing.
 //
-// Both `formal/layout_parity.test.ts` (transact, anchored on the Lean dump) and
-// `formal/batch_layout_parity.test.ts` (batch, anchored on the published vector)
-// built the same three accessors by hand, differing only in an error prefix.
-// The anchors stay per-suite — they assert genuinely different claims — but the
-// mechanism does not.
+// Used by `formal/layout_parity.test.ts` (transact) and
+// `formal/batch_layout_parity.test.ts` (batch). Each suite keeps its own anchor,
+// since they assert different claims.
 
 /** Sentinels by slot name, plus the accessors a layout test needs. */
 export interface Sentinels {
     /** Slot name -> its unique value. */
     map: Record<string, bigint>;
-    /** One slot, failing loudly rather than yielding `undefined` on a typo. */
+    /** One slot; throws on an unknown name rather than yielding `undefined`. */
     at(name: string): bigint;
     /** `[at("<field> 0"), ...]` for `n` slots. */
     scalars(field: string, n: number): bigint[];
@@ -26,11 +24,12 @@ export interface Sentinels {
 /**
  * Build sentinels for `names`, numbered from `base`.
  *
- * `base` separates two families in one test — `formal/layout_parity.test.ts`
- * builds the coefficient slots at 1000 and the challenge-only words at 9000, and
- * they must not collide, or a word moving between the two vectors would go
- * unnoticed. Both are required rather than defaulted: every call site states its
- * family, so a third one cannot silently land on top of an existing range.
+ * `base` separates two families in one test: `formal/layout_parity.test.ts`
+ * builds the coefficient slots at 1000 and the challenge-only words at 9000.
+ * They must not collide, or a word moving between the two vectors would go
+ * undetected. `base` and `label` are required rather than defaulted, so every
+ * call site states its family and a new one cannot overlap an existing range
+ * unnoticed.
  */
 export function sentinels(names: readonly string[], base: number, label: string): Sentinels {
     const map = Object.fromEntries(names.map((name, i) => [name, BigInt(base + i)]));

@@ -69,13 +69,13 @@ describe("transact_4x6 / multi-asset", function () {
         }), "an output asset swap must not balance");
     });
 
-    // ===== F2: cross-asset cancellation via the asset-generator DL =====
+    // ===== cross-asset cancellation via the asset-generator DL =====
     //
     // HashToAssetGen is circomlib Pedersen over 72 bits, so it is a single
     // segment and V^a = m(a)·BASE[0] for a publicly computable m(·). m is affine
     // in the low nibbles of asset_id, so m(1) + m(3) == 2·m(2) exactly, and the
     // Edwards point balance is satisfied by spending X of asset 1 plus X of
-    // asset 3 to mint 2X of asset 2. PerAssetValueBalance rejects it by
+    // asset 3 to mint 2X of asset 2. PerAssetValueBalance rejects this by
     // comparing assets as field elements rather than as points.
     it("FAILS on cross-asset cancellation V^1 + V^3 == 2·V^2", async () => {
         const { tx, circuit } = ctx;

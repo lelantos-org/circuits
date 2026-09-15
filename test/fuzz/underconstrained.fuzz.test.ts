@@ -1,35 +1,33 @@
-// Negative test generation against the CONSTRAINT SYSTEM, not the witness
-// calculator.
+// Negative test generation against the constraint system rather than the
+// witness calculator.
 //
-// `test/transact/tamper.test.ts` is the input-level half of this: change one
-// field of the circom input, require witness generation to fail. It covers a lot
-// and it has a blind spot it cannot close from where it stands.
-// `calculateWitness` runs the template body, so whatever input it accepts it
-// turns into a SELF-CONSISTENT witness — that is the generator's job. A signal
-// the template computes but never constrains is therefore invisible to it, and
-// that signal is exactly what a malicious prover controls, because a Groth16
-// proof binds the R1CS and nothing else.
+// `test/transact/tamper.test.ts` is the input-level counterpart: change one
+// field of the circom input and require witness generation to fail.
+// `calculateWitness` runs the template body, so any input it accepts becomes a
+// self-consistent witness. A signal the template computes but never constrains
+// is therefore not observable at the input level, yet a malicious prover
+// controls it, because a Groth16 proof binds only the R1CS.
 //
-// So this suite starts from an honest witness and edits the witness VECTOR,
-// asking `lib/r1cs.ts` — not the wasm — whether the result still satisfies.
-// Three searches run:
+// This suite starts from an honest witness and edits the witness vector,
+// checking satisfaction with `lib/r1cs.ts` rather than the wasm. Three searches
+// run:
 //
-//   * `sweepSingleSignal` decides, exactly and for every one of the ~100k
-//     witness entries, whether any second value is admissible on its own.
-//   * `sweepGroups` covers signals that must move TOGETHER — a pair sliding in
-//     step, a hint and the value it feeds — by walking the null space of the
-//     Jacobian restricted to each gadget and each constraint. Those directions
-//     are invisible to the sweep above, since along them every individual
-//     signal is still pinned by the others.
+//   * `sweepSingleSignal` decides exactly, for each of the ~100k witness
+//     entries, whether a second value is admissible on its own.
+//   * `sweepGroups` covers signals that must move together (a pair moving in
+//     step, a hint and the value it feeds) by walking the null space of the
+//     Jacobian restricted to each gadget and each constraint. The single-signal
+//     sweep misses these directions because each signal is individually pinned
+//     by the others.
 //   * `findBitGroups` rules out the two bit-decomposition bugs (aliasing, free
 //     digits) structurally, over every instance in the circuit.
 //
-// Between them they cover overflow/aliasing, missing equality constraints,
+// Together they cover overflow/aliasing, missing equality constraints,
 // unconstrained signals, range-check width and paired-signal freedom. They do
-// NOT cover every underconstraint — the group search holds everything outside a
-// group fixed, so a conspiracy spanning unrelated components is out of reach,
-// and null-space directions are straight lines, so freedom along a curved
-// variety is too. `just picus` decides the general case.
+// not cover every underconstraint: the group search holds everything outside a
+// group fixed, so freedom spanning unrelated components is not found, and
+// null-space directions are straight lines, so freedom along a curved variety
+// is not found either. `just picus` decides the general case.
 
 import * as fc from "fast-check";
 import { expect } from "chai";
@@ -72,11 +70,11 @@ describe("underconstrained_4x6 [fuzz]", function () {
     /**
      * Insert notes into a fresh tree, freeze the root, then take the proofs.
      *
-     * The order is the point: `finalize` reads an authentication path, and a
-     * path taken before the last insert authenticates against a root that no
-     * longer exists. `TxBuilder.nRealInputs` does this for notes it builds
-     * itself; the scenarios below need to hand over notes they have already
-     * shaped — a second asset, a blinder at its ceiling — so they build them.
+     * Order matters: `finalize` reads an authentication path, and a path taken
+     * before the last insert authenticates against a stale root.
+     * `TxBuilder.nRealInputs` does this for notes it builds itself; the
+     * scenarios below pass pre-shaped notes (a second asset, a blinder at its
+     * ceiling).
      */
     function spend(notes: Note[], nsk: Field): { root: Field; inputs: SpentNote[] } {
         const tree = tx.newTree();
@@ -100,9 +98,8 @@ describe("underconstrained_4x6 [fuzz]", function () {
 
     // ===== structural: bit decompositions =====
     //
-    // Witness-independent, so once is enough and the result covers every
-    // instance in the circuit rather than the ones some witness happened to
-    // exercise. Run against the `--O0` build (see `before`).
+    // Witness-independent, so a single run covers every instance in the circuit.
+    // Runs against the `--O0` build (see `before`).
 
     registerStructuralTests(() => ctx, 1000);
 
@@ -119,15 +116,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
             .to.equal(252);
     });
 
-    // The group search must actually be looking at something. Both sources are
-    // derived from the compiled circuit, so a change to either could silently
-    // reduce them to nothing and every group result below would be vacuous.
-
-    // An explainer that accepted everything would turn every witness-level test
-    // below green while checking nothing — the same vacuity trap the bit-group
-    // detector fell into. So verify the precondition is load-bearing: take a
-    // finding the explainer accepts, break only the fact it rests on, and
-    // require it to refuse.
+    // An explainer that accepted everything would make every witness-level test
+    // below pass vacuously. This takes findings the explainer accepts, falsifies
+    // only the precondition each rests on, and requires the explainer to refuse.
     it("an explanation is refused once its precondition stops holding", async () => {
         const w = await witnessFor(tx.fullShape());
         const findings = sweepSingleSignal(ctx.view, w, ctx.symbols);
@@ -140,9 +131,8 @@ describe("underconstrained_4x6 [fuzz]", function () {
             const inIndex = ctx.symbols.indexOf(`${base}.in`);
             const outIndex = ctx.symbols.indexOf(`${base}.out`);
 
-            // Falsify the precondition and nothing else: a non-zero IsZero input
-            // (equivalently out = 0) means the hint is NOT free by design, so the
-            // explanation must not stand.
+            // A non-zero IsZero input (equivalently out = 0) means the hint is
+            // not free by design, so the explanation must not apply.
             const doctored = w.slice();
             if (inIndex !== undefined) doctored[inIndex] = 1n;
             else if (outIndex !== undefined) doctored[outIndex] = 0n;
@@ -155,11 +145,10 @@ describe("underconstrained_4x6 [fuzz]", function () {
 
     // ===== witness-level: both sweeps, over a spread of honest witnesses =====
     //
-    // Which signals are free is a property OF the witness, not only of the
-    // circuit: an `IsZero` hint is free exactly when its input is zero, and a
-    // zero or a boundary value anywhere can leave an otherwise-pinned signal
-    // loose. So the scenarios below deliberately spread over the shapes and the
-    // extremes the circuit admits rather than re-testing one happy path.
+    // Which signals are free depends on the witness, not only the circuit: an
+    // `IsZero` hint is free exactly when its input is zero, and a zero or
+    // boundary value can leave an otherwise-pinned signal free. The scenarios
+    // below therefore span the shapes and extremes the circuit admits.
 
     it("the fully-occupied shape has no second witness", async () => {
         const findings = await assertNoSecond("fullShape", tx.fullShape());
@@ -172,9 +161,8 @@ describe("underconstrained_4x6 [fuzz]", function () {
     });
 
     // Not an all-dummy bundle: `Transact` asserts `all_dummy.out === 0`
-    // (src/lib/transact.circom), so every input slot being a dummy is rejected
-    // outright and there would be no honest witness to mutate. One real input
-    // alongside `public_in` is the shape a shielding spend actually takes.
+    // (src/lib/transact.circom), so an all-dummy bundle has no honest witness.
+    // One real input alongside `public_in` is the shape of a shielding spend.
     it("the deposit shape has no second witness", async () => {
         const { root, inputs } = tx.oneRealOneDummy(1000n, ALICE_NSK);
         await assertNoSecond("deposit", tx.build({
@@ -195,9 +183,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
         }));
     });
 
-    // Both public buckets non-zero at once: `pub_eq` compares the public asset
-    // against every slot's, so this is the witness that leaves the fewest of
-    // those comparisons trivially zero.
+    // Both public buckets non-zero: `pub_eq` compares the public asset against
+    // every slot's, so this witness leaves the fewest of those comparisons
+    // trivially zero.
     it("a shape with both public buckets non-zero has no second witness", async () => {
         const { root, inputs } = tx.oneRealOneDummy(1000n, ALICE_NSK);
         await assertNoSecond("publicInAndOut", tx.build({
@@ -209,10 +197,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
         }));
     });
 
-    // Two assets at once. `PerAssetValueBalance` runs its comparisons per
-    // (slot, asset) pair, so a second asset changes WHICH of them hold and
-    // therefore which `IsZero` hints go free — a different subset of the
-    // circuit from every single-asset shape above.
+    // Two assets. `PerAssetValueBalance` runs its comparisons per (slot, asset)
+    // pair, so a second asset changes which of them hold and which `IsZero`
+    // hints are free, exercising a different subset of the circuit.
     it("a two-asset shape has no second witness", async () => {
         const { root, inputs } = spend(
             [tx.note(100n, ALICE_NSK, 1n, ASSET), tx.note(50n, ALICE_NSK, 2n, ASSET_B)],
@@ -244,10 +231,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
         }));
     });
 
-    // Everything at zero that the circuit still accepts: a real input of value 0
-    // spending to outputs of value 0. Zero is the value that makes products
-    // vanish, and a vanishing product is exactly how a constraint stops
-    // restricting the signal it was meant to pin.
+    // All values zero: a real input of value 0 spending to outputs of value 0.
+    // Zero makes products vanish, and a vanishing product can leave a
+    // constraint not restricting the signal it pins.
     it("an all-zero-value shape has no second witness", async () => {
         const { root, inputs } = spend([tx.note(0n, ALICE_NSK, 1n)], ALICE_NSK);
         await assertNoSecond("zeroValues", tx.build({

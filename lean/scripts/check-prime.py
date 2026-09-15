@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """Discharge the two arithmetic axioms in the Lean development.
 
-`Lelantos.p_prime` and `Lelantos.ell_prime` are recorded as axioms because Mathlib's
-`norm_num` primality extension is trial-division based and cannot certify a 254-bit or
-251-bit number. This script checks them externally and checks the constants themselves
-against the values the circuit toolchain actually uses.
+`Lelantos.p_prime` and `Lelantos.ell_prime` are axioms because Mathlib's `norm_num`
+primality extension uses trial division and cannot certify 254-bit or 251-bit numbers.
+This script checks them externally and cross-checks the constants against the values
+the circuit toolchain uses.
 
-For `p` there is a **Lucas certificate**: the full factorization of `p - 1` is checked to
-multiply out, and a base `a` of multiplicative order exactly `p - 1` is exhibited. That is
-a primality proof for `p`, modulo the primality of the factors themselves — which the
-report labels honestly, deterministically certified by trial division where the factor is
-small enough and Miller-Rabin otherwise.
+For `p`, a Lucas certificate is checked: the full factorization of `p - 1` must multiply
+out, and a base `a` of multiplicative order exactly `p - 1` is exhibited. This proves `p`
+prime given the primality of the factors, which are certified by trial division when
+small enough and by Miller-Rabin otherwise; the report states the method for each.
 
-The factorization is recorded rather than searched for: trial division of `p - 1` up to a
-practical bound leaves a 173-bit composite cofactor, so a certificate built that way can
-never complete. Every recorded factor is re-verified on each run, and a failure to certify
-sets the exit status.
+The factorization is recorded rather than computed, because trial division of `p - 1` to
+a practical bound leaves a 173-bit composite cofactor. Every recorded factor is
+re-verified on each run, and any certification failure sets a non-zero exit status.
 
 For `ell` only Miller-Rabin is run; `ell - 1`'s factorization is not recorded here.
 
@@ -28,8 +26,8 @@ import sys
 # BN254 scalar field modulus (circom's default prime r) -- Lelantos/Model/Field.lean :: p
 P = 21888242871839275222246405745257275088548364400416034343698204186575808495617
 
-# Complete factorization of P - 1, with multiplicity. Verified to multiply out below, so a
-# transcription slip cannot pass silently.
+# Complete factorization of P - 1, with multiplicity. `lucas_certificate` verifies the
+# product.
 P_MINUS_1_FACTORS = (
     [2] * 28
     + [3, 3, 13, 29, 983, 11003, 237073]
@@ -41,7 +39,7 @@ P_MINUS_1_FACTORS = (
 DETERMINISTIC_LIMIT = 2 * 10 ** 15
 
 # Baby Jubjub prime-order subgroup order -- Lelantos/Model/Jubjub.lean :: ell
-# This is the full curve order divided by the cofactor 8.
+# Equal to the full curve order divided by the cofactor 8.
 BABYJUB_ORDER = 21888242871839275222246405745257275088614511777268538073601725287587578984328
 ELL = 2736030358979909402780800718157159386076813972158567259200215660948447373041
 
@@ -74,8 +72,8 @@ def is_probable_prime(n: int, rounds: int = 64) -> bool:
 
 
 def is_prime_by_trial_division(n: int) -> bool:
-    """Exhaustive trial division. A proof, not a probabilistic test -- but only usable on
-    factors small enough that sqrt(n) is reachable."""
+    """Exhaustive trial division. Deterministic, but practical only when sqrt(n) is
+    small."""
     if n < 2:
         return False
     if n % 2 == 0:
@@ -89,7 +87,7 @@ def is_prime_by_trial_division(n: int) -> bool:
 
 
 def certify_factor(q: int) -> tuple[bool, str]:
-    """Establish that a claimed factor is prime, saying which method was used."""
+    """Check that a claimed factor is prime; returns the result and the method used."""
     if q <= DETERMINISTIC_LIMIT:
         return is_prime_by_trial_division(q), "trial division"
     return is_probable_prime(q), "Miller-Rabin"
@@ -104,9 +102,8 @@ def lucas_certificate(n: int, factors: list[int]) -> tuple[bool, str]:
     then `a` has multiplicative order exactly `n - 1`, so the group `(Z/n)*` has `n - 1`
     elements and `n` is prime.
 
-    Returns (ok, detail). The caller is responsible for reporting how the primality of each
-    `q` was established -- this function checks the factorization multiplies out, but takes
-    the factors' primality as given."""
+    Returns (ok, detail). Checks that the factorization multiplies out but assumes each
+    `q` is prime; the caller certifies the factors."""
     product = 1
     for q in factors:
         product *= q

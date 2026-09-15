@@ -50,7 +50,7 @@ def bitNat (b : F) : ℕ := if b = 1 then 1 else 0
 
 theorem bitNat_le_one (b : F) : bitNat b ≤ 1 := by unfold bitNat; split <;> omega
 
-/-- For a genuine bit the `ℕ` reading casts back to the field element itself. -/
+/-- For a bit, the `ℕ` reading casts back to the field element itself. -/
 theorem cast_bitNat {b : F} (h : IsBit b) : ((bitNat b : ℕ) : F) = b := by
   rcases isBit_iff.mp h with rfl | rfl <;> simp [bitNat]
 
@@ -87,9 +87,8 @@ theorem cast_bitsNat {n : ℕ} {bs : ℕ → F} (h : ∀ i, i < n → IsBit (bs 
 
 `bitsNat` sends a bit vector to the natural it denotes. `bitNat_eq_digit` is the inverse
 direction: the decomposition is unique, so bit `i` of that natural is the bit the assignment
-supplied. Nothing downstream can read an individual bit without it — `num2Bits_sound` pins
-only the *sum*, and a statement about one bit (or, in `Gadgets.BatchAppend`, about one quaternary
-digit) needs the bits back.
+supplied. `num2Bits_sound` pins only the sum, so statements about one bit (or, in
+`Gadgets.BatchAppend`, about one quaternary digit) depend on this.
 -/
 
 /-- Splitting a decomposition at position `i`: the low `i` bits, plus the rest shifted. -/
@@ -130,7 +129,7 @@ theorem bitNat_eq_digit {bs : ℕ → F} {n i : ℕ} (hi : i < n) :
 
 The quaternary tree reads its path one *digit* at a time, and the circuits produce that
 digit by pairing bits `2d` and `2d + 1` of a `Num2Bits` output — the pair
-`idx_bits.out[2 * d]`, `idx_bits.out[2 * d + 1]` that `src/lib/batch_append.circom:154-158`
+`idx_bits.out[2 * d]`, `idx_bits.out[2 * d + 1]` that `src/lib/batch_append.circom:153-157`
 turns into a one-hot digit selector, the same shape as `src/lib/common.circom:21`. -/
 
 /-- Digit `d` of `m` in base 4. -/
@@ -153,8 +152,8 @@ theorem div_four_pow_split (m d : ℕ) : m / 4 ^ d = 4 * (m / 4 ^ (d + 1)) + qua
   rw [div_four_pow_succ, quatDigit]
   exact (Nat.div_add_mod (m / 4 ^ d) 4).symm
 
-/-- **The paired bits are the quaternary digit.** With `bitNat_eq_digit` this is what turns
-a `Num2Bits(2·depth)` decomposition of an index into the digit vector the insert consumes.
+/-- **The paired bits are the quaternary digit.** With `bitNat_eq_digit` this turns a
+`Num2Bits(2·depth)` decomposition of an index into the digit vector the insert consumes.
 -/
 theorem quatDigit_eq_bits {bs : ℕ → F} {n d : ℕ} (h : 2 * d + 1 < n) :
     quatDigit (bitsNat bs n) d = bitNat (bs (2 * d)) + 2 * bitNat (bs (2 * d + 1)) := by
@@ -186,10 +185,10 @@ theorem num2Bits_sound {n : ℕ} {v : F} {bs : ℕ → F}
 
 /-! ## A canonical satisfying assignment
 
-`Num2BitsSat` is a constraint, so every result consuming it is conditional on something
-satisfying it. These exhibit the obvious witness for an arbitrary natural below `2 ^ n`,
-which is what the completeness proofs need in order to instantiate `LessThan`, the
-quaternary-insert chain and the batch circuit at concrete indices.
+Every result consuming `Num2BitsSat` is conditional on a satisfying assignment. These
+exhibit the canonical witness for an arbitrary natural below `2 ^ n`, which the
+completeness proofs use to instantiate `LessThan`, the quaternary-insert chain and the
+batch circuit at concrete indices.
 -/
 
 /-- Bit `i` of `m` as a field element — the little-endian decomposition `Num2Bits` emits,
@@ -200,8 +199,8 @@ theorem natBits_isBit (m i : ℕ) : IsBit (natBits m i) := by
   have h : m / 2 ^ i % 2 = 0 ∨ m / 2 ^ i % 2 = 1 := by omega
   rcases h with h | h <;> simp [natBits, h, IsBit]
 
-/-- Splitting the low `n + 1` bits of `m` into its low `n` bits and bit `n`. Pure `Nat`
-arithmetic; it exists to carry the induction in `natBits_recompose`. -/
+/-- Splitting the low `n + 1` bits of `m` into its low `n` bits and bit `n`. `Nat`
+arithmetic carrying the induction in `natBits_recompose`. -/
 theorem mod_two_pow_succ (m n : ℕ) :
     m % 2 ^ (n + 1) = m % 2 ^ n + 2 ^ n * (m / 2 ^ n % 2) := by
   have hdvd : (2 : ℕ) ^ n ∣ 2 ^ (n + 1) := pow_dvd_pow 2 (Nat.le_succ n)

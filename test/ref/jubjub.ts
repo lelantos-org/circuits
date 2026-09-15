@@ -9,9 +9,9 @@
 //
 // Scalars are not reduced, matching the circuit: `MulH` is Num2Bits(252) +
 // FixedBaseMul (not circomlib's EscalarMulFix; see src/lib/fixed_base_mul.circom)
-// and `ValueScalarMul` is EscalarMulAny(64) over raw bits.
-// Reduction would diverge for points outside the prime-order subgroup. The
-// bit widths those Num2Bits calls enforce are asserted instead.
+// and `ValueScalarMul` is EscalarMulAny(64) over raw bits. Reduction would
+// diverge for points outside the prime-order subgroup; the bit widths those
+// Num2Bits calls enforce are asserted instead.
 
 import { buildBabyjub, buildPedersenHash } from "circomlibjs";
 import { BABYJUB_SUBGROUP_ORDER, POW_2_64, type Field, type Point } from "./field.js";
@@ -113,9 +113,9 @@ export class Jubjub {
      * Mirrors HashToAssetGen in src/lib/asset_gen.circom, whose header states
      * the equivalence to circomlibjs `pedersen.hash([TAG_ASSET, ...assetId_LE_8])`.
      *
-     * The buffer is exactly 9 bytes and circomlibjs reads bits LSB-first
-     * within each byte, which is what lines up with the circom's
-     * `(TAG >> i) & 1` followed by `Num2Bits(64).out[i]`.
+     * The buffer is 9 bytes and circomlibjs reads bits LSB-first within each
+     * byte, matching the circom's `(TAG >> i) & 1` followed by
+     * `Num2Bits(64).out[i]`.
      */
     hashToAssetGen(assetId: Field): Point {
         assertBigint(assetId, "hashToAssetGen assetId");
@@ -134,8 +134,8 @@ export class Jubjub {
      * cv = value·gen + rcv·H.
      *
      * Bounds mirror the circuit: `value` goes through EscalarMulAny(64) and
-     * `rcv` through Num2Bits(252), so anything wider would be a witness the
-     * circuit cannot represent.
+     * `rcv` through Num2Bits(252); wider values are not representable in a
+     * witness.
      */
     valueCommit(value: Field, assetGen: Point, rcv: Field): Point {
         assertBigint(value, "valueCommit value");

@@ -34,11 +34,11 @@ include "poly_eval.circom";
 // each nullifier[i] unspent, and each out_cm[j] inserted into the commitment
 // tree.
 //
-// NOT a circuit signal: recipient_address, chain_id, payer_address,
-// relayer_address, the per-output FMD clue fields and the encrypted-payload
-// digest. The circuit constrains none of them, so they are not PolyEval
-// coefficients — see TransactCompressN in poly_eval.circom. They bind to the
-// proof through the challenge instead: PubInputs.sol hashes them into z, so
+// Not circuit signals: recipient_address, chain_id, payer_address,
+// relayer_address, intent_hash, the per-output FMD clue fields and the
+// encrypted-payload digest. The circuit constrains none of them, so they are
+// not PolyEval coefficients (see TransactCompressN in poly_eval.circom). They
+// bind to the proof through the challenge: PubInputs.sol hashes them into z, so
 // altering any of them changes z and therefore y.
 template Transact(DEPTH, N_IN, N_OUT) {
     // ===== PUBLIC (verifier-visible) =====
@@ -80,9 +80,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
     signal input out_rcv[N_OUT];
     signal input out_rcv_dep[N_OUT];
 
-    // -------------------------------------------------------------------------
-    // Spent-note slots
-    // -------------------------------------------------------------------------
+    // ----- Spent-note slots -----
     component spent[N_IN];
     component in_dz = DummyZeroValue(N_IN);
 
@@ -115,20 +113,19 @@ template Transact(DEPTH, N_IN, N_OUT) {
 
     // At least one input slot must be real.
     //
-    // MerkleProofOrDummy skips the root comparison on a dummy slot, so with
-    // every slot dummy nothing reads merkle_root and it becomes a free signal —
-    // the one remaining PolyEval coefficient a prover could set to an arbitrary
-    // field element and solve the compression equation with. With one real slot
-    // the root is the output of a Poseidon chain, so hitting a chosen value
-    // needs a second preimage rather than arithmetic.
+    // MerkleProofOrDummy skips the root comparison on a dummy slot, so if every
+    // slot is a dummy, merkle_root is unconstrained: a PolyEval coefficient the
+    // prover could set freely to solve the compression equation. With one real
+    // slot the root is the output of a Poseidon chain, and matching a chosen
+    // value requires a second preimage.
     //
-    // No flow loses anything: MASP.withdraw and MASP.transfer both require
+    // This excludes no valid flow: MASP.withdraw and MASP.transfer require
     // publicIn == 0, and shielding goes through the deposit escrow and
-    // tree_update_batch, so an all-dummy transact could only ever have been a
-    // no-op with every output at value 0.
+    // tree_update_batch, so an all-dummy transact is a no-op with every output
+    // at value 0.
     //
-    // is_dummy is booleanized by DummyZeroValue above, so the sum is in
-    // [0, N_IN] and this is a single equality.
+    // DummyZeroValue booleanizes is_dummy, so the sum is in [0, N_IN] and a
+    // single equality suffices.
     signal dummy_acc[N_IN + 1];
     dummy_acc[0] <== 0;
     for (var i = 0; i < N_IN; i++) {
@@ -139,11 +136,9 @@ template Transact(DEPTH, N_IN, N_OUT) {
     all_dummy.in[1] <== N_IN;
     all_dummy.out === 0;
 
-    // -------------------------------------------------------------------------
-    // Output-note slots
-    // -------------------------------------------------------------------------
+    // ----- Output-note slots -----
     // out_rho is pinned to DeriveRho(nullifier[0], j), so no two committed output
-    // notes share a rho and therefore none share a future nullifier.
+    // notes share a rho.
     component out_rho_d[N_OUT];
     component out_note[N_OUT];
 
@@ -169,9 +164,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
         out_cv_dep[j][1] === out_note[j].cv_dep[1];
     }
 
-    // -------------------------------------------------------------------------
-    // Transparent bucket: public_in / public_out as points on V^pub
-    // -------------------------------------------------------------------------
+    // ----- Transparent bucket: public_in / public_out as points on V^pub -----
     component pub_gen = HashToAssetGen();
     pub_gen.asset_id <== public_asset_id;
 
@@ -185,9 +178,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
     pub_out_mul.gen[0] <== pub_gen.gen[0];
     pub_out_mul.gen[1] <== pub_gen.gen[1];
 
-    // -------------------------------------------------------------------------
-    // Value conservation
-    // -------------------------------------------------------------------------
+    // ----- Value conservation -----
     component vbal = PerAssetValueBalance(N_IN, N_OUT);
     for (var i = 0; i < N_IN; i++) {
         vbal.in_asset[i] <== in_asset[i];
@@ -219,9 +210,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
     bal.pub_out_pt[0] <== pub_out_mul.out[0];
     bal.pub_out_pt[1] <== pub_out_mul.out[1];
 
-    // -------------------------------------------------------------------------
-    // Public-input compression → (y, z)
-    // -------------------------------------------------------------------------
+    // ----- Public-input compression → (y, z) -----
     component pe = TransactCompressN(N_IN, N_OUT);
     pe.z <== z;
     pe.merkle_root <== merkle_root;

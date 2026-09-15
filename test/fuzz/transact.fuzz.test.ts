@@ -14,7 +14,7 @@ const fcParams = fcParamsFor("TRANSACT");
 
 // Balanced-split edge cases seeded into every fc.assert.
 // Note: MAX_VALUE = 2^64 - 1 is odd, so 2 * (MAX_VALUE / 2n) = MAX_VALUE - 1.
-// Each tuple must satisfy o1 + o2 === v1 + v2 (ctx.circuit rejects otherwise).
+// Each tuple must satisfy o1 + o2 === v1 + v2 (the circuit rejects otherwise).
 const BALANCED_EXAMPLES = [
     { v1: 0n, v2: 0n, o1: 0n, o2: 0n },
     { v1: MAX_VALUE / 2n, v2: MAX_VALUE / 2n, o1: MAX_VALUE - 1n, o2: 0n },
@@ -65,9 +65,8 @@ describe("transact_4x6 [fuzz]", function () {
     });
 
     it("unbalanced random ctx.tx (output mutated by +delta) always fails", async () => {
-        // Generate (v1, v2, o1, o2, delta) so that delta > 0 and o2+delta ∈
-        // (o1+o2, MAX_VALUE]. Result is always unbalanced AND in range — no
-        // silent post-hoc skips.
+        // Draws (v1, v2, o1, o2, delta) with delta > 0 and o2 + delta ≤ MAX_VALUE,
+        // so the result is unbalanced and in range.
         const arbUnbalancedDelta = arbBalancedSplit().chain(({ v1, v2, o1, o2 }) => {
             const headroom = MAX_VALUE - o2;
             if (headroom === 0n) return fc.constant({ v1, v2, o1, o2, delta: 0n, skip: true });
@@ -140,13 +139,13 @@ describe("transact_4x6 [fuzz]", function () {
     });
 
     it("input value > 2^64 always fails (range check)", async () => {
-        // Each run exercises the SDK and the ctx.circuit; the run count is scaled
+        // Each run exercises the SDK and the circuit; the run count is scaled
         // down by default and overridable via FUZZ_RUNS_TRANSACT_OVERFLOW.
         await fc.assert(fc.asyncProperty(
             fc.bigInt(1n, 1n << 200n),
             async (overflowSeed) => {
                 const overflow = MAX_VALUE + 1n + (overflowSeed % (1n << 64n));
-                // Either SDK validation or ctx.circuit range check must reject.
+                // Either SDK validation or the circuit range check must reject.
                 let threw = false;
                 try {
                     const nsk = 11n;

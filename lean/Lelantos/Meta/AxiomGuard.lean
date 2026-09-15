@@ -4,16 +4,15 @@ import Lelantos
 # Environment-wide axiom guard
 
 `Lelantos.Meta.Assumptions` prints the axiom dependencies of the headline theorems, and
-`lean/scripts/check-axioms.sh` diffs that output against `expected/axioms.txt`. That guard is
-only as good as the list of theorems someone remembered to add to it: a new result proved
-from a new axiom is invisible to it.
+`lean/scripts/check-axioms.sh` diffs that output against `expected/axioms.txt`; that check
+covers only the theorems listed there.
 
-This module closes that gap by checking **every** declaration in the `Lelantos` namespace
-against an allow-list, at build time. Adding an axiom — or admitting a proof, which surfaces
-as `sorryAx` — fails `lake build` rather than merely failing to appear in a diff.
+This module checks every declaration in the `Lelantos` namespace against an allow-list at
+build time. Adding an axiom, or admitting a proof (which surfaces as `sorryAx`), fails
+`lake build`.
 
-The allow-list is the trusted base. This file decides what is permitted;
-`Lelantos.Meta.Assumptions` documents why each entry is on the list. Keep the two in sync.
+The allow-list is the trusted base. This file defines what is permitted;
+`Lelantos.Meta.Assumptions` documents each entry. Keep the two in sync.
 -/
 
 open Lean
@@ -33,14 +32,14 @@ private def arithmeticAxioms : List Name :=
 gadgets, the two Pedersen bases, and the known discrete log of the asset generators.
 
 `coords_injective` is permitted but reaches no headline theorem: its only consumer lifts the
-point equation into the group, and nothing consumes that. See `Lelantos.Model.Jubjub`. -/
+point equation into the group, which has no consumers. See `Lelantos.Model.Jubjub`. -/
 private def curveAxioms : List Name :=
   [``Lelantos.coords_injective, ``Lelantos.babyAdd, ``Lelantos.babyAdd_spec,
    ``Lelantos.escalarMul, ``Lelantos.escalarMul_spec, ``Lelantos.H, ``Lelantos.BASE0,
    ``Lelantos.assetMul, ``Lelantos.assetMul_arith]
 
-/-- The complete trusted base. Note what is *absent*: there is no hash axiom, and
-`Lelantos.poseidon_not_injective` is the reason one cannot be added. -/
+/-- The complete trusted base. It contains no hash axiom; `Lelantos.poseidon_not_injective`
+shows that an injectivity axiom would be inconsistent. -/
 def allowed : List Name := leanAxioms ++ arithmeticAxioms ++ curveAxioms
 
 /-- Every declaration this development introduces, excluding compiler-generated ones. -/

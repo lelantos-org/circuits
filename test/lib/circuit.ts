@@ -67,11 +67,11 @@ const GENERATED_FIXTURES = path.join(ROOT, "build", ".tester", "fixtures");
  * A one-line wrapper `component main = <template>(<args>)` over `src/<source>`,
  * written under `build/` and returned as a path for `useCircuit`.
  *
- * For fixtures whose parameters are constants the tests also use: a checked-in
- * wrapper types them a second time, and a change to `constants.ts` then tests a
- * circuit other than the one the test builds witnesses for. The file is rewritten
- * only when its content changes, so the compile cache keyed on its path stays
- * valid.
+ * For fixtures whose parameters are constants the tests also use. Generating the
+ * wrapper keeps it in sync with `constants.ts`; a checked-in wrapper would
+ * duplicate the values and could compile a different circuit from the one the
+ * test builds witnesses for. The file is rewritten only when its content
+ * changes, so the compile cache keyed on its path stays valid.
  */
 export function generatedFixture(source: string, template: string, args: readonly number[]): string {
     const name = `gen_${template}_${args.join("_")}.circom`;
@@ -97,10 +97,10 @@ export function generatedFixture(source: string, template: string, args: readonl
 // compile per circuit. Mocha runs without --parallel (see package.json), so all
 // spec files share one process and one cache.
 //
-// The output directory is pinned rather than left to circom_tester's tmpdir,
-// because that compile already emits the `.r1cs` and `.sym` the R1CS-level
-// suites need (`lib/r1cs.ts`) and a tmpdir would hide them behind a second
-// ~100k-constraint compile. It lives under `build/`, which is gitignored.
+// The output directory is pinned rather than left to circom_tester's tmpdir:
+// the compile emits the `.r1cs` and `.sym` the R1CS-level suites need
+// (`lib/r1cs.ts`), and a tmpdir would require a second ~100k-constraint compile
+// to obtain them. It lives under `build/`, which is gitignored.
 //
 // Keyed on the absolute path and holding the promise, so concurrent `before`
 // hooks for one circuit await a single compile.
@@ -112,14 +112,14 @@ const cache = new Map<string, Promise<CircuitArtifacts>>();
  * A compiled circuit: the wasm tester the witness suites drive, plus the paths
  * to the constraint system behind it.
  *
- * The two must come from the SAME compile. A suite that mutates a witness and
- * asks whether the R1CS still accepts it is comparing artifacts against each
- * other, so a stale `.r1cs` beside a fresh wasm would not fail loudly — it would
- * quietly answer questions about a circuit that is no longer in `src/`.
+ * Both must come from the same compile. A suite that mutates a witness and
+ * checks it against the R1CS compares the two artifacts, so a stale `.r1cs`
+ * beside a fresh wasm would not error; it would report on a circuit that no
+ * longer matches `src/`.
  */
 export interface CircuitArtifacts {
     tester: CircuitTester;
-    /** `<name>.r1cs` — what a Groth16 proof actually binds. */
+    /** `<name>.r1cs` — what a Groth16 proof binds. */
     r1csPath: string;
     /** `<name>.sym` — witness index -> signal name. */
     symPath: string;
@@ -172,23 +172,22 @@ const exec = promisify(execCb);
 /**
  * Compile a circuit to `.r1cs` and `.sym` only, with circom's optimizer off.
  *
- * `loadCircuitArtifacts` above compiles at circom's default `--O2`, which is the
- * system a proof actually binds and therefore the one to sweep for a second
- * witness. But `--O2` substitutes linear constraints away, and a bit
- * decomposition is exactly a linear constraint: after optimization the weighted
- * sum `sum 2^i b_i === in` is gone, its bits folded into whatever consumed them.
- * In `4x6` no linear combination survives with more than two power-of-two
- * coefficients, so a structural search for decompositions finds nothing at all
- * there.
+ * `loadCircuitArtifacts` above compiles at circom's default `--O2`, the system a
+ * proof binds and therefore the one to sweep for a second witness. `--O2`
+ * substitutes linear constraints away, and a bit decomposition is a linear
+ * constraint: after optimization the weighted sum `sum 2^i b_i === in` is gone,
+ * its bits folded into whatever consumed them. In `4x6` no linear combination
+ * remains with more than two power-of-two coefficients, so a structural search
+ * for decompositions finds none there.
  *
- * `--O0` keeps them, which is why `just picus` also compiles its own `--O0`
+ * `--O0` keeps them, which is also why `just picus` compiles its own `--O0`
  * copy. Reasoning about aliasing on the `--O0` system is sound for the deployed
  * one: the optimizer's substitutions preserve the solution set, so a
- * decomposition wide enough to alias at `--O0` still aliases at `--O2`, only
- * spelled differently.
+ * decomposition wide enough to alias at `--O0` also aliases at `--O2`, in a
+ * different form.
  *
- * No wasm is emitted — the caller wants the constraint system, and skipping it
- * keeps this near a second even for `4x6`.
+ * No wasm is emitted: the caller needs only the constraint system, and skipping
+ * wasm keeps this near one second even for `4x6`.
  */
 export async function compileConstraintsOnly(
     absPath: string,

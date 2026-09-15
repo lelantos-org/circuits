@@ -56,16 +56,15 @@ type TamperBase = "balanced" | "oneRealRestDummy" | "fullShape";
 
 // ===== per-slot expansion =====
 //
-// The rows below are written once with a `%` where the slot index goes, then
-// expanded over EVERY slot the shape declares. The point is that `Transact`
-// takes N_IN = 4 inputs and N_OUT = 6 outputs while the scenario factories fill
-// at most two of each: a constraint that is mis-indexed for slot >= 2 — a loop
-// bound one short, a high slot never wired up — is satisfied by every witness
-// built from `balanced()`, so testing slot 0 proves nothing about slot 3.
+// Rows are written once with `%` as the slot index and expanded over every slot
+// the shape declares. `Transact` takes N_IN = 4 inputs and N_OUT = 6 outputs,
+// while the scenario factories fill at most two of each; a constraint
+// mis-indexed for slot >= 2 (a loop bound one short, an unwired high slot) is
+// satisfied by every witness built from `balanced()`.
 //
-// These run against `fullShape`, where every slot holds a real note; on
-// `balanced` the high slots are dummies and padding, which carry deliberately
-// weaker constraints and would need different expectations per index.
+// Expanded rows run against `fullShape`, where every slot holds a real note. In
+// `balanced` the high slots are dummies and padding, which carry weaker
+// constraints and would need per-index expectations.
 
 /** `"in_rcv[%]"` -> one row per input slot. */
 function perInput(path: string, reason: string, extra: Partial<TamperCase> = {}): TamperCase[] {
@@ -94,8 +93,8 @@ function expand(
 
 // ===== rows =====
 //
-// Grouped by what the field feeds rather than by name, so a coverage gap reads
-// as a gap in the list.
+// Grouped by what the field feeds rather than by name, so coverage gaps are
+// visible in the list.
 const TAMPER_CASES: TamperCase[] = [
     // -- value commitments: cv = value·V^asset + rcv·H --
     ...perInput("in_rcv[%]",   "cv binding rejects a wrong input blinding"),
@@ -136,9 +135,8 @@ const TAMPER_CASES: TamperCase[] = [
     ...perInput("in_rcv[%]", "Num2Bits(252) rejects a 253-bit blinder", { value: () => TWO_252 }),
 
     // -- booleanity --
-    // On `fullShape` every slot is real (is_dummy = 0), so 2 is out of range for
-    // each of them; the row below covers the is_dummy = 1 side, in slot 1, which
-    // `oneRealRestDummy` fills with a dummy.
+    // On `fullShape` every slot is real (is_dummy = 0). The row below covers the
+    // is_dummy = 1 side in slot 1, which `oneRealRestDummy` fills with a dummy.
     ...perInput("in_is_dummy[%]", "in_is_dummy must be 0 or 1", { value: () => 2n }),
     { path: "in_is_dummy[1]", reason: "in_is_dummy must be 0 or 1, in a dummy slot too",
       value: () => 2n, base: "oneRealRestDummy" },
@@ -161,11 +159,10 @@ describe("transact_4x6 / single-field tamper", function () {
     /**
      * The three honest bases, built once and handed out as deep copies.
      *
-     * There are 127 tamper rows and three distinct bases between them, and each
-     * base costs a full `TxBuilder` run — a tree, four inserts, four
-     * authentication paths — which was ~85% of every row's time. `structuredClone`
-     * of the finished input dict is free by comparison, and a row only ever
-     * writes one field of its copy, so the shared originals cannot drift.
+     * Each base costs a full `TxBuilder` run (a tree, four inserts, four
+     * authentication paths), which dominates per-row time; `structuredClone` of
+     * the finished input is negligible. A row writes only its own copy, so the
+     * shared originals are not modified.
      */
     type BaseName = NonNullable<TamperCase["base"]>;
     const bases = {} as Record<BaseName, CircomTransactInput>;
@@ -184,11 +181,10 @@ describe("transact_4x6 / single-field tamper", function () {
     /**
      * One real input in slot 0, dummies in slots 1..N_IN-1, balanced and honest.
      *
-     * The base for the rows that need a DUMMY slot to tamper. It cannot be an
-     * all-dummy bundle: `Transact` asserts `all_dummy.out === 0`
-     * (src/lib/transact.circom), so a bundle whose every input slot is a dummy is
-     * rejected before any tamper is read, and a rejection test built on one
-     * passes no matter what it does to the witness.
+     * The base for rows that tamper a dummy slot. It must not be all-dummy:
+     * `Transact` asserts `all_dummy.out === 0` (src/lib/transact.circom), so an
+     * all-dummy bundle is rejected regardless of the tamper and a rejection test
+     * built on it passes vacuously.
      */
     function oneRealRestDummy(): CircomTransactInput {
         const { tx } = ctx;
@@ -200,17 +196,13 @@ describe("transact_4x6 / single-field tamper", function () {
         });
     }
 
-    // The base every per-slot row tampers. Without it a row could "pass" because
-    // the untouched witness was already unsatisfiable — every rejection below
-    // would then be vacuous, and the whole expansion would prove nothing.
+    // Vacuity guard for the per-slot base: if the untouched witness were
+    // unsatisfiable, every rejection below would pass regardless of the tamper.
     it("accepts the fully-occupied shape: every input and output slot real", async () => {
         await expectAccepts(ctx.circuit, ctx.tx.fullShape());
     });
 
-    // Same guard for the dummy-slot base. This one is not hypothetical: these
-    // rows previously ran on an all-dummy bundle, which `all_dummy.out === 0`
-    // rejects on its own, so they passed while proving nothing about the field
-    // they tampered.
+    // Vacuity guard for the dummy-slot base.
     it("accepts one real input with the remaining slots dummy", async () => {
         await expectAccepts(ctx.circuit, oneRealRestDummy());
     });
@@ -224,10 +216,10 @@ describe("transact_4x6 / single-field tamper", function () {
         });
     }
 
-    // An honest witness, not a tamper case: the top of the declared blinder
-    // range must stay spendable. A Num2Bits one bit too narrow in MulH would
-    // make notes near the ceiling unspendable, and the SDK never mints one this
-    // large, so nothing else covers it.
+    // Honest witness: the top of the declared blinder range must stay spendable.
+    // A Num2Bits one bit too narrow in MulH would make notes near the ceiling
+    // unspendable; the SDK does not mint blinders this large, so no other test
+    // covers it.
     it("accepts blinders at the top of the 252-bit range", async () => {
         const { tx, circuit } = ctx;
         const maxRcv = TWO_252 - 1n;

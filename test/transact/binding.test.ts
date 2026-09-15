@@ -1,29 +1,27 @@
-// Where each logical public input is bound, now that the two mechanisms differ.
+// Where each logical public input of transact is bound.
 //
 // A logical public input reaches the proof one of two ways:
 //
 //   coefficient  it is a circuit signal and a `TransactCompressN` coefficient,
 //                so it enters `y = Σ c[k]·z^k` directly;
-//   challenge    it is not a signal at all, and enters only the keccak preimage
-//                `PubInputs.compress` hashes into `z` — which moves `y`, since
-//                the circuit evaluates the polynomial at whatever `z` it is
-//                handed.
+//   challenge    it is not a signal, and enters only the keccak preimage
+//                `PubInputs.compress` hashes into `z`, which moves `y` because
+//                the circuit evaluates the polynomial at the supplied `z`.
 //
-// Both bind. The difference is what they require: a coefficient is only binding
-// if some other constraint pins it, and a challenge word needs nothing.
+// Both bind, under different requirements: a coefficient binds only if another
+// constraint pins it, while a challenge word needs no constraint.
 //
-// `PolyEval` is affine in each coefficient, and `z` is an INPUT the prover reads
-// before choosing a witness — the contract derives it from calldata the prover
-// authored. An unpinned coefficient is therefore one linear equation in one
-// unknown: solve it and any calldata verifies against a proof of an unrelated
-// transaction. Schwartz-Zippel does not apply, because it needs the vector fixed
-// before the challenge and here the challenge comes first.
+// `PolyEval` is affine in each coefficient, and `z` is an input the prover reads
+// before choosing a witness, derived by the contract from prover-authored
+// calldata. An unpinned coefficient is therefore one linear equation in one
+// unknown: solving it lets any calldata verify against a proof of an unrelated
+// transaction. Schwartz-Zippel does not apply, because it requires the vector
+// to be fixed before the challenge.
 //
-// `recipient_address`, `chain_id`, `payer_address`, `relayer_address`, the FMD
-// clue triples and `out_aux_digest` carry no in-circuit constraint. They used to
-// be coefficients — 23 of the former 69 — and so were 23 such unknowns. They are
-// challenge words now, and this file pins that: none of them is a signal, none
-// of them is a coefficient, and every one of them still moves `z`.
+// `recipient_address`, `chain_id`, `payer_address`, `relayer_address`,
+// `intent_hash`, the FMD clue triples and `out_aux_digest` carry no in-circuit
+// constraint, so each is a challenge word. This file checks that none of them
+// is a signal or a coefficient, and that each one moves `z`.
 
 import { expect } from "chai";
 
@@ -51,13 +49,14 @@ const CHALLENGE_SCALARS = [
     "chain_id",
     "payer_address",
     "relayer_address",
+    "intent_hash",
 ] as const;
 
 /** `4 + 3·N_IN + 5·N_OUT` = 46: what the polynomial evaluates. */
 const COEFF_COUNT = 4 + 3 * N_IN + 5 * N_OUT;
 
-/** `9 + 3·N_IN + 8·N_OUT` = 69: what the challenge hashes. */
-const CHALLENGE_WORDS = 9 + 3 * N_IN + 8 * N_OUT;
+/** `10 + 3·N_IN + 8·N_OUT` = 70: what the challenge hashes. */
+const CHALLENGE_WORDS = 10 + 3 * N_IN + 8 * N_OUT;
 
 describe("transact_4x6 / where each public input is bound", function () {
     this.timeout(TIMEOUT_CIRCUIT);
@@ -75,14 +74,15 @@ describe("transact_4x6 / where each public input is bound", function () {
         base.chain_id = "67890";
         base.payer_address = "11111";
         base.relayer_address = "22222";
-        // The four writes above are challenge words, so the `z` `balanced()`
-        // derived no longer describes this transaction.
+        base.intent_hash = "33333";
+        // The five writes above are challenge words, so the `z` derived by
+        // `balanced()` must be recomputed.
         rebindFiatShamir(base);
     });
 
     // ===== the coefficient vector holds only pinned slots =====
 
-    it("evaluates 46 coefficients and hashes 69 challenge words", () => {
+    it("evaluates 46 coefficients and hashes 70 challenge words", () => {
         expect(coeffs(base).length, "coefficient vector").to.equal(COEFF_COUNT);
         expect(flatten(base).length, "challenge preimage").to.equal(CHALLENGE_WORDS);
     });
@@ -100,13 +100,12 @@ describe("transact_4x6 / where each public input is bound", function () {
     });
 
     it("the coefficients are the challenge preimage's leading words", () => {
-        // Stronger than a subsequence, and the contract depends on the
-        // difference: `PubInputs.compress` evaluates ONE span of the copied
-        // calldata (`_finalizeRaw(head, n, nCoeffs)`). That is only correct
-        // while every unpinned word sits after every pinned one, which is what
-        // the member order of `PubInputs.Transact` is arranged to give. Move an
-        // address word back into the middle and the contract silently evaluates
-        // the wrong 46.
+        // A prefix, not merely a subsequence: `PubInputs.compress` evaluates a
+        // single span of the copied calldata (`_finalizeRaw(head, n, nCoeffs)`),
+        // which is correct only while every unpinned word follows every pinned
+        // one. The member order of `PubInputs.Transact` provides this; an
+        // unpinned word placed among the coefficients would make the contract
+        // evaluate the wrong 46 words.
         const c = coeffs(base);
         const pre = flatten(base);
         expect(pre.slice(0, c.length)).to.deep.equal(
@@ -118,10 +117,9 @@ describe("transact_4x6 / where each public input is bound", function () {
     // ===== the unconstrained fields are not signals =====
 
     it("the challenge-only fields are not circuit signals", async () => {
-        // The projection in `setup.ts` drops them precisely because the witness
-        // calculator refuses them. Feeding one straight through proves the
-        // circuit no longer declares it — which is what stops it being a free
-        // variable in the first place.
+        // The projection in `setup.ts` drops these fields because the witness
+        // calculator refuses them. Passing one through shows the circuit does
+        // not declare it, so it cannot be a free variable.
         const circuit = await loadCircuit(CIRCUIT);
         const withExtra = { ...circuitSignals(base), recipient_address: base.recipient_address };
         let err: unknown;
@@ -139,11 +137,10 @@ describe("transact_4x6 / where each public input is bound", function () {
     /**
      * Assert that `patch` moves `z`, and that the circuit's `y` moves with it.
      *
-     * The first half is the binding: the contract recomputes `z` from calldata,
-     * so a relayer that rewrites one of these fields hands the verifier a
-     * different challenge. The second half is what makes that fatal — the same
-     * witness evaluated at the new challenge emits a different `y`, so the proof
-     * no longer matches the pair the verifier derived.
+     * The contract recomputes `z` from calldata, so a relayer that rewrites one
+     * of these fields produces a different challenge. The same witness
+     * evaluated at that challenge emits a different `y`, so the proof no longer
+     * matches the pair the verifier derived.
      */
     async function assertBindsThroughChallenge(
         label: string,
@@ -158,8 +155,8 @@ describe("transact_4x6 / where each public input is bound", function () {
 
         expect(zBase, `${label}: z must differ when the field changes`).to.not.equal(zTampered);
 
-        // Same coefficients either way — the field is not one — so the whole
-        // difference in `y` comes from the challenge.
+        // The field is not a coefficient, so the difference in `y` comes
+        // entirely from the challenge.
         const c = coeffs(base);
         expect(coeffs(tampered), `${label}: coefficients must not move`).to.deep.equal(c);
 
@@ -167,17 +164,14 @@ describe("transact_4x6 / where each public input is bound", function () {
         const yTampered = hornerEval(c, zTampered);
         expect(yBase, `${label}: y must differ at the two challenges`).to.not.equal(yTampered);
 
-        // Only the TAMPERED challenge is run here. The base half —
-        // `expectWitnessY(circuit, {...base, z: zBase}, yBase)` — does not depend
-        // on `label` or `patch`, so it was the same witness generation eleven
-        // times over; it is now the standalone case below.
+        // Only the tampered challenge is run here. The honest-challenge check
+        // does not depend on `label` or `patch`, so it is a standalone case.
         await expectWitnessY(circuit, { ...base, z: zTampered.toString() }, yTampered);
     }
 
-    // The premise every BINDS row rests on: at the honest challenge the circuit
-    // emits the reference `y`. If this failed, each row's tampered assertion
-    // would be comparing against a broken baseline and the whole block would be
-    // measuring nothing.
+    // Baseline for the BINDS rows: at the honest challenge the circuit emits the
+    // reference `y`. Without it, each row's tampered assertion could compare
+    // against a broken baseline.
     it("emits the reference y at the honest challenge", async () => {
         const zBase = fiatShamirZ(flatten(base));
         await expectWitnessY(
@@ -210,11 +204,10 @@ describe("transact_4x6 / where each public input is bound", function () {
     // ===== the pinned slots still bind through the coefficient vector =====
 
     it("y is sensitive to coefficient ORDER, not just membership", () => {
-        // At z = 1 Horner collapses to a plain sum and any permutation of the
-        // layout yields the same y, so this only says something at the derived
-        // challenge. Slots 0 and 1 are `merkleRoot` and `nullifier[0]`, adjacent
-        // and — unlike the public scalars, which are both 0 in a transfer —
-        // always distinct.
+        // At z = 1 Horner reduces to a plain sum and every permutation yields the
+        // same y, so the check uses the derived challenge. Slots 0 and 1 are
+        // `merkleRoot` and `nullifier[0]`: adjacent and always distinct, unlike
+        // the public scalars, which are both 0 in a transfer.
         const z = BigInt(base.z);
         expect(z, "z must not be 1: at z = 1 any permutation of the layout yields the same y")
             .to.not.equal(1n);

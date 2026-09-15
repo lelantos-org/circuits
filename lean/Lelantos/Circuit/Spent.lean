@@ -12,17 +12,17 @@ fidelity harness can compare them one by one against a real witness.
 `nsk`), a non-zero asset id, 64-bit values, membership of the leaf under the root, and a
 correctly formed nullifier.
 
-The dummy branch deliberately yields nothing. When `is_dummy = 1`:
+The dummy branch yields nothing. When `is_dummy = 1`:
 
-* the Merkle path is entirely unconstrained,
+* the Merkle path is unconstrained,
 * `pk` need not derive from `nsk`,
 * `asset_id` may be zero,
-* and the slot **still emits a prover-chosen `nullifier`**.
+* and the slot still emits a prover-chosen `nullifier`.
 
-Only `DummyZeroValue` (applied by the caller, `src/lib/transact.circom:87-89`) makes this safe,
-by forcing `value = 0` so the slot is neutral for value conservation. The prover-chosen
-nullifier is a real obligation on the contract's double-spend set, not an artefact of the
-model — see `dummy_nullifier_unconstrained`.
+`DummyZeroValue` (applied by the caller, `src/lib/transact.circom:85-87`) makes this safe
+by forcing `value = 0`, so the slot is neutral for value conservation. The prover-chosen
+nullifier is an obligation on the contract's double-spend set, not a modelling artefact;
+see `dummy_nullifier_unconstrained`.
 -/
 
 namespace Lelantos
@@ -78,8 +78,8 @@ structure SpentSlot (depth : ℕ) where
 /-- The constraint system of `SpentNote(depth)`, in source order.
 
 One named field per circom constraint, each citing its source line. `FIDELITY.md`'s
-constraint table is checked against this definition by eye, so it has to be readable a row
-at a time; positional projections into a nested conjunction retarget silently when a
+constraint table is checked against this definition row by row; named fields are used
+because positional projections into a nested conjunction retarget silently when a
 constraint is inserted. -/
 structure SpentNoteSat {depth : ℕ} (s : SpentSlot depth) : Prop where
   /-- `src/lib/spent.circom:46-47` — `ivk = Poseidon(TAG_IVK, nsk)`. -/
@@ -92,7 +92,7 @@ structure SpentNoteSat {depth : ℕ} (s : SpentSlot depth) : Prop where
   cm_def : s.cm = noteCommitment s.assetId s.value s.pk s.rho s.rcm
   /-- `:62-63` — value range. -/
   value_range : RangeCheck64Sat s.value s.valueBits
-  /-- `:68-69` — `HashToAssetGen`, which is also where `asset_id < 2^64` is enforced. -/
+  /-- `:68-69` — `HashToAssetGen`, which also enforces `asset_id < 2^64`. -/
   asset_bits : Num2BitsSat 64 s.assetId s.assetBits
   /-- `:68-69` — …and its output point. -/
   gen_def : s.gen = coords (assetGen s.assetId)
@@ -120,29 +120,27 @@ structure SpentNoteSat {depth : ℕ} (s : SpentSlot depth) : Prop where
 structure SpentReal {depth : ℕ} (s : SpentSlot depth) : Prop where
   /-- The prover knows the spend key: `pk` is the image of `nsk` under the key chain. -/
   owns : s.pk = pkOfNsk s.nsk
-  /-- Real notes carry a non-zero asset id, which is also what domain-separates `cm`. -/
+  /-- Real notes carry a non-zero asset id, which also domain-separates `cm`. -/
   assetNonzero : s.assetId ≠ 0
-  /-- Both packed fields are genuinely 64-bit, so the packing is injective. -/
+  /-- Both packed fields are 64-bit, so the packing is injective. -/
   valueRange : s.value.val < 2 ^ 64
   assetRange : s.assetId.val < 2 ^ 64
-  /-- The leaf really sits under the claimed root. -/
+  /-- The leaf sits under the claimed root. -/
   member : MerkleMember depth s.leaf s.pathElements s.pathIndices s.root
   /-- The leaf binds the commitment to its deposit value commitment. -/
   leafShape : s.leaf = leafHash s.cm s.cvDep.x s.cvDep.y
   /-- The commitment opens to the claimed note. -/
   commitment : s.cm = noteCommitment s.assetId s.value s.pk s.rho s.rcm
-  /-- The nullifier is the honest one for this note. -/
+  /-- The nullifier is the one derived from this note. -/
   nf : s.nullifier = nullifierOf (deriveNk s.nsk) s.rho s.cm
-  /-- Every path index is a valid quaternary digit, which is what lets
-  `merkleMember_inj` turn `member` into a binding statement rather than a bare
-  existential. -/
+  /-- Every path index is a valid quaternary digit, which lets `merkleMember_inj` turn
+  `member` into a binding statement rather than a bare existential. -/
   pathValid : ∀ d, d < depth → (s.pathIndices d).val < 4
   /-- **`cv` opens to this note's own value under this note's own asset generator.**
-  The point published on-chain commits to the `value` that `cm` binds, not to some
-  unrelated 64-bit number. -/
+  The point published on-chain commits to the `value` that `cm` binds. -/
   cvOpens : s.cv = coords ((s.value.val : ZMod ell) • assetGen s.assetId
     + (s.rcv.val : ZMod ell) • H)
-  /-- …and `cv_dep`, the one hashed into the leaf, opens to the same value. -/
+  /-- `cv_dep`, the commitment hashed into the leaf, opens to the same value. -/
   cvDepOpens : s.cvDep = coords ((s.value.val : ZMod ell) • assetGen s.assetId
     + (s.rcvDep.val : ZMod ell) • H)
 
@@ -187,9 +185,8 @@ theorem spentNote_isDummy_bit {depth : ℕ} {s : SpentSlot depth} (h : SpentNote
     s.isDummy = 0 ∨ s.isDummy = 1 :=
   merkleProofOrDummy_bit h.membership
 
-/-- Even a dummy slot emits a nullifier, and its value is chosen by the prover: `nsk` and
-`rho` are unconstrained in that branch, so the emitted `nullifier` is whatever the prover
-picked. Recorded as an explicit obligation rather than left implicit. -/
+/-- A dummy slot also emits a nullifier, chosen by the prover: `nsk` and `rho` are
+unconstrained in that branch. Stated explicitly as an obligation. -/
 theorem dummy_nullifier_unconstrained {depth : ℕ} {s : SpentSlot depth}
     (h : SpentNoteSat s) : s.nullifier = nullifierOf (deriveNk s.nsk) s.rho s.cm := by
   rw [← h.nf_def, h.nk_def]

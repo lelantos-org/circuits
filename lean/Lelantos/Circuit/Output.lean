@@ -4,23 +4,22 @@ import Lelantos.Gadgets.Note
 /-!
 # `src/lib/output.circom` — one output-note slot
 
-Simpler than `SpentNote`: no Merkle proof, no key chain, no dummy branch. `pk` is the
-recipient's key and is deliberately unconstrained — the circuit proves nothing about who
-can later spend the note, by design: `src/README.md § 1, "Out of scope"` puts spend
-authorization out of scope for v1.
+Unlike `SpentNote`: no Merkle proof, no key chain, no dummy branch. `pk` is the recipient's
+key and is unconstrained; the circuit proves nothing about who can later spend the note
+(`src/README.md § 1, "Out of scope"` excludes spend authorization for v1).
 
-Two things it does prove, and both matter:
+It proves:
 
-* `asset_id ≠ 0` **unconditionally** (unlike `SpentNote`, where the check is gated on
-  `1 - is_dummy`), which keeps `packed_av ≥ 2^64` and so keeps the `cm` preimage
-  domain-separated from tag-prefixed hashes.
+* `asset_id ≠ 0` unconditionally (in `SpentNote` the check is gated on `1 - is_dummy`),
+  which keeps `packed_av ≥ 2^64` and so keeps the `cm` preimage domain-separated from
+  tag-prefixed hashes.
 
-* `cv` and `cv_dep` are built from the *same* range-checked bit array and the *same*
-  generator — structurally so, since both come out of one `ValueCommitPair`
+* `cv` and `cv_dep` are built from the same range-checked bit array and the same
+  generator, structurally, since both come out of one `ValueCommitPair`
   (`src/lib/output.circom:59-66`) — so they cannot open to different
   `(asset, value)` pairs. That is `outputNote_cvDep_binds`, the transact half of
-  deposit binding. The value-inflation defences live in `tree_update_batch.circom`
-  and are **not** covered by this development.
+  deposit binding. The value-inflation checks in `tree_update_batch.circom` are not
+  covered by this module.
 -/
 
 namespace Lelantos
@@ -52,8 +51,8 @@ structure OutputSlot where
   assetInv : F
   assetIsZero : F
 
-/-- The constraint system of `OutputNote()`, in source order. Named fields for the same
-reason as `SpentNoteSat`: the fidelity table is checked against them row by row. -/
+/-- The constraint system of `OutputNote()`, in source order. Fields are named, as in
+`SpentNoteSat`, so the fidelity table can be checked against them row by row. -/
 structure OutputNoteSat (o : OutputSlot) : Prop where
   /-- `src/lib/output.circom:36-42` — `cm` binds the note. -/
   cm_def : noteCommitment o.assetId o.value o.pk o.rho o.rcm = o.cm
@@ -71,7 +70,7 @@ structure OutputNoteSat (o : OutputSlot) : Prop where
   with `rH` exported at `:71-72`. -/
   cv_sat : ValueCommitSat o.valueBits o.gen o.rcv o.rcvBits o.vT o.rH o.cv
   /-- `:59-66, 74-75` — deposit value commitment (`ValueCommitPair.cv_dep`), sharing the
-  same bits and generator structurally rather than by convention. -/
+  same bits and generator structurally. -/
   cv_dep_sat : ValueCommitSat o.valueBits o.gen o.rcvDep o.rcvDepBits o.vTDep o.rHDep o.cvDep
 
 /-- What an output slot establishes. -/
@@ -84,11 +83,10 @@ structure OutputWellFormed (o : OutputSlot) : Prop where
   `(asset, value)`. -/
   cvDepBinds : o.vT = o.vTDep
   /-- **`cv` opens to this note's own value under this note's own asset generator.**
-  Not "some 64-bit number times some point": the scalar is `value`, the range-checked
-  signal that `cm` also binds. -/
+  The scalar is `value`, the range-checked signal that `cm` also binds. -/
   cvOpens : o.cv = coords ((o.value.val : ZMod ell) • assetGen o.assetId
     + (o.rcv.val : ZMod ell) • H)
-  /-- …and so does `cv_dep`, with its own blinding factor and nothing else different. -/
+  /-- `cv_dep` opens likewise, differing only in its blinding factor. -/
   cvDepOpens : o.cvDep = coords ((o.value.val : ZMod ell) • assetGen o.assetId
     + (o.rcvDep.val : ZMod ell) • H)
 
@@ -116,13 +114,12 @@ deposit another. -/
 theorem outputNote_cvDep_binds {o : OutputSlot} (h : OutputNoteSat o) :
     o.vT = o.vTDep := (outputNote_sound h).cvDepBinds
 
-/-- **Deposit binding, stated where it can be read.** `cv` and `cv_dep` open to the *same*
-`(asset_id, value)` — the note's own — differing only in the blinding factor.
+/-- **Deposit binding, in terms of the note.** `cv` and `cv_dep` open to the same
+`(asset_id, value)`, the note's own, differing only in the blinding factor.
 
-`outputNote_cvDep_binds` alone is weaker than it looks: `vT = vTDep` is an equation between
-two scalar-multiplication intermediates, which holds because the model feeds both gadgets
-the same bit array. This version names the value being committed, so the statement is about
-the note rather than about the wiring. -/
+`outputNote_cvDep_binds` equates two scalar-multiplication intermediates (`vT = vTDep`),
+which holds because both gadgets receive the same bit array. This version names the
+committed value, so the statement is about the note rather than the wiring. -/
 theorem outputNote_cvDep_same_value {o : OutputSlot} (h : OutputNoteSat o) :
     ∃ r r' : ZMod ell,
       o.cv = coords ((o.value.val : ZMod ell) • assetGen o.assetId + r • H) ∧

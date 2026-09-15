@@ -9,45 +9,43 @@ import Lelantos.Gadgets.PolyEval
 `OutputNote`, and this file composes it with the public bucket, the two balance checks and
 the public-input compression.
 
-`transact_sound` is the top-level result. Given any assignment satisfying the modeled
-constraint system it produces `TxWellFormed`, whose fields are the actual security
-properties:
+`transact_sound` is the top-level result. Given any assignment satisfying the modelled
+constraint system it produces `TxWellFormed`, whose fields are the security properties:
 
 * every non-dummy input slot proves ownership and Merkle membership,
 * every dummy input slot carries value `0`,
-* every input slot is opened against the *same* root,
+* every input slot is opened against the same root,
 * every output slot is well-formed and its `rho` is the Orchard-style derivation,
-* **for every asset id in the field**, value is conserved as an equation over `ℕ`,
+* for every asset id in the field, value is conserved as an equation over `ℕ`,
 * the deposit value commitments are the ones the output notes computed,
 * and `y` is the polynomial evaluation of the declared 46-slot layout at `z`.
 
-Every one of those is arithmetic: `transact_sound` assumes **nothing about Poseidon**.
+All of these are arithmetic: `transact_sound` assumes nothing about Poseidon.
 
-The hash-binding properties — pairwise-distinct output `rho`s, Merkle membership being
-binding rather than merely existential, and a commitment pinning its whole note — live in
-the separate `TxBinding`, proved by `transact_binding` from an explicit collision-resistance
-hypothesis. That hypothesis is unsatisfiable (`poseidon_collision`), so `TxBinding` is
-assumed rather than proved; keeping it out of `TxWellFormed` is what stops the assumption
-from reaching conservation and every other consequence. See `Lelantos.Model.Poseidon`.
+The hash-binding properties (pairwise-distinct output `rho`s, binding Merkle membership,
+and a commitment pinning its whole note) are in the separate `TxBinding`, proved by
+`transact_binding` from an explicit collision-resistance hypothesis. That hypothesis is
+unsatisfiable (`poseidon_collision`), so `TxBinding` is assumed rather than proved; keeping
+it out of `TxWellFormed` prevents the assumption from reaching conservation and the other
+consequences. See `Lelantos.Model.Poseidon`.
 
-## What is *not* claimed
+## Not claimed
 
 * `PerAssetPointBalance` is included in the constraint model but no conclusion is drawn
-  from it — see `pointBalance_not_sound`. Conservation comes only from
+  from it (see `pointBalance_not_sound`). Conservation comes only from
   `PerAssetValueBalance`.
 * `rho` uniqueness across transactions reduces to the contract enforcing nullifier
   uniqueness, so it appears in `ContractObligations`, not as a theorem.
-* The FMD clue fields are bound by `PolyEval` and by nothing else. That is the circuit's
-  actual behaviour (`src/README.md § 1 "FMD clue binding"`), and the model says so.
-* `outAuxDigest` is likewise `PolyEval`-bound and nothing more. The circuit carries the
-  digest so that altering it changes `y`; that it *is* the hash of the payload the contract
-  received is checked on-chain, so it sits in `ContractObligations`.
-* **`y` is not claimed to determine the transaction.** Nothing here proves it does.
-  `polyEval_forge` shows what would follow if it did not: one coefficient the rest of the
-  system leaves free is one linear equation in one unknown, and `y` becomes whatever the
-  contract asks for. What rules that out is the *layout* — every slot it carries is pinned
-  by a constraint outside `TransactCompressN` — and that is a table below, checked by eye,
-  not a theorem. Compression is binding only under
+* The FMD clue fields are bound only by `PolyEval`, matching the circuit
+  (`src/README.md § 1 "FMD clue binding"`).
+* `outAuxDigest` is likewise only `PolyEval`-bound. The circuit carries the digest so that
+  altering it changes `y`; that it is the hash of the payload the contract received is
+  checked on-chain, so it is in `ContractObligations`.
+* `y` is not claimed to determine the transaction. By `polyEval_forge`, a coefficient the
+  rest of the system leaves free is one linear equation in one unknown, and `y` can be set
+  to any target. The layout rules that out, since every slot it carries is pinned by a
+  constraint outside `TransactCompressN`; that is the table below, checked by review, not a
+  theorem. Compression is binding only under
   `ContractObligations.challenge_binds_witness` and only while that table holds.
 * Everything is modulo the axioms in `Lelantos.Meta.Assumptions`.
 -/
@@ -58,58 +56,56 @@ variable {depth nIn nOut : ℕ}
 
 /-- The constraint system of `Transact(depth, nIn, nOut)`. -/
 structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
-  /-- `src/lib/transact.circom:90-122` — each spent slot, bound to the shared root. -/
+  /-- `src/lib/transact.circom:88-120` — each spent slot, bound to the shared root. -/
   spent_sat : ∀ i, i < nIn → SpentNoteSat (w.spent i)
   spent_root : ∀ i, i < nIn → (w.spent i).root = w.merkleRoot
-  /-- `:87-89` — `DummyZeroValue(N_IN)`. -/
+  /-- `:85-87` — `DummyZeroValue(N_IN)`. -/
   dummy_zero : DummyZeroValueSat nIn (fun i => (w.spent i).isDummy) (inValue w)
-  /-- `src/lib/transact.circom:129-140` — at least one input slot is real.
+  /-- `src/lib/transact.circom:126-137` — at least one input slot is real.
 
   `MerkleProofOrDummy` skips the root comparison on a dummy slot, so with every slot dummy
-  nothing reads `merkleRoot` and it becomes a free coefficient — the one slot of the layout
-  a prover could set to a chosen field element and solve `y = Σ c_k z^k` with. See the
-  pinning section below. -/
+  nothing reads `merkleRoot` and it would be a free coefficient, which a prover could set
+  to solve `y = Σ c_k z^k`. See the pinning section below. -/
   dummy_acc_base : w.dummyAcc 0 = 0
   dummy_acc_step : ∀ i, i < nIn → w.dummyAcc (i + 1) = w.dummyAcc i + (w.spent i).isDummy
   dummy_all_eq : IsEqualSat (w.dummyAcc nIn) (nIn : F) w.dummyAllInv w.dummyAllOut
   not_all_dummy : w.dummyAllOut = 0
-  /-- `:151-154` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
+  /-- `:146-149` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
   rho_derived : ∀ j, j < nOut → (w.out j).rho = deriveRho (w.spent 0).nullifier (j : F)
-  /-- `:156-166` — each output slot. -/
+  /-- `:151-161` — each output slot. -/
   out_sat : ∀ j, j < nOut → OutputNoteSat (w.out j)
-  /-- `:168-169` — the forwarded deposit commitments are the ones the outputs computed. -/
+  /-- `:163-164` — the forwarded deposit commitments are the ones the outputs computed. -/
   cv_dep_bound : ∀ j, j < nOut → w.outCvDep j = (w.out j).cvDep
-  /-- `:175-189` — the public bucket: generator, two `ValueTimesGen`s (each a
+  /-- `:168-181` — the public bucket: generator, two `ValueTimesGen`s (each a
   `RangeCheck64` plus a `ValueScalarMul`, `src/lib/balance.circom:24-41`). -/
   pub_gen : w.pubGen = coords (assetGen w.publicAssetId)
   /-- `HashToAssetGen` decomposes its argument with `Num2Bits(64)`
   (`src/lib/asset_gen.circom:18-19`), so the public bucket's asset id is range-checked
-  too. Modelled so that every `===` in the transitive closure is accounted for. -/
+  too. Modelled so that every `===` in the transitive closure is represented. -/
   pub_asset_range : Num2BitsSat 64 w.publicAssetId w.pubAssetBits
   pub_in_range : RangeCheck64Sat w.publicIn w.pubInBits
   pub_out_range : RangeCheck64Sat w.publicOut w.pubOutBits
   pub_in_mul : ValueScalarMulSat w.pubInBits w.pubGen w.pubInPt
   pub_out_mul : ValueScalarMulSat w.pubOutBits w.pubGen w.pubOutPt
-  /-- `src/lib/transact.circom:191-202` — the load-bearing conservation check. -/
+  /-- `src/lib/transact.circom:182-193` — the conservation check. -/
   value_balance : PerAssetValueBalanceSat nIn nOut (inAsset w) (inValue w) (outAsset w)
     (outValue w) w.publicAssetId w.publicIn w.publicOut w.vbPubInv w.vbPubEq
     w.vbInInv w.vbInEq w.vbOutInv w.vbOutEq w.vbInTerm w.vbOutTerm w.vbLhs w.vbRhs
-  /-- `src/lib/transact.circom:204-222` — the point equation, over the published coordinate
+  /-- `src/lib/transact.circom:195-213` — the point equation, over the published coordinate
   pairs, which is what the circuit compares. Included for fidelity; nothing is derived from
   it, because `pointBalance_not_sound` shows nothing can be.
 
-  This used to be stated over group elements, which cost six further fields asserting that
-  each published pair is the image under `coords` of a subgroup element — the only fields in
-  the model with no circom counterpart, and in the dangerous direction of `FIDELITY.md`'s
-  table, since `PerAssetPointBalance` imposes no such check. `Gadgets/PointBalance.lean`
-  now folds `PointSum` over `Pt` with `babyAdd`, exactly as
-  `src/lib/value_commit.circom:157-183` does, and the six are gone. -/
+  Stated over coordinates rather than group elements, so the model needs no fields
+  asserting that each published pair is the image under `coords` of a subgroup element
+  (which `PerAssetPointBalance` does not check). `Gadgets/PointBalance.lean` folds
+  `PointSum` over `Pt` with `babyAdd`, as
+  `src/lib/value_commit.circom:157-183` does. -/
   point_balance : PerAssetPointBalanceSat nIn nOut
     (fun i => (w.spent i).cv) (fun j => (w.out j).cv)
     (fun i => (w.spent i).rH) (fun j => (w.out j).rH)
     w.pubInPt w.pubOutPt
-  /-- `src/lib/transact.circom:225-243`, wired into `PolyEval` at
-  `src/lib/poly_eval.circom:110-111` — public-input compression. -/
+  /-- `src/lib/transact.circom:214-232`, wired into `PolyEval` at
+  `src/lib/poly_eval.circom:109-110` — public-input compression. -/
   compress : PolyEvalSat (piCount nIn nOut) (txCoeffs w) w.z w.peAcc w.y
 
 /-- The verifier's Fiat-Shamir derivation, as an abstract relation: `chal c z` holds when
@@ -118,34 +114,30 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
 `z = keccak256(abi.encode(c)) % r`, so it is a function of the vector alone. -/
 abbrev Challenge : Type := (ℕ → F) → F → Prop
 
-/-- Obligations the circuit cannot discharge, which the contract must.
-Listed so that no theorem below can silently assume them.
+/-- Obligations the circuit cannot discharge and the contract must, listed so that no
+theorem below assumes them implicitly.
 
-`challenge_binds_witness` is the one field here with content. The other three are stubs:
-they name a check without stating it, because what they range over — a nullifier set, an
-EVM `block.chainid`, a keccak preimage — has no counterpart in this development. Do not
-read a stub as discharged; read it as a claim made outside Lean. -/
+`challenge_binds_witness` is the only field with content. The other three are stubs that
+name a check without stating it, because what they range over (a nullifier set, an EVM
+`block.chainid`, a keccak preimage) has no counterpart in this development. A stub is a
+claim made outside Lean, not a discharged obligation. -/
 structure ContractObligations (chal : Challenge) (w : TxWitness depth nIn nOut) : Prop where
-  /-- `nullifier[i]` is unspent. Also what makes `rho` derivation collision-free across
+  /-- `nullifier[i]` is unspent. This also makes `rho` derivation collision-free across
   transactions, since `DeriveRho` anchors on `nullifier[0]`. -/
   nullifiers_fresh : True
-  /-- **The challenge covers *this witness's* coefficient vector.**
+  /-- **The challenge covers this witness's coefficient vector.**
 
-  Not "the contract hashed something", and not "`z` looks random": the vector fed to the
-  hash has to agree with `txCoeffs w`, the one the accepted proof evaluated. The contract
-  hashes the vector it reconstructs from calldata and never sees `txCoeffs w`, so nothing
-  on-chain establishes it directly. What makes it true in practice is the pinning argument
-  below: every coefficient is fixed by a constraint the prover cannot solve around, so the
-  only vector it can evaluate is the one describing the transaction it actually has.
+  The vector fed to the hash must agree with `txCoeffs w`, the one the accepted proof
+  evaluated. The contract hashes the vector it reconstructs from calldata and never sees
+  `txCoeffs w`, so nothing on-chain establishes this directly. It follows from the pinning
+  argument below: every coefficient is fixed by a constraint the prover cannot solve
+  around, so the only vector it can evaluate is the one describing its transaction.
 
-  `chal` ranges over more than `txCoeffs w`. The contract's preimage is 69 words at the
-  shipped shape against 46 coefficients — the addresses, the FMD clues and the payload
-  digest are hashed and never evaluated, which is how they bind with no constraint at all.
-  This field states only the part that has to agree.
-
-  It was `challenge_is_fiat_shamir : True` until `polyEval_forge` was proved. A stub was the
-  wrong shape: it reads as a check somebody performs, whereas the property is a relation
-  between the challenge and the *witness*. -/
+  The property is a relation between the challenge and the witness, not a check performed,
+  so it is stated rather than stubbed. `chal` ranges over more than `txCoeffs w`: the
+  contract's preimage is 70 words at the deployed shape against 46 coefficients, since the
+  addresses, the FMD clues and the payload digest are hashed but not evaluated, which binds
+  them without a constraint. This field states only the part that must agree. -/
   challenge_binds_witness : chal (txCoeffs w) w.z
   /-- `chain_id = block.chainid` and `recipient_address < 2^160`.
 
@@ -153,16 +145,16 @@ structure ContractObligations (chal : Challenge) (w : TxWitness depth nIn nOut) 
   `w.chainId` / `w.recipient` unless `challenge_binds_witness` holds. -/
   address_and_chain_checked : True
   /-- `out_aux_digest` is recomputed from the `aux` calldata, not taken from it. The
-  coefficient binds whatever value the prover put there; only this check ties that value to
-  the encrypted-note payload the recipient will actually receive. Without it a relayer keeps
-  the `PolyEval`-bound clue intact — so the recipient still flags the note — while corrupting
+  coefficient binds whatever value the prover supplied; only this check ties that value to
+  the encrypted-note payload the recipient receives. Without it a relayer could keep the
+  `PolyEval`-bound clue intact (so the recipient still flags the note) while corrupting
   `ephPub` and the ciphertext, leaving a note that cannot be opened after its inputs are
-  already spent. -/
+  spent. -/
   aux_digest_recomputed : True
 
 /-- What a satisfying assignment proves. -/
 structure TxWellFormed (w : TxWitness depth nIn nOut) : Prop where
-  /-- Non-dummy inputs are genuine, owned, in-tree notes. -/
+  /-- Non-dummy inputs are owned, in-tree notes. -/
   realSlots : ∀ i, i < nIn → (w.spent i).isDummy = 0 → SpentReal (w.spent i)
   /-- Dummy inputs carry no value, so they are neutral for conservation. -/
   dummySlots : ∀ i, i < nIn → (w.spent i).isDummy = 1 → (w.spent i).value = 0
@@ -183,31 +175,30 @@ structure TxWellFormed (w : TxWitness depth nIn nOut) : Prop where
   compression : w.y = polyEval (txCoeffs w) (piCount nIn nOut) w.z
   /-- **Every input slot is covered by exactly one of the two cases above.** Without this
   the conclusion is silent about a slot whose `is_dummy` is neither `0` nor `1`, and
-  "each input is a genuine note or carries no value" would not follow from `realSlots`
+  "each input is a real note or carries no value" would not follow from `realSlots`
   and `dummySlots` alone. -/
   dummyIsBit : ∀ i, i < nIn → (w.spent i).isDummy = 0 ∨ (w.spent i).isDummy = 1
   /-- The public bucket's asset id is 64-bit, matching the on-chain `uint64`. -/
   publicAssetRange : w.publicAssetId.val < 2 ^ 64
-  /-- **At least one input slot is real.** Not a value property: it is what keeps
-  `merkleRoot` pinned, since a dummy slot's Merkle check is skipped and an all-dummy witness
-  leaves the advertised root constrained by nothing. See the pinning section. -/
+  /-- **At least one input slot is real.** This keeps `merkleRoot` pinned: a dummy slot's
+  Merkle check is skipped, so an all-dummy witness leaves the advertised root
+  unconstrained. See the pinning section. -/
   someRealInput : ∃ i, i < nIn ∧ (w.spent i).isDummy = 0
 
 /-- The **hash-binding layer**: everything that needs Poseidon collision resistance, kept
-out of `TxWellFormed` on purpose.
+out of `TxWellFormed`.
 
-The split is load-bearing. `TxWellFormed` is arithmetic: it depends on `p_prime` and the
-Baby Jubjub gadget axioms, and on nothing about the hash. Folding these three fields into it
-would make every downstream consequence — `no_asset_creation` included — inherit a
-cryptographic hypothesis it does not need. `transact_binding` supplies this layer
-separately. -/
+`TxWellFormed` is arithmetic: it depends on `p_prime` and the Baby Jubjub gadget axioms,
+and on nothing about the hash. Folding these three fields into it would make every
+downstream consequence, `no_asset_creation` included, inherit an unneeded cryptographic
+hypothesis. `transact_binding` supplies this layer separately. -/
 structure TxBinding (w : TxWitness depth nIn nOut) : Prop where
-  /-- **Output `rho`s are pairwise distinct.** This is the entire purpose of `DeriveRho`:
-  two outputs of one transaction can never end up sharing a future nullifier. -/
+  /-- **Output `rho`s are pairwise distinct**, which is the purpose of `DeriveRho`: two
+  outputs of one transaction cannot share a future nullifier. -/
   rhoDistinct : ∀ j j', j < nOut → j' < nOut → j ≠ j' → (w.out j).rho ≠ (w.out j').rho
   /-- **Membership is binding, not merely existential.** Any other leaf provable at the
-  same position under the same root is *this* leaf. Without this, `realSlots`' `member`
-  field would say almost nothing. -/
+  same position under the same root is this leaf. Without this, `realSlots`' `member`
+  field only asserts that some chain exists. -/
   membershipBinding : ∀ i, i < nIn → (w.spent i).isDummy = 0 →
     ∀ (leaf' : F) (pe' : ℕ → ℕ → F),
       MerkleMember depth leaf' pe' (w.spent i).pathIndices w.merkleRoot →
@@ -269,9 +260,9 @@ theorem transact_sound {w : TxWitness depth nIn nOut}
 /-- **The binding layer**, under the collision-resistance hypothesis.
 
 `hnc` is unsatisfiable (`poseidon_collision`), so this theorem is vacuous read literally.
-The assumption is placed in the statement rather than in an axiom so that it cannot leak
-into `transact_sound` or anything else; `Lelantos.Model.Poseidon`'s module note records why the
-alternatives — an axiom, or a `∨ PoseidonCollision` conclusion — are worse. -/
+The assumption is placed in the statement rather than in an axiom so that it does not reach
+`transact_sound` or anything else; `Lelantos.Model.Poseidon`'s module note explains why the
+alternatives (an axiom, or a `∨ PoseidonCollision` conclusion) are unsuitable. -/
 theorem transact_binding {w : TxWitness depth nIn nOut} (hnc : ¬ PoseidonCollision)
     (hnOut : nOut ≤ 7) (h : TransactSat w) : TxBinding w where
   rhoDistinct := by
@@ -295,9 +286,8 @@ theorem transact_binding {w : TxWitness depth nIn nOut} (hnc : ¬ PoseidonCollis
 /-! ## Corollaries -/
 
 /-- **No asset creation.** If an asset id appears on no input slot and is not the public
-bucket's asset, then no output can carry it. Immediate from `conservation`, but worth
-stating: it is the "you cannot mint a new asset out of nothing" property, and it holds
-over `ℕ` so no wrap-around escape exists. -/
+bucket's asset, then no output can carry a non-zero value of it. Immediate from
+`conservation`; it holds over `ℕ`, so no wrap-around is possible. -/
 theorem no_asset_creation {w : TxWitness depth nIn nOut}
     (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7) (h : TransactSat w) (a : F)
     (hnotIn : ∀ i, i < nIn → inAsset w i ≠ a) (hnotPub : w.publicAssetId ≠ a) :
@@ -319,9 +309,9 @@ theorem no_asset_creation {w : TxWitness depth nIn nOut}
   rw [if_pos ha, mul_one] at hterm
   exact val_inj (by simpa using hterm)
 
-/-- **Public-input binding at the transaction level.** If two transactions with *different*
+/-- **Public-input binding at the transaction level.** If two transactions with different
 public inputs are accepted against the same `(z, y)`, then `z` is one of at most
-`piCount - 1` field elements, 68 out of `p ≈ 2^253.6` at `Transact(11, 4, 6)`.
+`piCount - 1` field elements, 45 out of `p ≈ 2^253.6` at `Transact(11, 4, 6)`.
 
 The security reading needs `ContractObligations.challenge_binds_witness`: the prover must
 not be able to pick `z` after fixing the coefficients. The circuit cannot enforce that, so
@@ -343,13 +333,12 @@ theorem transact_pi_binding {w w' : TxWitness depth nIn nOut}
   rw [← e1, hy, e2, hz]
 
 /-- **Public-input binding, stated per named field.** `transact_pi_binding` needs a
-coefficient index at which the two transactions differ. This form takes the difference where
-it is actually observed — in one named public input — and produces the index from
-`slotIndex`.
+coefficient index at which the two transactions differ. This form takes the difference in
+one named public input and produces the index from `slotIndex`.
 
-So: two accepted transactions that disagree about the Merkle root, any nullifier, any output
-commitment, the public bucket, any value commitment, the addresses, or any clue field cannot
-share `(z, y)` unless `z` is one of at most `piCount - 1` field elements. -/
+Two accepted transactions that disagree about the Merkle root, any nullifier, any output
+commitment, the public bucket, or any value commitment cannot share `(z, y)` unless `z` is
+one of at most `piCount - 1` field elements. -/
 theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
     (h : TransactSat w) (h' : TransactSat w')
     (hz : w.z = w'.z) (hy : w.y = w'.y)
@@ -365,19 +354,18 @@ theorem transact_pi_binding_slot {w w' : TxWitness depth nIn nOut}
 
 /-! ## Pinning: why the compression binds
 
-`transact_pi_binding` is what `PolyEval` buys, and on its own it buys nothing. It is
-quantified with both coefficient vectors fixed and then asks how many challenges collide;
-the prover gets the opposite order, because `z` is an input it reads before choosing a
-witness. The contract derives `z` from calldata the prover authored.
+`transact_pi_binding` alone is insufficient. It fixes both coefficient vectors and then
+counts colliding challenges; the prover works in the opposite order, because `z` is an
+input it reads before choosing a witness. The contract derives `z` from calldata the prover
+authored.
 
-What closes the gap is that `PolyEval` is affine in each coefficient with slope `z ^ k`
-(`polyEval_update`), so a coefficient the rest of the constraint system leaves free is one
-linear equation in one unknown: `polyEval_forge` solves it, and `y` becomes whatever the
-contract asks for, for a completely unrelated transaction. No collision, no low-probability
-event — arithmetic.
+`PolyEval` is affine in each coefficient with slope `z ^ k` (`polyEval_update`), so a
+coefficient the rest of the constraint system leaves free is one linear equation in one
+unknown: `polyEval_forge` solves it, and `y` can be set to any target for an unrelated
+transaction, with no collision required.
 
-So the compression is binding exactly when **every** coefficient is pinned, and that is a
-property of which slots the layout contains, not of `PolyEval`. At the shipped layout:
+The compression is therefore binding exactly when every coefficient is pinned, which is a
+property of the slots the layout contains, not of `PolyEval`. At the deployed layout:
 
 | slot | pinned by |
 |---|---|
@@ -389,31 +377,29 @@ property of which slots the layout contains, not of `PolyEval`. At the shipped l
 | `inCv i` / `outCv j` | `SpentNoteSat.cv_sat` / `OutputNoteSat.cv_sat`, a `ValueCommit` |
 | `outCvDepX/Y j` | `cv_dep_bound`, likewise |
 
-Pinned does not mean constant. A prover picks its own notes, so it picks the values these
-hash and commit to — what it cannot do is *steer* one to a chosen field element, because
-each is a Poseidon or Pedersen image of signals that reach no other coefficient. Hitting a
-target needs a preimage or a discrete log, not a division.
+Pinned does not mean constant. A prover picks its own notes, and so the values these hash
+and commit to, but cannot steer one to a chosen field element, because each is a Poseidon
+or Pedersen image of signals that reach no other coefficient. Hitting a target requires a
+preimage or a discrete log, not a division.
 
-The three 64-bit slots are the residue: `publicAssetId` is genuinely free within its range
-when `publicIn = publicOut = 0`, and `(publicIn, publicOut)` can be shifted together
-without disturbing conservation. That is 128 bits of freedom against a 254-bit modulus, so
-a solution to the one linear equation exists for about `2⁻¹²⁶` of challenges. This is the
-development's honest bound on the compression, and `pub_in_range` / `pub_out_range` /
-`pub_asset_range` are what keep it there rather than at 1.
+The three 64-bit slots are the exception: `publicAssetId` is free within its range when
+`publicIn = publicOut = 0`, and `(publicIn, publicOut)` can be shifted together without
+disturbing conservation. That is 128 bits of freedom against a 254-bit modulus, so a
+solution to the linear equation exists for about `2⁻¹²⁶` of challenges. This is the
+development's bound on the compression; `pub_in_range` / `pub_out_range` /
+`pub_asset_range` keep it there rather than at 1.
 
 The four address words, the FMD clue triples and the payload digest are not in the table
 because they are not coefficients. `4x6.circom` constrains none of them, so as coefficients
-they were 23 free unknowns at once; `PubInputs.sol` hashes them into `z` instead, which
-binds them against a tampering relayer and needs no constraint at all. `piCount` records
-the rule.
+they would be free unknowns; `PubInputs.sol` hashes them into `z` instead, which binds them
+against a tampering relayer without a constraint. `piCount` records the rule.
 -/
 
 /-! ## The instantiated shapes
 
-`transact_sound` is stated for `nIn ≤ 7`, `nOut ≤ 7` — the bound comes from
-`perAssetValueBalance_nat`, where it is what keeps each side of the balance equation below
-`p`. Seven is where that argument's rounding to `8 · 2^64` runs out, not where any shape
-sits; the shipped shape is comfortably inside it. -/
+`transact_sound` is stated for `nIn ≤ 7`, `nOut ≤ 7`. The bound comes from
+`perAssetValueBalance_nat`, where it keeps each side of the balance equation below `p`
+(rounding to `8 · 2^64`); the deployed shape is within it. -/
 
 /-- `Transact(11, 4, 6)` — `src/4x6.circom`. **The target shape.**
 
@@ -423,8 +409,8 @@ slot costs roughly 3.4x an output slot, carrying a Merkle path the output side d
 Depth 11 because an unused output slot is a real value-0 leaf, so six outputs would
 otherwise cut the tree's lifetime by a third.
 
-100,320 constraints, inside 2^17. It is the shape that fixes the `≤ 6` end of the slot
-bound `transact_sound` carries — the bound itself is stated at 7, where the proof reaches. -/
+100,320 constraints, inside 2^17. It requires `≤ 6` slots per side; `transact_sound` is
+stated at 7, the limit of the proof. -/
 abbrev Transact4x6 := TxWitness 11 4 6
 
 /-- **Soundness of the `4x6` instance.** -/

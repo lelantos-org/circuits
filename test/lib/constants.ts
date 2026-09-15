@@ -8,9 +8,9 @@ import type { Field } from "../helpers";
 // ===== circuit dimensions =====
 
 /**
- * Quaternary tree depth. `Transact(11, 4, 6)` and `TreeUpdateBatch(11, 8)` share
- * it — they must, since a spend's output leaves are inserted by the batch
- * circuit. 4^11 = 4,194,304 leaves.
+ * Quaternary tree depth, shared by `Transact(11, 4, 6)` and
+ * `TreeUpdateBatch(11, 8)` because a spend's output leaves are inserted by the
+ * batch circuit. 4^11 = 4,194,304 leaves.
  */
 export const DEPTH = 11;
 
@@ -36,9 +36,9 @@ export const ARITY = 4;
  * Max leaves per batch — the second argument to `TreeUpdateBatch` at the bottom
  * of `src/tree_update_batch.circom`.
  *
- * At its floor: COUNT_BITS below requires a power of two, and a spend emits
- * TRANSACT_OUT = 6 leaves that must fit one batch. Six is not a power of two,
- * so the floor is 8.
+ * The minimum valid value: COUNT_BITS below requires a power of two, and a
+ * spend emits TRANSACT_OUT = 6 leaves that must fit one batch, so the minimum
+ * is 8.
  */
 export const MAX_L = 8;
 

@@ -1,21 +1,17 @@
-// Why a malleable finding is allowed to exist.
+// Explanations for malleable findings.
 //
 // A `malleable` finding from `underconstrained.ts` is a second witness for the
-// SAME public statement: some hidden entry moves and `y` and `z` do not. That is
-// not a value break, but it is not automatically harmless either, so every one
-// has to be EXPLAINED before a suite lets it pass.
+// same public statement: a hidden entry moves while `y` and `z` do not. That is
+// not a value break but is not necessarily harmless, so each one must be
+// explained before a suite passes.
 //
-// The bar an explainer has to clear is that it names a PRECONDITION and has it
-// checked against the witness in hand. An earlier version of the suite instead
-// allow-listed signal families like `main.vbal.in_eq[*][*].isz.inv` and accepted
-// any number of findings inside them. That trusts a name: a genuinely
-// underconstrained signal that happened to land in an allow-listed family would
-// have passed unexamined, and the list would have grown every time someone
-// wanted a green run.
+// An explainer names a precondition and checks it against the witness in hand.
+// Allow-listing signal families by name (e.g. `main.vbal.in_eq[*][*].isz.inv`)
+// is not accepted: an underconstrained signal inside such a family would pass
+// unexamined.
 //
-// Adding one is deliberately more work than widening a list would be — that is
-// the point. State the gadget's constraints, derive when the signal is free,
-// find a witness entry that decides it, and check that entry.
+// To add an explainer: state the gadget's constraints, derive when the signal is
+// free, find a witness entry that decides it, and check that entry.
 
 import type { Finding } from "./underconstrained";
 import type { SymbolTable } from "./r1cs";
@@ -23,9 +19,8 @@ import type { SymbolTable } from "./r1cs";
 /**
  * Accounts for a finding, or returns null to leave it unexplained.
  *
- * Returning a string is an assertion that the finding is harmless AND that the
- * reason was verified against `witness` — not that the signal's name looked
- * familiar.
+ * Returning a string asserts that the finding is harmless and that the reason
+ * was verified against `witness`, not inferred from the signal's name.
  */
 export type Explainer = (
     f: Finding,
@@ -42,21 +37,20 @@ export type Explainer = (
  *     in · inv === 1 - out          in · out === 0
  *
  * At `in != 0` the first pins `inv` to `1/in`. At `in = 0` it reads
- * `0 === 1 - out`, which pins `out` to 1 and says nothing whatever about `inv`.
- * So `inv` is free EXACTLY when `in = 0`, equivalently when `out = 1` — and a
- * free `inv` reaches nothing else, since `out` stays pinned either way, so the
- * public statement cannot move with it.
+ * `0 === 1 - out`, which pins `out` to 1 and leaves `inv` unconstrained. So
+ * `inv` is free exactly when `in = 0`, equivalently `out = 1`. A free `inv`
+ * reaches nothing else, since `out` is pinned either way, so the public
+ * statement cannot change with it.
  *
- * Either sibling decides the precondition, and which one SURVIVES depends on the
- * instance: `--O2` deletes whichever was a linear alias, and it is not the same
- * one each time. `main.vbal.*.isz` keeps `in` while its `out` is folded into the
- * sum it feeds; `main.spent[*].asset_nz` is the mirror image, `in` gone (varIdx
- * -1) and `out` kept. So read whichever is still there, and refuse when neither
- * is rather than assuming a layout.
+ * Either sibling decides the precondition, and which one remains depends on the
+ * instance: `--O2` removes whichever is a linear alias. `main.vbal.*.isz` keeps
+ * `in` while its `out` is folded into the sum it feeds; `main.spent[*].asset_nz`
+ * keeps `out` and drops `in` (varIdx -1). The explainer reads whichever is
+ * present and returns null when neither is.
  */
 export const isZeroHint: Explainer = (f, witness, symbols) => {
-    // The freedom this argument describes is total: any field element does. A
-    // single alternative value is a different phenomenon and is not covered.
+    // The argument covers total freedom (any field element). A single
+    // alternative value is a different case and is not covered.
     if (f.kind !== "unconstrained") return null;
     if (f.support.length !== 1) return null;
 
@@ -81,8 +75,8 @@ export const isZeroHint: Explainer = (f, witness, symbols) => {
     return null;
 };
 
-// No explainer for a free `frontier_in[d][k]`: `BatchAppend` pins every unread slot to zero,
-// so a free frontier slot is always a regression and must stay unexplained.
+// No explainer for a free `frontier_in[d][k]`: `BatchAppend` pins every unread
+// slot to zero, so a free frontier slot indicates a missing constraint.
 
 /** Every explanation the suites accept. */
 export const EXPLAINERS: readonly Explainer[] = [isZeroHint];

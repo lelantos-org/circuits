@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Fail if the trusted base changed.
+# Fails if the trusted base differs from the checked-in expectation.
 #
-# `#print axioms` is the only authoritative statement of what this development assumes.
-# This script captures it and diffs against the checked-in expectation, so an axiom can
-# never be added without the diff showing up in review.
+# Captures the `#print axioms` output, the authoritative list of what the development
+# assumes, and diffs it against `expected/axioms.txt`, so any added axiom appears in review.
 #
 # Regenerate after an intentional change:  lean/scripts/check-axioms.sh --update
 set -euo pipefail

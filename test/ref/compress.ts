@@ -3,7 +3,7 @@
 // Transcribed from src/lib/poly_eval.circom. The same orders appear in
 // contracts/src/lib/PubInputs.sol :: compress and in Lelantos.piSlot
 // (lean/Lelantos/Circuit/Witness.lean). lean/expected/layout-*.txt pins the Lean
-// side; src/test/formal/layout_parity.test.ts ties it to this module.
+// side; test/formal/layout_parity.test.ts ties it to this module.
 
 import { keccak_256 } from "@noble/hashes/sha3";
 import { BN254_FR, type Field } from "./field.js";
@@ -27,6 +27,7 @@ export interface FlattenInput {
     chain_id: Loose;
     payer_address: Loose;
     relayer_address: Loose;
+    intent_hash: Loose;
     out_cv_dep: readonly (readonly Loose[])[];
     out_clue_Rx: readonly Loose[];
     out_clue_Ry: readonly Loose[];
@@ -36,12 +37,11 @@ export interface FlattenInput {
 
 /**
  * The Fiat-Shamir challenge preimage: every logical public input, in calldata
- * order. Total = 9 + 3·N_IN + 8·N_OUT; 69 at (N_IN, N_OUT) = (4, 6).
+ * order. Total = 10 + 3·N_IN + 8·N_OUT; 70 at (N_IN, N_OUT) = (4, 6).
  *
- * Superset of `coeffs` below. The four address words, the clue triples and the
- * aux digest are hashed here but never evaluated, which is what binds them
- * without the circuit having to constrain them: change one and `z` moves, so
- * `y` moves, so the proof fails.
+ * Superset of `coeffs` below. The five unpinned struct words, the clue triples
+ * and the aux digest are hashed here but not evaluated. This binds them without
+ * circuit constraints: changing one changes `z`, hence `y`, and the proof fails.
  *
  * Arity is taken from the input array lengths, matching the circom template's
  * genericity over (N_IN, N_OUT).
@@ -73,13 +73,14 @@ export function flatten(input: FlattenInput): Field[] {
         big(input.chain_id),
         big(input.payer_address),
         big(input.relayer_address),
+        big(input.intent_hash),
     );
     for (let j = 0; j < nOut; j++) {
         c.push(big(input.out_clue_Rx[j]), big(input.out_clue_Ry[j]), big(input.out_clue_bits[j]));
     }
     c.push(big(input.out_aux_digest));
 
-    const expected = 9 + 3 * nIn + 8 * nOut;
+    const expected = 10 + 3 * nIn + 8 * nOut;
     if (c.length !== expected) {
         throw new Error(`flatten: produced ${c.length} coeffs, expected ${expected}`);
     }
@@ -92,10 +93,10 @@ export function flatten(input: FlattenInput): Field[] {
  *
  * The strict subset of `flatten` the polynomial is evaluated over: exactly the
  * slots `4x6.circom` pins with a constraint of its own. `PolyEval` is affine in
- * each coefficient and `z` is read by the prover before the witness is chosen,
- * so an unpinned coefficient is one linear equation in one unknown and the
- * compression stops binding anything. `recipient_address`, `chain_id`,
- * `payer_address`, `relayer_address`, `out_aux_digest` and the clue fields carry
+ * each coefficient and the prover knows `z` before choosing the witness, so an
+ * unpinned coefficient is one linear equation in one unknown and the
+ * compression binds nothing. `recipient_address`, `chain_id`, `payer_address`,
+ * `relayer_address`, `intent_hash`, `out_aux_digest` and the clue fields carry
  * no circuit constraint, so they are absent here and bound through `flatten`.
  */
 export function coeffs(input: FlattenInput): Field[] {
@@ -103,12 +104,10 @@ export function coeffs(input: FlattenInput): Field[] {
     const nOut = input.out_cm.length;
     const expected = 4 + 3 * nIn + 5 * nOut;
 
-    // The leading words of the preimage, not a second walk over the same order.
-    // `PubInputs.Transact` orders its members so the pinned ones come first
-    // precisely so this is a prefix — see `TRANSACT_COEFFS` — and taking it as a
-    // slice makes that structural instead of a property two functions have to
-    // keep agreeing on. `test/transact/binding.test.ts` asserts the prefix
-    // relation against the compiled circuit.
+    // The leading words of the preimage. `PubInputs.Transact` orders pinned
+    // members first so they form a prefix (see `TRANSACT_COEFFS`); slicing makes
+    // the prefix relation structural. `test/transact/binding.test.ts` asserts it
+    // against the compiled circuit.
     const c = flatten(input).slice(0, expected);
     if (c.length !== expected) {
         throw new Error(`coeffs: produced ${c.length} coeffs, expected ${expected}`);
@@ -132,10 +131,9 @@ export interface FlattenBatchInput {
 /**
  * Slot names of the batch challenge preimage, in order.
  *
- * The order `flattenBatch` emits values in, declared beside it so the names
- * published in `vectors/` and the values they label stay together. The vector
- * generator reads this directly. All `4 + 6·maxL` are coefficients — see
- * `batchCoeffs` for why none is demoted.
+ * Matches the order `flattenBatch` emits values in, so the names published in
+ * `vectors/` label the right values. The vector generator reads this directly.
+ * All `4 + 6·maxL` slots are coefficients; see `batchCoeffs`.
  */
 export function batchLayoutNames(maxL: number): string[] {
     const names = ["oldRoot", "newRoot", "startIndex", "actualCount"];
@@ -157,8 +155,8 @@ export function batchLayoutNames(maxL: number): string[] {
  * leaves, odd counts included. `batchLayoutNames` above names these slots in
  * the same order; a change to one requires the same change to the other.
  *
- * `batchCoeffs` below is the vector the polynomial is evaluated over, and for
- * this shape it is the whole of this one.
+ * `batchCoeffs` below is the vector the polynomial is evaluated over; for this
+ * shape it equals this preimage.
  */
 export function flattenBatch(input: FlattenBatchInput): Field[] {
     const maxL = input.cms.length;
@@ -197,33 +195,30 @@ export function flattenBatch(input: FlattenBatchInput): Field[] {
  * coefficient vector and the challenge preimage coincide, because every word is
  * pinned by a constraint of its own.
  *
- * Kept as a separate function from `flattenBatch` rather than an alias. The two
- * answer different questions — "what is hashed into `z`" and "what is evaluated
- * into `y`" — and they are equal here only as a consequence of every word being
- * pinned. Aliasing them would make a future demotion look like a refactor
- * instead of the soundness argument it is.
+ * A separate function rather than an alias of `flattenBatch`: one defines what
+ * is hashed into `z`, the other what is evaluated into `y`, and they coincide
+ * only because every word is pinned. Excluding a word from this vector changes
+ * the soundness argument and belongs here.
  *
- * Why nothing is demoted. `4x6.circom` excludes its trailing challenge words
- * because they are not signals of the circuit at all, so no witness copy exists
- * to disagree with calldata. That does not carry over: `leaf_asset`,
- * `leaf_public_in` and `is_deposit` ARE signals of `tree_update_batch.circom`,
- * and hashing a signal into `z` binds nothing, since the prover reads `z` first
- * and may choose a witness that disagrees with the calldata it was hashed from.
+ * No word is excluded. `4x6.circom` excludes its trailing challenge words
+ * because they are not circuit signals, so no witness copy can disagree with
+ * calldata. `leaf_asset`, `leaf_public_in` and `is_deposit` are signals of
+ * `tree_update_batch.circom`, and hashing a signal into `z` binds nothing: the
+ * prover knows `z` first and may choose a witness that disagrees with the
+ * calldata it was hashed from.
  *
- * Why they are genuinely pinned. The gated deposit binding pins
- * `leaf_public_in[k]` and `leaf_asset[k]` against `cv_dep[k]` under discrete-log
- * hardness, but degenerates on its own: `ValueTimesGen(0, gen)` is the curve
- * identity for every `gen`, so at `leaf_public_in[k] === 0` the equality reduces
- * to `cv_dep[k] == rcv[k]·H` and `leaf_asset[k]` retains only a 64-bit range
- * check — and a range check is not a pin. Step 6a of the circuit closes that per
- * slot: on an active deposit leaf, `leaf_asset == 0` exactly when
- * `leaf_public_in == 0`, so a worthless leaf's asset is pinned to a constant and
- * a valued one's is pinned by the binding.
+ * Each word is pinned. The gated deposit binding pins `leaf_public_in[k]` and
+ * `leaf_asset[k]` against `cv_dep[k]` under discrete-log hardness, but
+ * degenerates alone: `ValueTimesGen(0, gen)` is the curve identity for every
+ * `gen`, so at `leaf_public_in[k] === 0` the equality reduces to
+ * `cv_dep[k] == rcv[k]·H` and `leaf_asset[k]` is only range-checked to 64 bits,
+ * which does not pin it. Step 6a of the circuit covers this per slot: on an
+ * active deposit leaf, `leaf_asset == 0` exactly when `leaf_public_in == 0`, so
+ * a zero-value leaf's asset is pinned to a constant and a valued leaf's asset is
+ * pinned by the binding.
  */
 export function batchCoeffs(input: FlattenBatchInput): Field[] {
-    // The whole preimage. Kept as its own function, not an alias: the two
-    // answer different questions, and a future demotion is written here as a
-    // slice with its argument made at the docblock above.
+    // The whole preimage; see the docblock above.
     return flattenBatch(input);
 }
 
@@ -247,9 +242,9 @@ export function hornerEval(coeffs: Field[], z: Field): Field {
  * The element order is big-endian, unlike the little-endian encoding used
  * elsewhere in this directory.
  *
- * Exposed separately because the circuit places no constraint on `z`, so an
- * encoding error is not detectable through witness generation. The vectors
- * record this preimage, which localises a mismatch to the encoding.
+ * Exported separately because the circuit does not constrain `z`, so witness
+ * generation cannot detect an encoding error. The vectors record this preimage,
+ * which localises a mismatch to the encoding.
  */
 export function abiEncodeCoeffs(coeffs: Field[]): Uint8Array {
     const out = new Uint8Array(64 + coeffs.length * 32);

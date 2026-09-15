@@ -36,6 +36,11 @@ export const DEFAULT_ASSET: Field = 7n;
 // a default.
 export const TEST_AUX_DIGEST: Field = 0xa17d19e57n;
 
+// Stand-in for a swap's intent hash in the published vectors. A full-width word
+// (top bits set, still below r), so a consumer that masks the slot to an address
+// or drops it fails.
+export const TEST_INTENT_HASH: Field = 0x2f00000000000000000000000000000000000000000000000000000000c0ffeen;
+
 export interface TxBuildArgs {
     inputs: SpentNote[];
     outputs: Note[];
@@ -191,7 +196,7 @@ export class TxBuilder {
 
     /**
      * `N_IN` real inputs and `N_OUT` real outputs, balanced: every slot the
-     * shape declares holds a genuine note.
+     * shape declares holds a real note.
      *
      * `balanced()` and the scenario factories above fill at most two input and
      * two output slots, leaving the rest to `padInputs` / `padOutputs`. A dummy
@@ -246,10 +251,9 @@ const FULL_SHAPE_IN_VALUES = [100n, 50n, 30n, 20n];
 const FULL_SHAPE_OUT_VALUES = [60n, 50n, 40n, 30n, 15n, 5n];
 
 /**
- * The two tables above are written out rather than generated, so a change to
- * `N_IN` or `N_OUT` leaves them the wrong length and `fullShape` silently stops
- * filling every slot — which is the one thing it exists to do. Fail loudly
- * instead.
+ * The two tables above are listed explicitly rather than generated, so a change
+ * to `N_IN` or `N_OUT` leaves them the wrong length and `fullShape` would no
+ * longer fill every slot. This check throws in that case.
  */
 function assertFullShapeValues(): void {
     const sum = (xs: bigint[]) => xs.reduce((a, b) => a + b, 0n);
@@ -283,27 +287,27 @@ export function rebindFiatShamir(input: TransactWitnessBundle): TransactWitnessB
  *
  * A structural clone rather than a field-by-field copy, because unlike the batch
  * every field `flatten`/`coeffs` read is already a logical public input; there
- * is no private state in the bundle to exclude. Deep enough that the caller can
- * mutate one view without disturbing the other, which is the whole point.
+ * is no private state in the bundle to exclude. The clone is deep, so the
+ * caller can mutate one view without affecting the other.
  */
 export function calldataView(w: TransactWitnessBundle): TransactWitnessBundle {
     return structuredClone(w);
 }
 
 /**
- * Bind `z` to a CALLDATA view that may differ from the witness `w`, and return
- * the `y` the contract will compare against.
+ * Bind `z` to a calldata view that may differ from the witness `w`, and return
+ * `w`. `calldataY` computes the `y` the contract compares against.
  *
- * `rebindFiatShamir` fuses two roles a deployment keeps apart: deriving the
- * challenge, and choosing the witness. `MASP` hashes ITS calldata into `z` and
- * compares ITS `y`; the prover then picks any witness satisfying the R1CS at
- * that `z`. `z` is a circuit INPUT read before the witness is chosen, so
- * Schwartz-Zippel does not apply and a word is bound only if a constraint
- * already pins it (src/README.md § 2a).
+ * `rebindFiatShamir` combines two roles that are separate in deployment:
+ * deriving the challenge and choosing the witness. `MASP` hashes its calldata
+ * into `z` and compares its own `y`; the prover then picks any witness
+ * satisfying the R1CS at that `z`. `z` is a circuit input known before the
+ * witness is chosen, so Schwartz-Zippel does not apply and a word is bound only
+ * if a constraint pins it (src/README.md § 2a).
  *
- * Mirrors `lib/batch.ts :: bindFiatShamir`. Use this wherever the question is
- * "can the prover lie to the contract", and `rebindFiatShamir` where it is
- * "does constraint X fire".
+ * Mirrors `lib/batch.ts :: bindFiatShamir`. Use this to test whether the prover
+ * can diverge from the contract's calldata, and `rebindFiatShamir` to test
+ * whether a specific constraint fires.
  */
 export function bindFiatShamir(
     w: TransactWitnessBundle,
@@ -316,8 +320,8 @@ export function bindFiatShamir(
 /**
  * The `y` the contract computes for a calldata view at the bound challenge.
  *
- * `z` defaults to the view's own, which is what an honest caller wants; pass one
- * explicitly to evaluate a calldata view at a challenge bound from elsewhere.
+ * `z` defaults to the view's own; pass one explicitly to evaluate a calldata
+ * view at a challenge bound from elsewhere.
  */
 export function calldataY(calldata: TransactWitnessBundle, z: Field = BigInt(calldata.z)): Field {
     return hornerEval(coeffs(calldata), z);
@@ -380,22 +384,21 @@ export interface Scenario {
  * calculator sees them.
  *
  * `TxBuilder.build` emits a `TransactWitnessBundle`: the circuit's signals plus
- * `recipient_address`, `chain_id`, `payer_address`, `relayer_address`, the clue
- * triples and `out_aux_digest`. Those are logical public inputs but NOT signals
- * of this circuit — they reach the proof through the Fiat-Shamir challenge, not
- * through `PolyEval`.
+ * `recipient_address`, `chain_id`, `payer_address`, `relayer_address`,
+ * `intent_hash`, the clue triples and `out_aux_digest`. Those are logical public
+ * inputs but not signals of this circuit; they reach the proof through the
+ * Fiat-Shamir challenge, not through `PolyEval`.
  *
- * The wasm calculator rejects an unknown key outright ("Signal
- * recipient_address not found"), and `expectWitnessFails` classifies that as a
- * test bug rather than a constraint firing — correctly, since a rejection test
- * that accepts it would pass while proving nothing. So every suite that feeds a
- * bundle straight to a tester has to project first, and doing it once at the
- * `loadCircuit` call is the only place that cannot be forgotten at one call site
- * out of thirty.
+ * The wasm calculator rejects an unknown key ("Signal recipient_address not
+ * found"), and `expectWitnessFails` classifies that as a test bug rather than a
+ * constraint firing, since a rejection test that accepts it would pass
+ * vacuously. Every suite that feeds a bundle to a tester must therefore
+ * project first; applying the projection at the `loadCircuit` call covers all
+ * call sites.
  *
- * `circuitSignals` is an explicit pick, so this drops exactly the binding fields
- * and nothing else: a signal added to the circuit and forgotten there arrives as
- * "Not all inputs have been set" rather than being silently defaulted.
+ * `circuitSignals` is an explicit pick, so this drops exactly the binding fields:
+ * a signal added to the circuit but missing there fails with "Not all inputs
+ * have been set" rather than being defaulted.
  */
 export function projectingTester(c: CircuitTester): CircuitTester {
     return {

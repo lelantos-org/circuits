@@ -1,10 +1,10 @@
 // Unit tests for `ref/`, the reference implementation the published vectors are
 // generated from.
 //
-// These cover the parts of `ref/` that no circuit test can reach. Anything a
-// circuit consumes is checked transitively — a wrong Poseidon or asset generator
+// These cover the parts of `ref/` that circuit tests do not reach. Anything a
+// circuit consumes is checked transitively: a wrong Poseidon or asset generator
 // makes commitments disagree with circom and fails a constraint. The values
-// below have no such backstop:
+// below are not checked that way:
 //
 //   - `z` is an unconstrained circuit input, so an incorrect ABI encoding
 //     produces a witness the circuit accepts and a challenge the contract
@@ -101,10 +101,10 @@ describe("reference / merkle path recomputation", function () {
     });
 
     // `fillBlocks` seeds the node cache instead of hashing every internal node, so
-    // it is only sound while it agrees with a naive fill of the same leaves —
-    // including the frontier, which reads the seeded siblings. Checked with one
-    // constant everywhere and with the per-slot constants batch witnesses use,
-    // where the frontier slots of a level must also differ.
+    // it must agree with a naive fill of the same leaves, including the frontier,
+    // which reads the seeded siblings. Checked with one constant everywhere and
+    // with the per-slot constants batch witnesses use, where the frontier slots
+    // of a level must also differ.
     const fills: [string, (level: number, index: number) => Field][] = [
         ["one constant", () => 0xdeadn],
         ["prefillLeaf", prefillLeaf],
@@ -125,8 +125,8 @@ describe("reference / merkle path recomputation", function () {
                     expect(fast.root(), `root at ${where}`).to.equal(naive.root());
                     expect(fast.frontier(), `frontier at ${where}`).to.deep.equal(naive.frontier());
 
-                    // The prefill is only ever a base for further inserts, so the
-                    // post-insert state has to agree too.
+                    // The prefill is a base for further inserts, so the
+                    // post-insert state must agree too.
                     if (n < capacity) {
                         naive.insert(7n);
                         fast.insert(7n);
@@ -169,8 +169,8 @@ describe("reference / merkle path recomputation", function () {
     });
 
     it("cacheKeyStride grows past the depth-10 value", () => {
-        // A stride fixed at 2^18 is exact at depth 10 and one short at depth 11,
-        // where the largest level-1 index is 4^10 - 1.
+        // 2^18 suffices at depth 10 but not at depth 11, where the largest
+        // level-1 index is 4^10 - 1.
         expect(cacheKeyStride(10)).to.equal(2 ** 18);
         expect(cacheKeyStride(11)).to.be.greaterThan(4 ** 10 - 1);
     });
@@ -204,8 +204,8 @@ describe("reference / fuzzy message detection", function () {
         [P, J] = await Promise.all([Poseidon.build(), buildJubjub()]);
     });
 
-    // The clue signals carry no in-circuit constraints, so the scheme's own
-    // correctness is covered nowhere else.
+    // The clue signals carry no in-circuit constraints, so these cases are the
+    // only coverage of the scheme's correctness.
     it("a detection key detects every clue flagged for its flag key", () => {
         const gen = deterministicClueGen(P, J);
         for (let i = 0; i < 32; i++) {
@@ -232,8 +232,8 @@ describe("reference / fuzzy message detection", function () {
         for (let i = 0; i < N; i++) {
             if (fmdTest(J, P, other, gen.next().clue)) matched++;
         }
-        // Expected N / 2^gamma = 4. The bound is loose because the security
-        // property is that detection is rate-limited, not that it never fires.
+        // Expected N / 2^gamma = 4. The bound is loose: the security property is
+        // that detection is rate-limited, not that it never fires.
         expect(matched, `${matched}/${N} matched an unrelated detection key`).to.be.lessThan(N / 8);
     });
 
@@ -309,14 +309,12 @@ describe("reference / snark compression", () => {
     // The vectors record `abiEncodedChallenge` so the contract side can localise
     // a mismatch to the encoding; recomputing it here checks the published value.
     //
-    // Two vectors per case, and the split is the point: `challenge` is every
-    // logical public input and is what `z` hashes, `coeffs` is the subset the
-    // circuit pins and is what `y` evaluates. They differ for `transact` (69
-    // hashed, 46 evaluated) and coincide for `tree_update_batch` (52 and 52).
-    // The difference is not a formatting choice: transact's extra 23 words are
-    // not signals of the circuit, so `z` is the only thing that can bind them,
-    // while every batch word IS a signal and so must be evaluated. See
-    // src/README.md § 2a.
+    // Each case carries two vectors: `challenge` is every logical public input
+    // and is what `z` hashes; `coeffs` is the subset the circuit pins and is what
+    // `y` evaluates. They differ for `transact` (70 hashed, 46 evaluated) and
+    // coincide for `tree_update_batch` (52 and 52). Transact's extra 24 words are
+    // not circuit signals, so only `z` binds them; every batch word is a signal
+    // and must be evaluated. See src/README.md § 2a.
     //
     // Driven from index.json, so a shape change (a new circuit, or a different
     // MAX_L) is covered without editing this file.
@@ -329,21 +327,21 @@ describe("reference / snark compression", () => {
 
     // ===== a challenge-only field must be one the circuit cannot see =====
     //
-    // A word in the challenge preimage but not the coefficient vector is bound
-    // by nothing on its own: `z` is a circuit INPUT the prover reads before
-    // choosing a witness, so hashing a field into it binds that field only if
-    // something else already pins it (src/README.md § 2a).
+    // A word in the challenge preimage but not the coefficient vector is not
+    // bound on its own: `z` is a circuit input the prover reads before choosing a
+    // witness, so hashing a field into it binds that field only if something
+    // else already pins it (src/README.md § 2a).
     //
-    // Exactly one argument makes a demotion sound, and `transact` is the only
-    // shape that can make it: its trailing words are not signals of the circuit
-    // at all, so no witness copy exists to disagree with calldata. Checked
-    // against the compiled circuit by `test/transact/binding.test.ts :: the
-    // challenge-only fields are not circuit signals`.
+    // Omitting a word from the coefficients is sound only when the word is not a
+    // circuit signal, so no witness copy exists to disagree with calldata. Only
+    // `transact` meets that condition, checked against the compiled circuit by
+    // `test/transact/binding.test.ts :: the challenge-only fields are not
+    // circuit signals`.
     //
-    // `tree_update_batch` cannot make that argument — every word of its preimage
-    // is a signal — and demoting three of them anyway is what shipped two
-    // critical mints. So it is absent from this set, and publishing a
-    // challenge-only field would fail here.
+    // Every word of the `tree_update_batch` preimage is a signal, and a
+    // challenge-only signal lets a prover mint unbacked notes. It is therefore
+    // absent from this set, and publishing a challenge-only field for it fails
+    // here.
     const MAY_DEMOTE = new Set(["transact"]);
 
     for (const file of VECTOR_FILES) {

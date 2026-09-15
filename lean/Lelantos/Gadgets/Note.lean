@@ -5,18 +5,16 @@ import Mathlib.Tactic.IntervalCases
 /-!
 # `src/lib/note.circom` — keys, commitments, nullifiers
 
-Straight transcription of the six templates, plus the two structural facts they exist to
-provide:
+Transcription of the six templates, plus the two structural facts they provide:
 
 * `packAV_inj` — packing `(asset_id, value)` into `asset_id · 2^64 + value` is injective
-  once both fields are 64-bit range-checked. This is what makes `NoteCommitment` bind the
-  asset and the value separately rather than only their combination, and it is also the
-  implicit domain separation the module relies on: for a real note `asset_id ≠ 0`, so
-  `packed_av ≥ 2^64` and the `cm` preimage can never collide with a small tag like
-  `TAG_MERKLE` or `TAG_LEAF`.
+  once both fields are 64-bit range-checked, so `NoteCommitment` binds the asset and the
+  value separately rather than only their combination. It also provides the module's
+  implicit domain separation: for a real note `asset_id ≠ 0`, so `packed_av ≥ 2^64` and the
+  `cm` preimage cannot collide with a small tag like `TAG_MERKLE` or `TAG_LEAF`.
 
-* `nullifier_binds_cm` — the commitment sits *inside* the nullifier preimage, so two notes
-  that share `(nk, rho)` still get different nullifiers. This is the faerie-gold defence
+* `nullifier_binds_cm` — the commitment is part of the nullifier preimage, so two notes
+  that share `(nk, rho)` get different nullifiers. This is the faerie-gold defence
   described at `src/README.md` § 7, "Why `cm` is in the preimage (faerie gold)"; without
   `cm` in the preimage an attacker who
   produced a second note with a victim's `rho` could burn the victim's nullifier.
@@ -39,7 +37,7 @@ def pkOfNsk (nsk : F) : F := derivePk (deriveIvk nsk)
 /-- `packed_av <== asset_id * 2^64 + value` — `src/lib/note.circom:61`. -/
 def packAV (assetId value : F) : F := assetId * POW_2_64 + value
 
-/-- `NoteCommitment` — `src/lib/note.circom:52-68`. Note there is no tag: domain separation
+/-- `NoteCommitment` — `src/lib/note.circom:52-68`. There is no tag: domain separation
 comes from `packed_av ≥ 2^64`, which holds because real notes have `asset_id ≠ 0`. -/
 def noteCommitment (assetId value pk rho rcm : F) : F :=
   poseidon [packAV assetId value, pk, rho, rcm]
@@ -54,7 +52,7 @@ def nullifierOf (nk rho cm : F) : F := poseidon [TAG_NF, nk, rho, cm]
 `src/lib/merkle.circom:66-74`. -/
 def merkleNode (c : ℕ → F) : F := poseidon [TAG_MERKLE, c 0, c 1, c 2, c 3]
 
-/-- `Poseidon` reads four children, so agreeing on those four is agreeing. -/
+/-- `Poseidon` reads four children, so agreement on those four suffices. -/
 theorem merkleNode_congr {a b : ℕ → F} (h : ∀ c, c < 4 → a c = b c) :
     merkleNode a = merkleNode b := by
   simp only [merkleNode, h 0 (by norm_num), h 1 (by norm_num), h 2 (by norm_num),
@@ -79,7 +77,7 @@ private theorem packAV_bound {x y : F} (hx : x.val < 2 ^ 64) (hy : y.val < 2 ^ 6
     omega
   exact lt_trans hlt two_pow_128_lt_p
 
-/-- On range-checked inputs the packed field element really is `asset·2^64 + value` as an
+/-- On range-checked inputs the packed field element is `asset·2^64 + value` as an
 integer. -/
 theorem packAV_val {x y : F} (hx : x.val < 2 ^ 64) (hy : y.val < 2 ^ 64) :
     (packAV x y).val = x.val * 2 ^ 64 + y.val := by
@@ -95,8 +93,8 @@ theorem packAV_inj {a v a' v' : F}
   refine ⟨val_inj ?_, val_inj ?_⟩ <;> omega
 
 /-- **The implicit domain separation of `NoteCommitment`.** A real note has
-`asset_id ≠ 0`, so its packed field is at least `2^64` and can never equal a small
-domain tag. This is the argument `src/lib/note.circom:47-51` makes in prose. -/
+`asset_id ≠ 0`, so its packed field is at least `2^64` and cannot equal a small
+domain tag, as argued in prose at `src/lib/note.circom:47-51`. -/
 theorem packAV_val_ge {a v : F} (hnz : a ≠ 0) (ha : a.val < 2 ^ 64) (hv : v.val < 2 ^ 64) :
     2 ^ 64 ≤ (packAV a v).val := by
   rw [packAV_val ha hv]
@@ -110,8 +108,8 @@ theorem packAV_val_ge {a v : F} (hnz : a ≠ 0) (ha : a.val < 2 ^ 64) (hv : v.va
 particular the commitment is pinned, so a second note sharing `(nk, rho)` cannot collide
 with the victim's nullifier.
 
-Conditional on `hcr`, which is unsatisfiable (`poseidon_collision`) — read this as an
-assumption recorded in the statement, not as a proved property. -/
+Conditional on `hcr`, which is unsatisfiable (`poseidon_collision`); this is an assumption
+recorded in the statement, not a proved property. -/
 theorem nullifier_binds_cm (hcr : ¬ PoseidonCollision) {nk rho cm nk' rho' cm' : F}
     (h : nullifierOf nk rho cm = nullifierOf nk' rho' cm') :
     nk = nk' ∧ rho = rho' ∧ cm = cm' := by
@@ -140,7 +138,7 @@ theorem deriveRho_inj (hcr : ¬ PoseidonCollision) {a b a' b' : F}
 that `SpentNote` and `OutputNote` apply, a commitment cannot be reopened to a different
 `(asset_id, value, pk, rho, rcm)`.
 
-Without `packAV_inj` this would only bind the *packed* pair, and a prover could trade
+Without `packAV_inj` this would only bind the packed pair, and a prover could trade
 asset id against value inside one field element. -/
 theorem noteCommitment_inj (hcr : ¬ PoseidonCollision) {a v pk rho rcm a' v' pk' rho' rcm' : F}
     (ha : a.val < 2 ^ 64) (hv : v.val < 2 ^ 64)
@@ -161,10 +159,9 @@ theorem leafHash_inj (hcr : ¬ PoseidonCollision) {cm x y cm' x' y' : F}
   exact ⟨h'.2.1, h'.2.2.1, h'.2.2.2⟩
 
 /-- **A note commitment is never a leaf hash.** `NoteCommitment` and `leafHash` have the
-*same* arity (4), so arity gives no separation here — the separation is entirely the
-`packed_av ≥ 2^64 > TAG_LEAF` argument, and it therefore depends on the caller's
-`asset_id ≠ 0` and both range checks. Drop any of those three and a prover could present
-a leaf hash as a note commitment. -/
+same arity (4), so the separation rests on `packed_av ≥ 2^64 > TAG_LEAF` and depends on
+the caller's `asset_id ≠ 0` and both range checks. Without any of those three a prover
+could present a leaf hash as a note commitment. -/
 theorem noteCommitment_ne_leafHash (hcr : ¬ PoseidonCollision) {a v : F} (hnz : a ≠ 0)
     (ha : a.val < 2 ^ 64) (hv : v.val < 2 ^ 64) (pk rho rcm cm x y : F) :
     noteCommitment a v pk rho rcm ≠ leafHash cm x y := by
@@ -199,8 +196,8 @@ theorem noteCommitment_ne_merkleNode (hcr : ¬ PoseidonCollision) (a v pk rho rc
   have h' := poseidon_inj hcr h
   simp at h'
 
-/-- A leaf hash is never a Merkle node, by arity. This is what stops a prover presenting
-an internal node as a leaf. -/
+/-- A leaf hash is never a Merkle node, by arity, so a prover cannot present an internal
+node as a leaf. -/
 theorem leafHash_ne_merkleNode (hcr : ¬ PoseidonCollision) (cm x y : F) (c : ℕ → F) :
     leafHash cm x y ≠ merkleNode c := by
   intro h

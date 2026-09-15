@@ -1,24 +1,23 @@
-// Can a transact prover attest to a transaction the contract never validated?
+// Checks that a transact prover cannot attest to a transaction the contract did
+// not validate.
 //
-// `test/tree_update_batch.test.ts :: divergent witness` asks this of the batch,
-// where the answer was twice "yes". This is the transact half, and it did not
-// exist: every transact suite derives `z` from the same bundle it feeds the
-// circuit (`rebindFiatShamir`), so witness and calldata are the same
-// transaction by construction and a word the circuit never pins still reads as
+// `test/tree_update_batch.test.ts :: divergent witness` covers the batch
+// circuit. The other transact suites derive `z` from the same bundle they pass
+// to the circuit (`rebindFiatShamir`), so witness and calldata are the same
+// transaction by construction and a word the circuit never pins still appears
 // bound.
 //
-// The shape being ruled out is the one `blinders.test.ts` argues is reachable:
-// `z` comes from calldata the prover authored and is read BEFORE the witness is
-// chosen, so any witness satisfying the R1CS at that `z` produces a verifying
-// proof. Soundness rests entirely on the circuit's `y` disagreeing with the
-// contract's whenever the two descriptions do.
+// The attack shape is the one `blinders.test.ts` describes: `z` comes from
+// prover-authored calldata and is read before the witness is chosen, so any
+// witness satisfying the R1CS at that `z` produces a verifying proof. Soundness
+// requires the circuit's `y` to differ from the contract's whenever the two
+// descriptions differ.
 //
-// Transact's challenge-only words cannot be tested here and do not need to be:
-// they are not signals of `4x6.circom` at all, so no witness copy exists to
-// diverge — `binding.test.ts :: the challenge-only fields are not circuit
-// signals` checks exactly that against the compiled circuit, and it is the
-// argument that lets them be excluded from `y`. What this file covers is the
-// other 46 words, every one of which IS a signal.
+// Transact's challenge-only words are out of scope: they are not signals of
+// `4x6.circom`, so no witness copy exists to diverge. `binding.test.ts :: the
+// challenge-only fields are not circuit signals` checks that against the
+// compiled circuit, which justifies excluding them from `y`. This file covers
+// the other 46 words, each of which is a signal.
 
 import { flatten, type TransactWitnessBundle } from "../helpers";
 import { assertViewsDiverge, expectNotForgeable, expectWitnessY } from "../lib/expect";
@@ -31,13 +30,13 @@ describe("transact_4x6 / divergent witness", function () {
 
     const ctx = useTransactCircuit();
 
-    // `TxBuilder.balanced()` is the shared honest base the tamper suites use;
-    // its docblock states the contract this file needs — "honest in every respect
-    // but the field under test".
+    // `TxBuilder.balanced()` is the shared honest base of the tamper suites; its
+    // docblock guarantees it is "honest in every respect but the field under
+    // test".
     //
-    // Built once. Every case diverges a `structuredClone` of it and
-    // `bindFiatShamir` writes only `w.z`, so no case can contaminate the base,
-    // and `tx.build` is ~260ms a call.
+    // Built once (`tx.build` takes ~260ms). Every case diverges a
+    // `structuredClone` of it and `bindFiatShamir` writes only `w.z`, so no case
+    // modifies the base.
     let honest: TransactWitnessBundle;
 
     before(() => {
@@ -51,10 +50,9 @@ describe("transact_4x6 / divergent witness", function () {
         diverge: (c: TransactWitnessBundle) => void;
     }
 
-    // One per coefficient block. Each is a signal of the circuit, so a witness
-    // copy exists and can disagree; each is also evaluated into `y`, which is
-    // what makes the disagreement visible. A field moved out of `coeffs` while
-    // remaining a signal would fail here.
+    // One per coefficient block. Each is a circuit signal, so a witness copy
+    // exists and can disagree, and each is evaluated into `y`, which exposes the
+    // disagreement. A field that is a signal but not in `coeffs` fails here.
     const CASES: Case[] = [
         { field: "merkle_root", diverge: c => { c.merkle_root = bump(c.merkle_root); } },
         { field: "nullifier", diverge: c => { c.nullifier[0] = bump(c.nullifier[0]); } },
@@ -86,9 +84,9 @@ describe("transact_4x6 / divergent witness", function () {
     }
 
     it("a fully honest witness matches its own calldata", async () => {
-        // Guards the harness: this is the case every divergence above perturbs,
-        // so if the circuit's `y` disagreed with the reference here, each of
-        // them would pass for the wrong reason.
+        // Harness guard: every divergence above perturbs this case, so a
+        // disagreement between the circuit's `y` and the reference here would
+        // make them pass for the wrong reason.
         const w = calldataView(honest);
         bindFiatShamir(w, calldataView(w));
         await expectWitnessY(ctx.circuit, w, calldataY(w));

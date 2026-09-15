@@ -1,25 +1,23 @@
 // The bit-decomposition half of the negative-test generator.
 //
-// `underconstrained.ts` sweeps one signal at a time, which by construction
-// cannot see a bug that needs several signals to move together. The most
-// important such bug in a circom circuit is the bit decomposition, and it fails
-// in two ways:
+// The single-signal sweep in `underconstrained.ts` cannot detect a bug that
+// requires several signals to move together. The bit decomposition is the main
+// such case in a circom circuit, with two failure modes:
 //
-//   1. ALIASING. `Num2Bits(n)` with `2^n > p` does not determine its input: the
+//   1. Aliasing. `Num2Bits(n)` with `2^n > p` does not determine its input: the
 //      bits of `v` and the bits of `v + p` both satisfy the weighted sum, since
 //      the sum is taken mod `p`. A range check built on it proves nothing, and a
 //      value near `p` passes as a small one. Only `n >= 254` is affected on
-//      BN254 — `2^253 < p < 2^254`.
+//      BN254 (`2^253 < p < 2^254`).
 //
-//   2. MISSING BOOLEANITY. If a signal carrying weight `2^k` in the sum is not
+//   2. Missing booleanity. If a signal carrying weight `2^k` in the sum is not
 //      itself pinned to {0, 1}, the "bit" is a free field element and the sum
-//      constrains nothing at all: any target is reachable by solving for it.
+//      constrains nothing: any target is reachable by solving for it.
 //
-// Both are properties of the CONSTRAINT SYSTEM alone — no witness, no sampling,
-// and every instance in the circuit is covered rather than a sample of them. So
-// this runs as a structural check rather than a mutation: a mutation can only
-// demonstrate the bug where it exists, while the check below rules it out
-// everywhere at once, which is the stronger statement when it passes.
+// Both are properties of the constraint system alone: no witness or sampling is
+// involved, and every instance in the circuit is covered. This therefore runs
+// as a structural check rather than a mutation: a mutation demonstrates the bug
+// only where it exists, while the check below rules it out everywhere.
 //
 // Groups are recovered from the coefficients, not from `.sym` names, so a
 // hand-rolled decomposition that never mentions `Num2Bits` is covered too.
@@ -44,7 +42,7 @@ export interface BitGroup {
     width: number;
     /** Witness index carrying weight `2^k`, indexed by `k`. */
     signals: number[];
-    /** Weights whose signal is NOT pinned to {0, 1} by any constraint. */
+    /** Weights whose signal is not pinned to {0, 1} by any constraint. */
     unconstrainedBits: number[];
 }
 
@@ -53,7 +51,7 @@ export interface BitGroup {
  *
  * A booleanity constraint mentions one signal and the constant, so
  * `f(t) = (a·t + a0)(b·t + b0) - (c·t + c0)` is fully determined by the
- * coefficients — no witness needed. It pins `t` to {0, 1} when it is genuinely
+ * coefficients, with no witness needed. It pins `t` to {0, 1} when it is
  * quadratic (`a·b != 0`, else it has a single root) and vanishes at both 0 and
  * 1. That covers circom's `b * (b - 1) === 0` and any re-association of it.
  */
@@ -104,17 +102,17 @@ function loneSignal(...lcs: LinearCombination[]): number | null {
  *
  * A group is a linear combination carrying the consecutive weights
  * `2^0, 2^1, ... 2^(width-1)`, at least one of whose signals some constraint
- * pins to {0, 1}. Both halves of that are needed:
+ * pins to {0, 1} (or at least `MIN_UNAMBIGUOUS_WIDTH` of them; see `groupFrom`).
+ * Both conditions are needed:
  *
  *   - The run must start at `2^0`. A decomposition always has a units digit,
  *     while an isolated `2^k` coefficient is ordinary arithmetic.
- *   - Some digit must actually be a bit. Weights `1, 2` alone are far too common
- *     to mean anything — in `4x6` that pattern matches 1328 linear combinations
- *     of which none is a decomposition, against 87 that are. Requiring one real
- *     bit separates the two exactly, and it does not blunt the search this
- *     feeds: a decomposition whose digits are ALL free is not an underconstrained
- *     decomposition, it is not a decomposition at all, and the signals in it are
- *     covered one at a time by the sweep in `underconstrained.ts`.
+ *   - Some digit must be a bit. Weights `1, 2` alone are common: in `4x6` that
+ *     pattern matches 1328 linear combinations that are not decompositions,
+ *     against 87 that are. Requiring one boolean digit separates the two
+ *     exactly without weakening the search: a short run whose digits are all
+ *     free is not a decomposition, and its signals are covered individually by
+ *     the sweep in `underconstrained.ts`.
  */
 export function findBitGroups(view: R1csView): BitGroup[] {
     const booleans = booleanSignals(view);
@@ -141,14 +139,13 @@ interface Weight {
 }
 
 /**
- * Coefficient value -> the power of two it represents, in BOTH polarities.
+ * Coefficient value -> the power of two it represents, in both polarities.
  *
  * circom does not emit a decomposition as `sum 2^i b_i`; it emits the equality
  * `in === lc1` as the single linear constraint `in - lc1 = 0`, so the bits carry
- * NEGATIVE weights `p - 2^i` and only `in` is positive. Matching one polarity
- * finds nothing at all — the detector reports zero groups on a circuit full of
- * them, and every test built on it passes vacuously, which is exactly how the
- * first draft of this file behaved.
+ * negative weights `p - 2^i` and only `in` is positive. Matching only positive
+ * weights finds no groups, and every test built on the detector would pass
+ * vacuously.
  */
 function powerOfTwoWeights(): Map<bigint, Weight> {
     const weights = new Map<bigint, Weight>();
@@ -166,8 +163,8 @@ function powerOfTwoWeights(): Map<bigint, Weight> {
  *
  * The two polarities are collected in one pass but kept apart, so a combination
  * that happens to mix signs cannot be spliced into a run that is not there. A
- * decomposition is written in one polarity; the other can at best pick up a
- * stray `2^0`, so the wider reading is the real one.
+ * decomposition is written in one polarity; the other can at most pick up a
+ * stray `2^0`, so the wider reading is taken.
  */
 function scanLc(
     lc: LinearCombination,
@@ -215,7 +212,7 @@ function groupFrom(
     // while an isolated `2^k` coefficient is ordinary arithmetic.
     let width = 0;
     while (byExponent.has(width)) width++;
-    if (width < 2) return null; // a lone `2^0` is just a coefficient of 1
+    if (width < 2) return null; // a lone `2^0` is a coefficient of 1
 
     const signals: number[] = [];
     const unconstrainedBits: number[] = [];
@@ -225,16 +222,15 @@ function groupFrom(
         if (!booleans.has(signal)) unconstrainedBits.push(e);
     }
 
-    // Nothing here looks like a decomposition: no digit is a bit, and the run is
-    // short enough that consecutive powers of two are unremarkable arithmetic.
+    // Not a decomposition: no digit is a bit, and the run is short enough that
+    // consecutive powers of two are ordinary arithmetic.
     //
-    // The width escape hatch matters. Requiring a bit would make the ONE case
-    // this check exists for — a decomposition whose booleanity was forgotten
-    // entirely — invisible, since with no bit among its digits it would be
+    // The width exception is required. Requiring a bit alone would hide a
+    // decomposition with no booleanity constraints at all, since it would be
     // filtered out as arithmetic. A run of `MIN_UNAMBIGUOUS_WIDTH` consecutive
-    // powers of two is not something ordinary arithmetic produces; in `4x6`
-    // every false match is width 2 and every real group is fully boolean, so the
-    // two populations do not overlap at all.
+    // powers of two does not arise from ordinary arithmetic; in `4x6` every false
+    // match is width 2 and every real group is fully boolean, so the two
+    // populations do not overlap.
     if (unconstrainedBits.length === width && width < MIN_UNAMBIGUOUS_WIDTH) return null;
 
     return { constraint, slot, width, signals, unconstrainedBits };

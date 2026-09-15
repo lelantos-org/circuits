@@ -15,10 +15,9 @@
 // | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)   |
 // | TAG_RHO     | 11    | rho  = Poseidon(TAG_RHO, nullifier[0], out_index)   |
 //
-// 12 (TAG_SUB_TOKEN) and 13 (TAG_FMD_EXPAND) are off-circuit. They are
-// deliberately absent from `TAGS`, which mirrors the in-circuit `TAG_*()`
-// functions one-for-one; `TAG_FMD_EXPAND` is exported below because the FMD
-// reference impl needs it.
+// 12 (TAG_SUB_TOKEN) and 13 (TAG_FMD_EXPAND) are off-circuit and absent from
+// `TAGS`, which mirrors the in-circuit `TAG_*()` functions one-for-one.
+// `TAG_FMD_EXPAND` is exported for the FMD reference implementation.
 
 export const TAG_CM = 1n;
 export const TAG_NF = 2n;

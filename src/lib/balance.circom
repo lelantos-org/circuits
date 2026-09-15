@@ -55,11 +55,11 @@ template DummyZeroValue(N) {
 //
 // The point equality alone does not imply conservation. HashToAssetGen is
 // circomlib Pedersen over a 72-bit message, which fits one segment and reduces
-// to m(asset_id)·BASE[0] for a publicly computable integer m(·), so every asset
-// generator lies in the same prime-order group with known relative discrete
-// logs. m(·) is ~2^85 and affine in the low nibbles of asset_id, so
-// V^1 + V^3 == 2·V^2 exactly and the point equality is satisfied by spending X
-// of asset 1 plus X of asset 3 to mint 2X of asset 2.
+// to m(asset_id)·BASE[0] for a publicly computable integer m(·), so all asset
+// generators lie in one prime-order group with known relative discrete logs.
+// m(·) is ~2^85 and affine in the low nibbles of asset_id, so
+// V^1 + V^3 == 2·V^2 and the point equality accepts spending X of asset 1 plus
+// X of asset 3 to mint 2X of asset 2.
 //
 // This check makes no group-theoretic assumption. For every asset id c present
 // in the transaction:
@@ -72,13 +72,11 @@ template DummyZeroValue(N) {
 // every asset present. Dummy inputs carry value 0 (DummyZeroValue) and are
 // neutral whatever asset_id they declare.
 //
-// Precondition, soundness-critical: the caller must already have 64-bit
-// range-checked every value passed in. SpentNote and OutputNote apply
-// RangeCheck64 to in_value and out_value; the transact circuit applies it to
-// public_in and public_out. With at most N_IN+1 terms below 2^64 per side the
-// sums stay under 2^66, far below the modulus, so these are exact integer
-// equalities that cannot be satisfied by wrapping. Dropping a range check
-// invalidates the argument.
+// Precondition (soundness-critical): the caller must 64-bit range-check every
+// value passed in. SpentNote and OutputNote apply RangeCheck64 to in_value and
+// out_value; the transact circuit applies it to public_in and public_out. With
+// at most max(N_IN, N_OUT) + 1 terms below 2^64 per side, the sums stay below
+// the modulus, so these are exact integer equalities with no field wraparound.
 template PerAssetValueBalance(N_IN, N_OUT) {
     signal input in_asset[N_IN];
     signal input in_value[N_IN];

@@ -8,12 +8,12 @@ import { circuitSignals, type TransactWitnessBundle } from "../ref/witness";
 import { readOutput } from "../lib/expect";
 import { TIMEOUT_HEAVY } from "../lib/constants";
 
-// Groth16 public-signal ORDER for the transact shapes.
+// Groth16 public-signal order for the transact and batch shapes.
 //
 // The exported Solidity verifier takes `_pubSignals` as a flat `uint[2]`, so a
-// transposition is not a type error anywhere: it is two field elements handed
-// over in the wrong order, and every proof fails to verify. The failure mode is
-// indistinguishable from a bad zkey or a stale ceremony.
+// transposition is not a type error: the two field elements arrive in the wrong
+// order and every proof fails to verify, indistinguishably from a bad zkey or a
+// stale ceremony.
 //
 // circom orders the main component's signals as:
 //
@@ -22,22 +22,19 @@ import { TIMEOUT_HEAVY } from "../lib/constants";
 //   witness[.. + nPubInputs]  = main's PUBLIC INPUT signals, declaration order
 //
 // `Transact` declares `signal output y` and receives `z` via
-// `component main { public [z] }`, so the order is `[y, z]` — NOT `[z, y]`.
-// The consumer relies on this: `PubInputs.sol :: _finalizeRaw` returns
+// `component main { public [z] }`, so the order is `[y, z]`, not `[z, y]`.
+// `PubInputs.sol :: _finalizeRaw` depends on this: it returns
 // `out[0] = y, out[1] = z`.
 //
-// This asserts it against the compiled circuit rather than against prose, so
-// adding an output to `Transact`, or promoting another input to public, fails
-// here instead of at the first on-chain verification.
+// Asserted against the compiled circuit, so adding an output to `Transact` or
+// making another input public fails here rather than at on-chain verification.
 //
-// `TreeUpdateBatch` is covered by the same reasoning and gets its own block at
-// the bottom: it declares `signal output y` and takes `z` via
-// `component main { public [ z ] }` too, and `PubInputs.sol :: compress`
+// `TreeUpdateBatch` gets the same checks: it declares `signal output y`, takes
+// `z` via `component main { public [ z ] }`, and `PubInputs.sol :: compress`
 // returns the pair in the same order for both overloads. It needs no signal
-// projection, because unlike transact ALL of its logical public inputs are
-// declared signals — which is exactly the property that makes its challenge-only
-// words forgeable, and is checked in `tree_update_batch.test.ts :: divergent
-// witness`.
+// projection because, unlike transact, all of its logical public inputs are
+// declared signals; the same property makes challenge-only words forgeable for
+// it, which `tree_update_batch.test.ts :: divergent witness` checks.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
@@ -104,8 +101,7 @@ describe("groth16 public-signal order", function () {
                 expect(BigInt(witness[0].toString())).to.equal(1n);
             });
 
-            // The two assertions that matter. Together they say: the first
-            // public signal is y and the second is z.
+            // The order assertions: the first public signal is y, the second z.
             it("witness[1] is `y`, the first public signal", () => {
                 expect(readOutput(witness, 0).toString()).to.equal(vector.circuitOutput.y);
                 expect(readOutput(witness, 0).toString()).to.equal(vector.compression.y);
@@ -115,15 +111,15 @@ describe("groth16 public-signal order", function () {
                 expect(readOutput(witness, 1).toString()).to.equal(vector.compression.z);
             });
 
-            // Guards the inference above: if `y` and `z` were ever equal the
-            // order assertions would hold vacuously under a transposition.
+            // If `y` equals `z`, the order assertions above hold vacuously under a
+            // transposition.
             it("`y` and `z` are distinct, so the order is actually observable", () => {
                 expect(vector.compression.y).to.not.equal(vector.compression.z);
             });
 
             it("the exported verifier consumes exactly these two, in this order", () => {
-                // _pubSignals = [y, z]. Spelled out so a reader porting this to
-                // another consumer copies the right pair.
+                // _pubSignals = [y, z], written out as the reference for other
+                // consumers.
                 const pubSignals = [BigInt(witness[1].toString()), BigInt(witness[2].toString())];
                 expect(pubSignals.map(String)).to.deep.equal([
                     vector.compression.y,

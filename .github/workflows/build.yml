@@ -24,11 +24,10 @@ jobs:
       - name: Setup toolchain
         uses: ./.github/actions/setup
 
-      # Every shape in budget.json — the gate below reads one .r1cs per entry
-      # and fails on a missing or stale one. Both are otherwise compiled only
-      # indirectly, by `just vectors-check` and by circom_tester inside the mocha
-      # suite, neither of which runs the production `--r1cs --wasm --sym` path or
-      # reports constraint counts.
+      # Compiles every shape in budget.json; the budget check reads one .r1cs per
+      # entry and fails on a missing or stale one. Other jobs compile only through
+      # `just vectors-check` and circom_tester, neither of which uses the
+      # production `--r1cs --wasm --sym` path or reports constraint counts.
       - name: Compile circuits (4x6, tree_update_batch)
         run: just compile-4x6 compile-batch
 
@@ -36,23 +35,20 @@ jobs:
         uses: ./.github/actions/setup-build-circuit
 
       # The witness-graph builder cannot compile `signal <== someFunction()`, so
-      # the circuits hoist those through a `var` (see src/lib/note.circom). This
-      # step is what stops someone inlining one back: the release would
-      # otherwise fail at publish time instead.
+      # the circuits assign such calls through a `var` (see src/lib/note.circom).
+      # This step detects violations before they fail the publish workflow.
       - name: Witness graph builds
         run: just build-graph
 
-      # Compiling asserts nothing about size, and `groth16 setup` — where an
-      # overflow would surface — does not run here. Transact(10,3,3) clears its
-      # 2^16 FFT domain by 13 constraints, so the count needs its own gate.
+      # Compilation does not check circuit size, and `groth16 setup`, which would
+      # reject an oversized circuit, does not run here, so constraint counts are
+      # checked separately.
       - name: Constraint budget
         run: just budget
 
-      # Every field of the Lean witness structures claims to BE a signal of the
-      # compiled circuit. This is where that is checked, because it is the only
-      # job that produces `build/*.sym` — the mocha suite compiles through
-      # circom_tester, which writes elsewhere, so the same test skips in the
-      # `test` workflow. `REQUIRE_ARTIFACTS=1` makes a missing artifact a failure
-      # here rather than a silent pass.
+      # Checks that every field of the Lean witness structures is a signal of the
+      # compiled circuit. It runs here because this is the only job producing
+      # `build/*.sym`; circom_tester writes elsewhere, so the test skips in the
+      # `test` workflow. `REQUIRE_ARTIFACTS=1` makes a missing artifact a failure.
       - name: Model signal parity
         run: just signal-parity

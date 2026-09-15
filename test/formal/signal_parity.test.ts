@@ -7,35 +7,33 @@ import { loadSymbols, type SymbolTable } from "../lib/r1cs";
 
 // Model-to-circuit signal parity.
 //
-// `lean/` proves things about `TransactSat`, a hand-written structure over a
-// hand-written `TxWitness`. Every field of that witness claims to BE a signal of
-// `4x6.circom`, and nothing checked the claim: `lake build` sees Lean, and the
-// circuit tests see circom, and the sentence tying them together lived in a doc
-// comment. A renamed signal, or a field naming one that never existed, was
-// invisible to both.
+// `lean/` proves properties of `TransactSat`, a hand-written structure over a
+// hand-written `TxWitness`. Each field of that witness corresponds to a signal
+// of `4x6.circom`. `lake build` checks only Lean and the circuit tests check
+// only circom, so neither detects a renamed signal or a field naming a signal
+// that does not exist.
 //
-// `lean/expected/signal-map.json` is that sentence, written down. This file checks
-// the circom half — that each named signal exists in the compiled `.sym`.
-// `lean/scripts/check-names.py` checks the Lean half, that each key resolves as a
-// declaration. Neither side can drift without one of them failing.
+// `lean/expected/signal-map.json` records the correspondence. This file checks
+// the circom half: each named signal exists in the compiled `.sym`.
+// `lean/scripts/check-names.py` checks the Lean half: each key resolves as a
+// declaration. Drift on either side fails one of the two.
 //
-// WHAT THIS IS NOT. It does not check that a field mirrors the RIGHT signal, only
-// that the signal it names is real. A field pointed at a real but wrong signal
-// passes here. That is the next rung — evaluating the model on a real witness — and
-// this is its prerequisite, since such a harness needs exactly this map to read a
+// Scope: this checks that the signal a field names exists, not that it is the
+// correct signal; a field mapped to a real but wrong signal passes. Evaluating
+// the model on a real witness would check that, and requires this map to read a
 // witness vector into a `TxWitness`.
 //
-// ARITY COMES FREE. A template is checked at every index below its bound AND at the
-// bound itself, where it must be absent. So `Transact(11, 4, 6)` is read off the
-// circuit rather than asserted in `constants.ts`: widen `N_OUT` in the circom and
-// this fails until the map agrees.
+// Arity: a template is checked at every index below its bound and at the bound
+// itself, where it must be absent. `Transact(11, 4, 6)` is therefore read off
+// the circuit rather than asserted in `constants.ts`: widening `N_OUT` in the
+// circom fails this until the map is updated.
 //
-// ON `absent`. The circom optimizer deletes a signal that a constraint pins to a
-// constant, and those deletions are informative rather than inconvenient.
-// `main.all_dummy.out` is gone because `all_dummy.out === 0` holds it at zero — the
-// constraint `TransactSat.not_all_dummy` models and `TxWellFormed.someRealInput`
-// rests on. Asserting it STAYS gone turns the optimizer into a witness: if that
-// constraint is ever removed, the signal comes back and this fails.
+// `absent`: the circom optimizer removes a signal that a constraint pins to a
+// constant, so the removal indicates the constraint is present.
+// `main.all_dummy.out` is removed because `all_dummy.out === 0` pins it to zero,
+// the constraint `TransactSat.not_all_dummy` models and
+// `TxWellFormed.someRealInput` depends on. Asserting that it stays absent
+// detects removal of that constraint.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
@@ -68,11 +66,11 @@ interface Expansion {
 /**
  * Expand a template into the names that must exist, plus the names that must not.
  *
- * Every placeholder is swept independently with the others held at 0, rather than
+ * Each placeholder is swept independently with the others held at 0, rather than
  * over the full product: the product is millions of names for a three-placeholder
- * template and buys nothing, since a `.sym` entry missing at `[2][3]` but present at
- * `[2][0]` and `[0][3]` is not a failure mode circom has. The out-of-range name for
- * each placeholder is what pins the arity.
+ * template, and circom does not emit a `.sym` missing `[2][3]` while containing
+ * `[2][0]` and `[0][3]`. The out-of-range name for each placeholder pins the
+ * arity.
  */
 function expand(template: string, shape: Record<string, number>): Expansion {
     const vars = [...template.matchAll(PLACEHOLDER)].map(match => {
@@ -111,12 +109,10 @@ for (const [circuit, map] of circuits) {
         before(async function () {
             if (!existsSync(symPath)) {
                 // `build/` is gitignored and the mocha suite compiles through
-                // circom_tester, which writes its own artifacts elsewhere — so a
-                // local run, and the `test` workflow, legitimately have no
-                // `build/*.sym`. Skipping there is right; silently skipping in the
-                // job that exists to run this is not, so `REQUIRE_ARTIFACTS=1` turns
-                // the skip into a failure. The `build` workflow compiles both
-                // circuits and sets it.
+                // circom_tester, which writes its artifacts elsewhere, so local
+                // runs and the `test` workflow have no `build/*.sym` and skip.
+                // `REQUIRE_ARTIFACTS=1` turns the skip into a failure; the `build`
+                // workflow compiles both circuits and sets it.
                 if (process.env.REQUIRE_ARTIFACTS === "1") {
                     throw new Error(
                         `${map.sym} is missing and REQUIRE_ARTIFACTS=1. ` +
@@ -145,9 +141,9 @@ for (const [circuit, map] of circuits) {
         });
 
         it("no modelled signal exists past the declared shape", () => {
-            // The arity pin. `main.spent[4]` existing would mean `N_IN` grew and the
-            // Lean instantiation `Transact(11, 4, 6)` is describing a smaller circuit
-            // than the one being compiled.
+            // The arity pin. If `main.spent[4]` exists, `N_IN` exceeds 4 and the
+            // Lean instantiation `Transact(11, 4, 6)` describes a smaller circuit
+            // than the one compiled.
             const overrun: string[] = [];
             for (const [field, template] of Object.entries(map.present)) {
                 for (const name of expand(template, map.shape).absent) {
@@ -178,8 +174,9 @@ for (const [circuit, map] of circuits) {
         });
 
         it("every folded signal has a surviving alias to read it from", () => {
-            // A model field whose signal was optimized away still has to be readable,
-            // or the witness harness this map exists for cannot populate it.
+            // A model field whose signal is optimized away must remain readable
+            // through an alias, or a witness harness using this map cannot
+            // populate it.
             const aliases = map.aliases ?? {};
             const unreadable: string[] = [];
             for (const field of Object.keys(map.absent)) {

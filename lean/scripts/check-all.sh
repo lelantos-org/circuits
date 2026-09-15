@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Run every check CI runs, in the order that fails fastest.
+# Runs every check CI runs, ordered so the fastest-failing checks come first.
 #
-# `lake build` is the proof check: compiling a Lean module elaborates and kernel-checks
-# every proof in it, and it also runs the environment-wide axiom scan in
-# `Lelantos.Meta.AxiomGuard`. `leanchecker` then replays every declaration through the
-# kernel a second time, independently of the elaborator. The rest compare the development against artefacts outside
-# it — the primality of the field modulus, the recorded trusted base, the public-input
-# layout the SDK and the contract also implement, the source citations the doc comments
-# carry, the constraints those citations reach, and the Lean names the prose claims
-# exist.
+# `lake build` elaborates and kernel-checks every proof and runs the environment-wide
+# axiom scan in `Lelantos.Meta.AxiomGuard`. `leanchecker` replays every declaration
+# through the kernel independently of the elaborator. The remaining checks compare the
+# development against external artefacts: primality of the field modulus, the recorded
+# trusted base, the public-input layout shared with the SDK and contract, source
+# citations in doc comments, constraint coverage of those citations, and Lean names
+# referenced in prose.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

@@ -28,11 +28,10 @@ function toInput(coeffs: bigint[], z: bigint) {
 
 // Coefficient array arbitrary — N entries clamped to [0, R).
 const arbCoeffs = fc.array(arbField(R - 1n), { minLength: N, maxLength: N });
-// z != 0. The gadget rejects zero outright (`z_nz.out === 0` in
-// lib/poly_eval.circom): at z = 0 the Horner chain collapses to y === coeffs[0]
-// and the other N-1 coefficients leave no trace in the public signals. So it is
-// not a value the positive properties below can assert anything about — the
-// witness never gets built. The rejection itself is covered by "FAILS at z = 0".
+// z != 0. The gadget rejects zero (`z_nz.out === 0` in lib/poly_eval.circom)
+// because at z = 0 the Horner chain reduces to y === coeffs[0] and the other N-1
+// coefficients do not affect the public signals. The positive properties
+// exclude it; the rejection is covered by "FAILS at z = 0".
 const arbZ = fc.bigInt(1n, R - 1n);
 // Permutation property needs z ∉ {0, 1} (those are sum-/index-invariant).
 const arbZForPermutation = fc.bigInt(2n, R - 1n);
@@ -105,8 +104,8 @@ describe("PolyEval [fuzz, N=26]", function () {
     });
 
     it("permutation alters y (Schwartz–Zippel sanity)", async () => {
-        // Build (c0, cN-1) as a distinct pair so swap is observable without
-        // .filter / early-return; remaining N-2 slots stay uniform.
+        // (c0, cN-1) is drawn as a distinct pair so the swap is observable
+        // without .filter or an early return; the other N-2 slots are uniform.
         const arbCoeffsDistinctEnds = fc.tuple(
             arbDistinctBigInt(0n, R - 1n),
             fc.array(arbField(R - 1n), { minLength: N - 2, maxLength: N - 2 }),

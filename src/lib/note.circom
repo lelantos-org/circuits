@@ -88,12 +88,12 @@ template DeriveRho() {
 
 // nf = Poseidon(TAG_NF, nk, rho, cm)
 //
-// cm is in the preimage so the nullifier identifies one exact note rather than
-// the pair (nk, rho). Without it two notes sharing a rho share a nullifier, and
-// spending either permanently locks the other. DeriveRho rules that out on the
-// transact path, but the deposit path constrains no rho and output rho is
-// publicly derivable from nullifier[0], so a dust deposit could plant a
-// rho-colliding note in a victim's wallet. Binding cm covers every inserter.
+// cm is in the preimage so the nullifier identifies one note rather than the
+// pair (nk, rho); otherwise two notes sharing a rho share a nullifier, and
+// spending either permanently locks the other. DeriveRho prevents rho reuse on
+// the transact path, but the deposit path does not constrain rho and output rho
+// is publicly derivable from nullifier[0], so a deposit could create a note
+// with a colliding rho for another owner. Binding cm covers every inserter.
 template Nullifier() {
     signal input nk;
     signal input rho;

@@ -15,10 +15,10 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 // y match the contract's value for an unrelated witness.
 //
 // z != 0 is enforced here. At z = 0 the Horner chain reduces to y === coeffs[0]
-// and the remaining N-1 coefficients leave no trace in the public signals. The
-// consumer derives z as keccak256(challenge) mod r and so reaches 0 only with
-// negligible probability; this makes the circuit reject it outright rather than
-// depend on that derivation.
+// and the remaining N-1 coefficients do not affect the public signals. The
+// consumer derives z as keccak256(challenge) mod r, which is 0 only with
+// negligible probability; the circuit rejects z = 0 independently of that
+// derivation.
 template PolyEval(N) {
     signal input coeffs[N];
     signal input z;
@@ -52,15 +52,14 @@ template PolyEval(N) {
 // commitments by ValueCommit, the three public scalars by RangeCheck64 and
 // PerAssetValueBalance.
 //
-// recipient_address, chain_id, payer_address, relayer_address, out_aux_digest
-// and the 3·N_OUT FMD clue fields carry no in-circuit constraint and are
-// therefore not coefficients. PubInputs.sol keeps them in the keccak preimage
-// that produces z, so altering any of them moves z, hence y, and invalidates
+// recipient_address, chain_id, payer_address, relayer_address, intent_hash,
+// out_aux_digest and the 3·N_OUT FMD clue fields have no in-circuit constraint
+// and are therefore not coefficients. PubInputs.sol includes them in the keccak
+// preimage of z, so altering any of them changes z, hence y, and invalidates
 // the proof.
 //
-// Adding a coefficient is a two-part change: wire it in here, and name the
-// constraint elsewhere that pins it. Without one it belongs in the challenge
-// preimage instead.
+// A new coefficient must be wired in here and pinned by a constraint elsewhere;
+// a value with no such constraint belongs in the challenge preimage instead.
 template TransactCompressN(N_IN, N_OUT) {
     var N = 4 + 3 * N_IN + 5 * N_OUT;
 
@@ -119,36 +118,30 @@ template TransactCompressN(N_IN, N_OUT) {
 // coefficients: the challenge preimage and the coefficient vector are the same
 // 4 + 6·MAX_L words, and PubInputs.compress evaluates the whole span.
 //
-// WHY ALL THREE ARE EVALUATED, and what pins them. PolyEval's precondition is
-// that every coefficient is pinned by a constraint elsewhere in the circuit,
-// because `z` is an input the prover reads before choosing a witness (see the
-// header of PolyEval above). For these three the pin is the gated deposit
-// binding in TreeUpdateBatch step 7,
+// What pins them. PolyEval requires every coefficient to be pinned by a
+// constraint elsewhere, because the prover reads `z` before choosing a witness
+// (see PolyEval above). For these fields the pin is the gated deposit binding
+// in TreeUpdateBatch step 6,
 //
 //     active_dep[k] · (cv_dep[k] − (leaf_public_in[k]·V^leaf_asset[k] + rcv[k]·H)) === 0
 //
 // which pins leaf_public_in[k] and leaf_asset[k] against cv_dep[k] under the
-// discrete-log hardness of the Jubjub subgroup — moving either operand forces a
-// compensating cv_dep, itself two coefficients.
+// discrete-log hardness of the Jubjub subgroup: changing either operand
+// requires a compensating cv_dep, itself two coefficients.
 //
-// That equality degenerates on its own: ValueTimesGen(0, gen) is the curve
-// identity for EVERY gen, so at leaf_public_in[k] == 0 the V^leaf_asset[k] term
-// vanishes, the equality reduces to cv_dep[k] == rcv[k]·H, and leaf_asset[k]
-// would retain only Num2Bits(64) and != 0. A range check bounds a coefficient
-// without pinning it, and four such leaves — a flush whose fee notes are at
-// fbps = 0 — would give 4 × 64 = 256 bits of free dial against a 254-bit
-// modulus, solvable as a small CVP.
+// At leaf_public_in[k] == 0 the equality degenerates: ValueTimesGen(0, gen) is
+// the identity for every gen, so it reduces to cv_dep[k] == rcv[k]·H and
+// leaf_asset[k] retains only Num2Bits(64). A range check bounds a coefficient
+// without pinning it; four such leaves (fee notes of a flush at fbps = 0) give 4 × 64 = 256
+// free bits against a 254-bit modulus, solvable as a small CVP instance.
+// TreeUpdateBatch step 6a closes this by requiring leaf_asset[k] == 0 exactly
+// when leaf_public_in[k] == 0.
 //
-// Step 7 closes that degeneracy directly rather than by excluding the fields
-// from the polynomial, with the two per-slot pins named in obligations 5 and 6
-// of the TreeUpdateBatch header: a principal leaf's leaf_public_in is non-zero,
-// and a fee leaf's leaf_asset equals its principal's. So no active deposit slot
-// reaches the degenerate case with a free asset, and demoting the fields is
-// unnecessary. Demoting them is also unsound, which is the other half of the
-// reason they are here: unlike the transact compressor's challenge-only words,
-// these ARE signals of TreeUpdateBatch, and hashing a signal into z binds
-// nothing — the prover reads z first and is free to choose a witness that
-// disagrees with the calldata it was hashed from.
+// Moving these fields to the challenge preimage instead would be unsound:
+// unlike the transact compressor's challenge-only words, they are signals of
+// TreeUpdateBatch, and hashing a signal into z binds nothing, since the prover
+// reads z first and can choose a witness that disagrees with the calldata it
+// was hashed from.
 //
 // The two uint64 blocks (leaf_asset, leaf_public_in) are adjacent and the uint8
 // block (is_deposit) follows them, so PubInputs.compress re-masks the sub-word

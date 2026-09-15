@@ -8,24 +8,23 @@ The signal set of `Transact(DEPTH, N_IN, N_OUT)` and the coefficient layout that
 `TransactCompressN` folds into the verifier-visible pair `(z, y)`. The constraint system
 over these signals is in `Lelantos.Circuit.Transact`.
 
-Keeping the layout in its own module has one purpose: it is the highest-risk piece of hand
-transcription in the development, it is dumped and diffed by `lean/scripts/dump-layout.sh`,
-and it should be reviewable without reading the soundness proofs.
+The layout is a separate module because it is hand-transcribed, is dumped and diffed by
+`lean/scripts/dump-layout.sh`, and should be reviewable without reading the soundness proofs.
 -/
 
 namespace Lelantos
 
 /-- Number of `PolyEval` coefficients: `4 + 3·N_IN + 5·N_OUT`
-(`src/lib/poly_eval.circom:65`). For `(2, 2)` this is 20, for `(4, 6)` it is 46.
+(`src/lib/poly_eval.circom:64`). For `(2, 2)` this is 20, for `(4, 6)` it is 46.
 
 **Membership rule.** A logical public input is a coefficient only if some
 constraint outside `TransactCompressN` pins it. `PolyEval` is affine in each
 coefficient and `z` is an input the prover reads first, so an unpinned
-coefficient is one linear equation in one unknown — solve it and `y` is whatever
-the contract asks for. The four address words, the FMD clue triples and the
-payload digest carry no constraint at all, so they are not here; they are bound
-by being hashed into the challenge instead (`PubInputs.TRANSACT_CHALLENGE_WORDS`,
-69 words at the 4x6 shape). -/
+coefficient is one linear equation in one unknown whose solution sets `y` to any
+target. The five address and chain words, the FMD clue triples and the payload
+digest carry no constraint, so they are excluded; they are bound by being hashed
+into the challenge instead
+(`PubInputs.TRANSACT_CHALLENGE_WORDS`, 70 words at the 4x6 shape). -/
 def piCount (nIn nOut : ℕ) : ℕ := 4 + 3 * nIn + 5 * nOut
 
 example : piCount 2 2 = 20 := by norm_num [piCount]
@@ -87,11 +86,10 @@ def outValue (w : TxWitness depth nIn nOut) (j : ℕ) : F := (w.out j).value
 /-! ## Public-input layout
 
 The layout is defined once, as a map from coefficient index to a named slot; the field
-value at an index is a separate lookup. Because the dumped names and the values the proofs
-use come from the same definition, `lean/scripts/dump-layout.sh` is a cross-check against
-the other implementations of this ordering — `contracts/src/libs/PubInputs.sol ::
-compress(Transact, aux)` and `test/ref/compress.ts :: coeffs` — rather than a restatement
-of a second copy.
+value at an index is a separate lookup. The dumped names and the values the proofs use come
+from the same definition, so `lean/scripts/dump-layout.sh` cross-checks it against the
+other implementations of this ordering: `contracts/src/libs/PubInputs.sol ::
+compress(Transact, aux)` and `test/ref/compress.ts :: coeffs`.
 -/
 
 /-- One coefficient position of `TransactCompressN`. -/
@@ -110,7 +108,7 @@ inductive PISlot where
   | outCvDepY (j : ℕ)
 deriving Repr, DecidableEq, Inhabited
 
-/-- The layout of `TransactCompressN(nIn, nOut)` — `src/lib/poly_eval.circom:64-108`.
+/-- The layout of `TransactCompressN(nIn, nOut)` — `src/lib/poly_eval.circom:63-107`.
 Single source of truth. -/
 def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   let oNf := 1
@@ -153,13 +151,12 @@ def txCoeffs (w : TxWitness depth nIn nOut) (k : ℕ) : F :=
 
 /-! ### Inverting the layout
 
-`piSlot` maps a coefficient index to a slot. `slotIndex` maps back, which is what turns
-"these two transactions differ in `nullifier[1]`" into "their coefficient vectors differ at
-index `k`" — the hypothesis `polyEval_binding` needs. Without it the binding theorem can
-only be applied by someone who already knows the coefficient index.
+`piSlot` maps a coefficient index to a slot. `slotIndex` maps back, turning "these two
+transactions differ in `nullifier[1]`" into "their coefficient vectors differ at index
+`k`", the hypothesis `polyEval_binding` needs.
 -/
 
-/-- The slots a `(nIn, nOut)` instance actually has. Indexed constructors are in range only
+/-- The slots a `(nIn, nOut)` instance has. Indexed constructors are in range only
 for the slots that exist. -/
 def PISlot.InRange (nIn nOut : ℕ) : PISlot → Prop
   | .nullifier i | .inCvX i | .inCvY i => i < nIn
@@ -201,13 +198,12 @@ theorem piSlot_slotIndex {nIn nOut : ℕ} {s : PISlot} (hs : s.InRange nIn nOut)
 /-- **`slotIndex` is a retraction of `piSlot` too.** With `piSlot_slotIndex` this makes the
 two a bijection between coefficient indices below `piCount` and in-range slots.
 
-`piSlot_slotIndex` alone is enough to *find* the index of a named slot, which is all
-`transact_pi_binding_slot` needs. This direction is what lets a proof go the other way —
-"no index other than this one carries this slot" — which is what any statement about a
-*single* coefficient being free or pinned requires. -/
+`piSlot_slotIndex` suffices to find the index of a named slot, which is all
+`transact_pi_binding_slot` needs. This direction shows that no other index carries the
+slot, which any statement about a single coefficient being free or pinned requires. -/
 theorem slotIndex_piSlot (nIn nOut : ℕ) {k : ℕ} (hk : k < piCount nIn nOut) :
     slotIndex nIn nOut (piSlot nIn nOut k) = k := by
-  -- `split_ifs` and `split` both blow simp's step budget on the `ite` chain under
+  -- `split_ifs` and `split` both exceed simp's step budget on the `ite` chain under
   -- `slotIndex`'s matcher, so the chain is peeled by hand. Each `rw` is syntactic and the
   -- resulting goal is one linear arithmetic fact, including the interleaved coordinate
   -- slots, where `omega` handles the `/ 2` and `% 2`.
@@ -261,16 +257,15 @@ theorem txCoeffs_slotIndex {depth nIn nOut : ℕ} (w : TxWitness depth nIn nOut)
 
 /-! ### Moving one slot
 
-`txCoeffs_eq_update` is the bridge from "these two witnesses agree on every public input
-but one" to "their coefficient vectors differ in exactly one place", which is the shape
-`polyEval_update` and `polyEval_forge` consume. It needs both halves of the layout
-bijection: `piSlot_slotIndex` to place the moved slot, `slotIndex_piSlot` to know no other
-index carries it.
+`txCoeffs_eq_update` turns "these two witnesses agree on every public input but one" into
+"their coefficient vectors differ in exactly one place", the shape `polyEval_update` and
+`polyEval_forge` consume. It uses both halves of the layout bijection: `piSlot_slotIndex`
+to place the moved slot, `slotIndex_piSlot` to show no other index carries it.
 
-Kept as the standing statement of what a free slot would buy an attacker. Every slot in
-this layout is pinned by a constraint in `TransactSat`, so no witness pair satisfying its
-hypothesis exists at a single slot — but that is a property of the layout's membership, not
-of this lemma, and it is the property a future slot addition has to re-establish.
+It states what a free slot would allow an attacker. Every slot in this layout is pinned by
+a constraint in `TransactSat`, so no satisfying witness pair differs at a single slot; that
+is a property of the layout's membership, not of this lemma, and must be re-established
+for any added slot.
 -/
 
 /-- Two witnesses agreeing on every slot but `s` have coefficient vectors related by a

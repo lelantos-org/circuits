@@ -9,30 +9,27 @@ Poseidon is modelled as an opaque function `poseidon : List F → F`. Every circ
 ## Collision resistance is a hypothesis, not an axiom
 
 `Function.Injective poseidon` is refutable: `List F` is infinite and `F` is finite, so no
-injection exists. `poseidon_not_injective` proves this. Asserting it as an axiom makes the
-development contradictory, and a contradictory development proves everything — `False`
-yields `TxWellFormed w` for every `w`, satisfying or not, while still type-checking and
-still passing `#print axioms`.
+injection exists (`poseidon_not_injective`). As an axiom it would make the development
+inconsistent: `False` would yield `TxWellFormed w` for every `w` while still type-checking
+and passing `#print axioms`.
 
-Weakening the conclusion to `P ∨ PoseidonCollision` does not help either: `PoseidonCollision`
-is provable (`poseidon_collision`), so such a statement is discharged by `Or.inr` and carries
-no information. The same applies to any formulation that merely asserts the existence of
-some collision. A non-trivial treatment must either name the concrete colliding preimages
-built from the prover's own witness, or move to a concrete-security formulation with an
-explicit adversary and advantage bound; neither is attempted here.
+A conclusion of the form `P ∨ PoseidonCollision` is equally uninformative, since
+`PoseidonCollision` is provable (`poseidon_collision`) and discharges it by `Or.inr`; the same
+holds for any statement that only asserts some collision exists. A non-trivial treatment
+requires either concrete colliding preimages built from the prover's witness or a
+concrete-security formulation with an explicit adversary and advantage bound. Neither is
+modelled here.
 
-What is done instead: collision resistance appears as an explicit hypothesis
-`hcr : ¬ PoseidonCollision` on the theorems that need it, and nowhere else. That hypothesis
-is unsatisfiable, so those theorems are vacuous read literally, but the vacuity is local and
-visible in the statement: the environment stays consistent, no other theorem is weakened,
-and `transact_sound` and the whole arithmetic layer depend on no hash assumption. See
-`Lelantos.TxBinding` for where the hypothesis is discharged, and `lean/README.md` for the
-resulting list of what is not proved.
+Collision resistance instead appears as an explicit hypothesis `hcr : ¬ PoseidonCollision`
+on the theorems that need it, and nowhere else. The hypothesis is unsatisfiable, so those
+theorems are vacuous read literally, but the vacuity is local and visible in the statement:
+the environment stays consistent, no other theorem is weakened, and `transact_sound` and the
+arithmetic layer depend on no hash assumption. See `Lelantos.TxBinding` for where the
+hypothesis is discharged, and `lean/README.md` for the list of what is not proved.
 
-Modelling the argument list as a `List` (rather than a fixed arity) also gives
-cross-arity separation for free, which is sound to assume here: circom instantiates
-`Poseidon(3)` and `Poseidon(4)` as genuinely different permutations, so an input to one
-is never an input to the other.
+Modelling the arguments as a `List` rather than a fixed arity also gives cross-arity
+separation. This matches circom, which instantiates `Poseidon(3)` and `Poseidon(4)` as
+distinct permutations.
 
 ## Tags
 

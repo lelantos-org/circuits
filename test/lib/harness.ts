@@ -1,37 +1,34 @@
-// Suite scaffolding: the `before` hook almost every suite was writing by hand.
+// Suite scaffolding: a shared `before` hook for loading circuits and gadgets.
 //
-// A dozen suites opened with some subset of `loadCircuit(WRAPPER)`,
-// `Poseidon.build()` and `Jubjub.build()`, assigning into `let` bindings
-// declared above. The bodies differed only in which of the three they wanted,
-// so a change to how a circuit is loaded — the projection wrapper, a new
-// artifact — had a dozen landing sites.
+// Suites need some subset of `loadCircuit(WRAPPER)`, `Poseidon.build()` and
+// `Jubjub.build()`. Centralising the hook gives a change to circuit loading
+// (the projection wrapper, a new artifact) a single site.
 //
-// Four suites still build directly, each for a reason `useCircuit` does not
-// cover: `fuzz/fixed_base_mul.fuzz.test.ts` loads three circuits in one
-// `Promise.all`; `formal/pubsignal_order.test.ts` loads a per-shape path inside
-// a nested hook and keeps the witness, not the tester;
-// `transact/binding.test.ts` deliberately loads the UNWRAPPED circuit to prove
-// the challenge-only fields are not signals; `underconstrained_selftest.test.ts`
-// wants `compileConstraintsOnly`, a different artifact.
+// Four suites build directly, each for a reason `useCircuit` does not cover:
+// `fuzz/fixed_base_mul.fuzz.test.ts` loads three circuits in one `Promise.all`;
+// `formal/pubsignal_order.test.ts` loads a per-shape path inside a nested hook
+// and keeps the witness, not the tester; `transact/binding.test.ts` loads the
+// unwrapped circuit to prove the challenge-only fields are not signals;
+// `underconstrained_selftest.test.ts` needs `compileConstraintsOnly`, a
+// different artifact.
 //
-// The shape here is `test/transact/setup.ts :: useTransactCircuit`, which got it
-// right first: return a STABLE context object and let `before` populate it, so
-// callers destructure at test time rather than capturing an undefined binding at
-// declaration time. That file now builds on this.
+// The pattern matches `test/transact/setup.ts :: useTransactCircuit`, which
+// builds on this module: return a stable context object and let `before`
+// populate it, so callers destructure at test time rather than capturing an
+// undefined binding at declaration time.
 //
-// WHY `before` AND NOT A TOP-LEVEL AWAIT. `before` is here to DEFER, not to
-// cache — `loadCircuit` already caches. Mocha loads every spec file before
-// running any test, so a module-level `await loadCircuit(...)` would compile
-// every circuit on every invocation, including a `--grep` replay of one shrunk
-// fuzz counterexample (the workflow the justfile documents), which today pays
-// for one circuit. A `before` failure also names its suite and fails only that
-// suite, where a top-level-await failure aborts the run with no attribution,
-// and `this.timeout(...)` on the describe covers a hook but not a module load.
+// `before` rather than top-level await: `before` defers the load (`loadCircuit`
+// already caches). Mocha loads every spec file before running any test, so a
+// module-level `await loadCircuit(...)` would compile every circuit on every
+// invocation, including a `--grep` replay of one shrunk fuzz counterexample (the
+// workflow the justfile documents), which otherwise compiles one circuit. A
+// `before` failure also names and fails only its suite, whereas a
+// top-level-await failure aborts the run without attribution, and
+// `this.timeout(...)` on the describe covers a hook but not a module load.
 //
-// `Jubjub.build()` is memoized here as well. It initialises two circomlibjs wasm
-// modules and was NOT cached, so every suite that wanted a curve paid for it
-// again; `loadCircuit` and `compileConstraintsOnly` were already memoized per
-// path, so this closes the last repeated setup cost.
+// `Jubjub.build()` is memoized here because it initialises two circomlibjs wasm
+// modules. `loadCircuit` and `compileConstraintsOnly` are memoized per path, so
+// no setup cost repeats across suites.
 
 import { Jubjub, Poseidon } from "../helpers";
 import { loadCircuit, type CircuitTester } from "./circuit";
@@ -51,15 +48,14 @@ export interface Gadgets {
 /**
  * A context whose fields throw until `before` fills them.
  *
- * The type says `circuit: CircuitTester`, which is a lie for the interval
- * between `useCircuit()` returning and the hook running — and the natural way to
- * get that lie wrong is to destructure at `describe` scope instead of inside the
- * `it`. That used to surface as `Cannot read properties of undefined (reading
+ * The type declares `circuit: CircuitTester`, which does not hold between
+ * `useCircuit()` returning and the hook running. Destructuring at `describe`
+ * scope instead of inside the `it` reads the field in that interval; with plain
+ * fields that fails as `Cannot read properties of undefined (reading
  * 'calculateWitness')`, naming neither the suite nor the mistake.
  *
- * Defining the fields as throwing getters makes the rule enforced rather than a
- * comment, and costs nothing at a call site: `ctx.circuit` still reads as a
- * plain property once the hook has run.
+ * Throwing getters enforce the rule at no cost to call sites: `ctx.circuit`
+ * reads as a plain property once the hook has run.
  */
 export function pendingCtx<T extends object>(keys: readonly (keyof T)[], what: string): T {
     const store: Partial<T> = {};
@@ -100,10 +96,11 @@ export function useGadgets(): Gadgets {
 }
 
 /**
+ * Load a circuit and the reference gadgets in `before`.
  *
  * `wrap` adapts the tester before it is handed over; `test/transact/setup.ts`
- * uses it for `projectingTester`. See that function's docblock for why the
- * projection is applied at load.
+ * uses it for `projectingTester`, whose docblock explains why the projection is
+ * applied at load.
  */
 export function useCircuit(
     path: string,

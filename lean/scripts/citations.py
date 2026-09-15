@@ -1,18 +1,12 @@
-"""The citation scanner, shared by the checks that read citations.
-
-`check-citations.py` asks whether each citation resolves; `check-coverage.py` asks
-whether the citations together cover every constraint the circom emits. They are
-different questions over the same scan, and two copies of a regex this fiddly would
-drift — which is the failure mode both scripts exist to catch.
+"""Citation scanner shared by `check-citations.py` (does each citation resolve) and
+`check-coverage.py` (do the citations cover every constraint).
 
 A citation is one of three forms:
 
-  * `src/lib/note.circom:61` or `:61-68` — full, self-contained;
-  * `` `:61-68` `` — bare, resolving against the most recent path named in the same
-    file, which is the convention the Lean field doc comments and the `FIDELITY.md`
-    tables use;
-  * `src/lib/note.circom` with no line number — a mention, where existence is the
-    only checkable claim.
+  * `src/lib/note.circom:61` or `:61-68`: full, self-contained;
+  * `` `:61-68` ``: bare, resolving against the most recent path named in the same
+    file, as used by Lean field doc comments and `FIDELITY.md` tables;
+  * `src/lib/note.circom` with no line number: a mention, checked only for existence.
 """
 
 from __future__ import annotations
@@ -26,40 +20,32 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from checks import REPO
 
-# Roots a citation may point at. Anchored so that a path appearing inside a
-# longer one — `node_modules/circomlibjs/src/babyjub.js` — is not mistaken for a
-# repo-relative `src/...` path.
+# Roots a citation may point at. The lookbehind prevents a path nested in a longer
+# one (`node_modules/circomlibjs/src/babyjub.js`) from matching as `src/...`.
 FULL = re.compile(
     r"(?<![\w/])(?P<path>(?:src|lean|scripts|contracts)/[\w./-]+\.\w+)"
     r":(?P<lo>\d+)(?:-(?P<hi>\d+))?"
 )
 # A bare citation, possibly a comma-separated list of spans: `` `:71-78, 119-120` ``.
-# The list form is used where one model field mirrors two disjoint blocks — a gadget
-# instantiated in one place and bound to an output in another. It used to be read as a
-# single span, silently dropping everything after the first comma, so several fields
-# that looked cited had no working citation at all; `check-coverage.py` is what
-# surfaced that. The closing backtick is required, so a span list ends where it ends.
+# The list form covers a model field mirroring disjoint blocks, such as a gadget
+# instantiated in one place and bound to an output in another. Every span in the list
+# is parsed; the closing backtick is required and terminates the list.
 BARE = re.compile(r"`:(?P<spans>\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*)`")
 SPAN = re.compile(r"(?P<lo>\d+)(?:-(?P<hi>\d+))?")
 
-# A repo-relative path named without a line number. `FULL` requires `:lineno`, so these
-# were unchecked, and several had rotted: `src/2x2.circom` and `src/3x3.circom` were
-# deleted shapes still described as deployed, and `sdk/src/bundle/snark-compression.ts`
-# named a file that had moved to `test/ref/compress.ts`. Existence is all that can be
-# checked here — there is no span to anchor against — but existence is what rots.
+# A repo-relative path named without a line number, which `FULL` does not match. Only
+# existence is checked, since there is no span to anchor against.
 MENTION = re.compile(
     r"(?<![\w/])(?P<path>(?:src|lean|scripts|contracts|sdk|test|vectors)/[\w./-]+\.\w+)"
     r"(?![\w:])"
 )
 
-# A markdown heading naming a source file, which sets the referent for the bare
-# citations under it without itself being one. `FIDELITY.md` heads each table with
-# the file it transcribes and then cites lines bare; without this those rows resolve
-# against whatever file was last named with a line number, which is either wrong or
-# — before any full citation appears — nothing at all, leaving them unchecked.
+# A markdown heading naming a source file sets the referent for the bare citations
+# below it without being a citation itself. `FIDELITY.md` heads each table with the
+# transcribed file and cites lines bare; without this, those rows would resolve against
+# the last full citation, or have no referent and go unchecked.
 #
-# Headings only. A path mentioned in prose must not silently re-aim the rows that
-# follow it, and several do exactly that.
+# Only headings set the referent; paths mentioned in prose do not.
 ANCHOR = re.compile(
     r"^#{1,6}\s.*?(?<![\w/])(?P<path>(?:src|lean|scripts|contracts)/[\w./-]+\.\w+)"
     r"(?![\w./-]*:\d)"
@@ -87,10 +73,8 @@ class Citation(NamedTuple):
 def citations_in(path: str) -> Iterator[Citation]:
     """Every citation in one file, in source order.
 
-    A bare citation resolves against the most recent path named in the same file,
-    with or without a line number, which is the convention the Lean sources and
-    `FIDELITY.md` use. Bare citations before any path have no referent and are
-    skipped rather than guessed at.
+    A bare citation resolves against the most recent full citation or heading path in
+    the same file. Bare citations with no preceding referent are skipped.
     """
     source = os.path.relpath(path, REPO)
     context: str | None = None
@@ -114,9 +98,8 @@ def citations_in(path: str) -> Iterator[Citation]:
                     yield Citation(source, lineno, context, lo, hi, True, text)
 
 
-# circom comments, stripped before a line is read as code. A `//` note mentioning
-# `===` is not a constraint, and a template name quoted in a comment is not that
-# template's vocabulary for anchoring purposes.
+# circom comments, stripped before a line is read as code, so `===` or identifiers in
+# comments count neither as constraints nor as anchoring vocabulary.
 COMMENT = re.compile(r"//.*$|/\*.*?\*/", re.S)
 
 

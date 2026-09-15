@@ -12,17 +12,15 @@ current node, three siblings, and the one-hot selector produced by `PathIndexSel
     c2 <== s2*cur + (s0+s1)*sib1 + s3*sib2;
     c3 <== s3*cur + (1-s3)*sib2;
 
-`merkleLevel4_sound` shows this arithmetic really is the insertion of `cur` at position
-`path_index` into the sibling list — `slots` below — for every one of the four cases. If
-the selector were not one-hot the same arithmetic could duplicate `cur` into two slots or
-drop a sibling, which is why `pathIndexSelectors_sound` is a prerequisite rather than a
-convenience.
+`merkleLevel4_sound` shows this arithmetic is the insertion of `cur` at position
+`path_index` into the sibling list (`slots` below) in each of the four cases. If the
+selector were not one-hot the same arithmetic could duplicate `cur` into two slots or drop
+a sibling, so `pathIndexSelectors_sound` is a prerequisite.
 
-`merkleProofOrDummy_sound` is the payoff: a slot with `is_dummy = 0` genuinely proves
-membership of its leaf under `root`. A slot with `is_dummy = 1` proves *nothing at all* —
-the path is entirely unconstrained — which is sound only because `DummyZeroValue` forces
-such a slot to carry value `0`. That asymmetry is stated explicitly rather than hidden,
-because it is a real obligation on the rest of the system.
+`merkleProofOrDummy_sound`: a slot with `is_dummy = 0` proves membership of its leaf under
+`root`. A slot with `is_dummy = 1` proves nothing, since the path is unconstrained; this is
+sound only because `DummyZeroValue` forces such a slot to carry value `0`, which is an
+obligation on the rest of the system.
 -/
 
 namespace Lelantos
@@ -84,16 +82,16 @@ structure MerkleRootSat (depth : ℕ) (leaf : F) (pe : ℕ → ℕ → F) (pi : 
   /-- `:98` — the root is the top of the chain. -/
   top : root = cur depth
 
-/-- What it *means* for a leaf to sit under a root along a given path: the abstract
-hash chain, with no reference to selector signals. -/
+/-- A leaf sits under a root along a given path: the abstract hash chain, with no
+reference to selector signals. -/
 def MerkleMember (depth : ℕ) (leaf : F) (pe : ℕ → ℕ → F) (pi : ℕ → F) (root : F) : Prop :=
   ∃ chain : ℕ → F,
     chain 0 = leaf ∧
     (∀ d, d < depth → chain (d + 1) = merkleNode (slots (pi d).val (chain d) (pe d))) ∧
     root = chain depth
 
-/-- **Soundness of `MerkleRoot`.** A satisfying assignment exhibits a genuine hash chain,
-and every path index is a valid quaternary digit. -/
+/-- **Soundness of `MerkleRoot`.** A satisfying assignment exhibits a hash chain, and every
+path index is a valid quaternary digit. -/
 theorem merkleRoot_sound {depth : ℕ} {leaf root : F} {pe : ℕ → ℕ → F} {pi : ℕ → F}
     {b s c : ℕ → ℕ → F} {curChain : ℕ → F}
     (h : MerkleRootSat depth leaf pe pi b s c curChain root) :
@@ -120,8 +118,8 @@ structure MerkleProofOrDummySat (depth : ℕ) (leaf : F) (pe : ℕ → ℕ → F
 
 /-- **Soundness of `MerkleProofOrDummy`.** A non-dummy slot proves membership.
 
-The dummy branch is deliberately absent from the conclusion: when `is_dummy = 1` nothing
-about the path is constrained, so no membership statement is available or intended. -/
+The dummy branch is absent from the conclusion: when `is_dummy = 1` nothing about the path
+is constrained, so no membership statement holds. -/
 theorem merkleProofOrDummy_sound {depth : ℕ} {leaf root isDummy diff computed : F}
     {pe : ℕ → ℕ → F} {pi : ℕ → F} {b s c : ℕ → ℕ → F} {curChain : ℕ → F}
     (h : MerkleProofOrDummySat depth leaf pe pi root isDummy diff computed b s c curChain)
@@ -135,10 +133,10 @@ theorem merkleProofOrDummy_sound {depth : ℕ} {leaf root isDummy diff computed 
 
 /-! ## Binding
 
-`MerkleMember` on its own is close to tautological: it says a hash chain *exists*, and the
-witness supplies one. What makes membership a real commitment is that the root determines
-the chain — which needs Poseidon collision resistance. That is `merkleMember_inj`, and it
-is the reason `spentNote_sound`'s `member` field is worth anything.
+`MerkleMember` alone only states that a hash chain exists, which the witness supplies.
+Membership is binding when the root determines the chain, which requires Poseidon
+collision resistance. That is `merkleMember_inj`, on which the meaning of
+`spentNote_sound`'s `member` field depends.
 -/
 
 /-- Inserting at a fixed position is injective: matching all four slots forces the same
@@ -157,11 +155,10 @@ theorem slots_inj {t : ℕ} (ht : t < 4) {cur cur' : F} {sib sib' : ℕ → F}
     interval_cases k <;> assumption
 
 /-- **Merkle membership is binding.** Two membership proofs at the same position under the
-same root have the same leaf and the same siblings — unless the prover found a Poseidon
-collision.
+same root have the same leaf and the same siblings, absent a Poseidon collision.
 
-This is what upgrades `MerkleMember` from "a chain exists" to "the root commits to this
-leaf at this position". -/
+This strengthens `MerkleMember` from "a chain exists" to "the root commits to this leaf at
+this position". -/
 theorem merkleMember_inj (hnc : ¬ PoseidonCollision)
     {depth : ℕ} {leaf leaf' root : F} {pe pe' : ℕ → ℕ → F} {pi : ℕ → F}
     (hidx : ∀ d, d < depth → (pi d).val < 4)
@@ -203,7 +200,7 @@ theorem merkleProofOrDummy_idx {depth : ℕ} {leaf root isDummy diff computed : 
     ∀ d, d < depth → (pi d).val < 4 :=
   (merkleRoot_sound h.recomputed).2
 
-/-- A dummy slot is boolean-flagged; this is the only thing its constraints give us. -/
+/-- The dummy flag is boolean; this is all a dummy slot's constraints establish. -/
 theorem merkleProofOrDummy_bit {depth : ℕ} {leaf root isDummy diff computed : F}
     {pe : ℕ → ℕ → F} {pi : ℕ → F} {b s c : ℕ → ℕ → F} {curChain : ℕ → F}
     (h : MerkleProofOrDummySat depth leaf pe pi root isDummy diff computed b s c curChain) :

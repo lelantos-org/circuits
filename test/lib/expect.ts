@@ -1,8 +1,8 @@
 // Assertions over circom_tester witnesses.
 //
 // `circuit.calculateWitness(input, true)` either succeeds or throws. A
-// rejection test does NOT reduce to a bare try/catch, because the two throw
-// classes mean opposite things: see `SHAPE_ERROR` below.
+// rejection test is not a bare try/catch, because the two throw classes mean
+// opposite things: see `SHAPE_ERROR` below.
 
 import { expect } from "chai";
 
@@ -13,8 +13,8 @@ import type { Field } from "../helpers";
 // alongside the other witness assertions.
 export { readOutput };
 
-// The witness calculator fails in two unrelated ways, and only one of them is
-// evidence that a constraint fired.
+// The witness calculator fails in two unrelated ways, and only one indicates
+// that a constraint fired.
 //
 // A violated constraint raises `Assert Failed.`, followed by one
 // `Error in template <Name>_<id> line: <n>` frame per enclosing template:
@@ -23,16 +23,16 @@ export { readOutput };
 //     Error in template Num2Bits_0 line: 38
 //     Error in template Probe_1 line: 8
 //
-// A malformed input object raises something else entirely — and, critically, a
-// MISTYPED SIGNAL NAME lands here rather than being ignored: circom counts the
-// values it was handed, so an unknown key reads as a surplus value.
+// A malformed input object raises a different error. A mistyped signal name
+// also lands here rather than being ignored: circom counts the values it
+// receives, so an unknown key reads as a surplus value.
 //
 //     Not enough values for input signal b
 //     Too many values for input signal zzz      <- the typo case
 //     Not all inputs have been set. Only 1 out of 3
 //
-// A rejection test that accepts either class is vacuous: rename a signal and it
-// still "passes", now proving only that the test's own input object is wrong.
+// A rejection test that accepts either class is vacuous: after a signal rename
+// it still passes, proving only that the test's input object is wrong.
 // `expectWitnessFails` therefore treats the second class as a test bug.
 const SHAPE_ERROR =
     /Not enough values for input signal|Too many values for input signal|Not all inputs have been set/;
@@ -40,12 +40,12 @@ const SHAPE_ERROR =
 const CONSTRAINT_ERROR = /Assert Failed/;
 
 /**
- * Decide what a witness-calculator failure means, or throw saying it proves
- * nothing.
+ * Classify a witness-calculator failure, throwing unless it is attributable to
+ * the circuit.
  *
- * Returns normally only for the one class that is evidence about the circuit: a
- * constraint fired. The other two are test bugs, and reporting them as passes is
- * how a rejection suite goes green while checking nothing.
+ * Returns normally only when a constraint fired. The other two classes are test
+ * bugs; counting them as passes would let a rejection suite pass without
+ * checking the circuit.
  *
  * `context` is prepended to the diagnostic, so each caller names what it was
  * asserting.
@@ -81,22 +81,21 @@ export interface WitnessFailureOptions {
      * every frame of the error, so either the gadget or an enclosing template
      * may be named.
      *
-     * Pins WHICH constraint rejected, not merely that something did. Worth
-     * setting wherever two different constraints could plausibly cover a field
-     * and the test is asserting a specific one.
+     * Pins which constraint rejected, not only that one did. Set it where two
+     * constraints could cover a field and the test targets a specific one.
      */
     template?: string;
 }
 
 /**
- * Assert that witness generation for `input` fails a CONSTRAINT.
+ * Assert that witness generation for `input` fails a constraint.
  *
  * `message` should name the constraint under test: a failure here means that
  * constraint did not fire.
  *
  * An input-shape error (see `SHAPE_ERROR` above) is reported as a test bug
- * rather than counted as a pass, so a renamed or mistyped signal cannot turn a
- * rejection suite green while proving nothing.
+ * rather than counted as a pass, so a renamed or mistyped signal cannot make a
+ * rejection suite pass vacuously.
  */
 export async function expectWitnessFails(
     circuit: CircuitTester,
@@ -179,24 +178,22 @@ export async function witnessMatchesRoot(
  * Assert that a witness diverging from the calldata it is proved against cannot
  * be forged into a passing proof.
  *
- * This is the soundness shape the rest of this file cannot express. Every other
- * batch assertion derives `(y, z)` from the same object it feeds the circuit, so
- * the witness and the calldata are the same thing by construction. A real
- * prover authors them separately: `z` arrives from the contract's hash over
- * calldata, and nothing forces the witness to agree with it. The gap between the
- * two is where an unpinned coefficient lives.
+ * The other assertions in this file derive `(y, z)` from the same object fed to
+ * the circuit, so witness and calldata coincide by construction. A prover
+ * supplies them separately: `z` comes from the contract's hash over calldata,
+ * and the witness need not agree with it. An unpinned coefficient is exploitable
+ * through that difference.
  *
- * `input.z` must already be the CALLDATA challenge and `calldataY` the value the
- * contract will compare against — see `lib/batch.ts :: bindFiatShamir`.
+ * `input.z` must already be the calldata challenge and `calldataY` the value the
+ * contract compares against; see `lib/batch.ts :: bindFiatShamir`.
  *
- * The circuit is sound on this field if EITHER:
+ * The circuit is sound on this field if either:
  *   - a constraint rejects the divergent witness, or
  *   - it is admitted but yields `y != calldataY`, so the on-chain equality
  *     fails.
  *
- * It is BROKEN if the witness is admitted and `y == calldataY`: the contract
- * validated one set of values and the proof attests to another. That is a
- * forgery, and it is what this assertion exists to name.
+ * It is unsound if the witness is admitted and `y == calldataY`: the contract
+ * validated one set of values and the proof attests to another (a forgery).
  */
 export async function expectNotForgeable(
     circuit: CircuitTester,
@@ -241,13 +238,12 @@ export async function expectNotForgeable(
 /**
  * Assert that a witness view and a calldata view describe different statements.
  *
- * The guard a divergence case needs before it asserts anything. It exists
- * because a mutation run showed all 49 batch cases surviving a SHALLOW
- * `calldataView`: the snapshot then shares the witness's arrays, the mutation
- * moves both, and every case compares a view against itself and passes.
+ * Precondition for a divergence case. Guards against vacuous passes: with a
+ * shallow `calldataView` the snapshot shares the witness's arrays, the mutation
+ * changes both, and every case compares a view against itself and passes.
  *
- * Both arguments are challenge preimages — `treeUpdateBatchChallenge` for the
- * batch, `flatten` for transact — so the comparison covers exactly the words the
+ * Both arguments are challenge preimages (`treeUpdateBatchChallenge` for the
+ * batch, `flatten` for transact), so the comparison covers exactly the words the
  * contract hashes.
  */
 export function assertViewsDiverge(witness: Field[], calldata: Field[], field: string): void {

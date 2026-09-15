@@ -3,28 +3,27 @@ import Lelantos.Gadgets.ValueCommit
 /-!
 # `PerAssetPointBalance` is **not** a conservation check
 
-`src/lib/balance.circom:144` checks the Edwards point equation
+`src/lib/balance.circom:142` checks the Edwards point equation
 
     Σ in_cv ⊕ pub_in_pt ⊕ Σ out_rH  ==  Σ out_cv ⊕ pub_out_pt ⊕ Σ in_rH
 
-and the source comment is emphatic that this is defence in depth only
-(`src/lib/balance.circom:140-141`, `src/README.md` § 6, "Point balance
-(defense in depth)"). This module turns that
-warning into a theorem.
+which the source documents as defence in depth only
+(`src/lib/balance.circom:138-139`, `src/README.md` § 6, "Point balance
+(defense in depth)"). This module states that as a theorem.
 
-The reason is `HashToAssetGen`: it Pedersen-hashes a 72-bit message, which circomlib packs
-into a *single* segment, so every asset generator is a publicly computable multiple of one
-shared base — `Lelantos.assetGen`. Asset ids `1, 2, 3` land in consecutive multipliers, so
+`HashToAssetGen` Pedersen-hashes a 72-bit message, which circomlib packs into a single
+segment, so every asset generator is a publicly computable multiple of one shared base
+(`Lelantos.assetGen`). Asset ids `1, 2, 3` map to consecutive multipliers, so
 
     V¹ + V³ = 2 · V²
 
-exactly, and a prover can spend one unit of asset 1 plus one unit of asset 3 while minting
-two units of asset 2. `pointBalance_not_sound` constructs precisely that assignment: it
-satisfies the point equation and violates per-asset conservation for asset 1.
+and a prover can spend one unit of asset 1 plus one unit of asset 3 while minting two
+units of asset 2. `pointBalance_not_sound` constructs that assignment: it satisfies the
+point equation and violates per-asset conservation for asset 1.
 
-Consequence for the rest of the development: conservation is proved **only** from
-`perAssetValueBalance_nat`, and no theorem is allowed to appeal to the point equation.
-The runtime counterpart of this proof is `test/transact/multi_asset.test.ts`.
+Conservation is therefore proved only from `perAssetValueBalance_nat`, and no theorem
+appeals to the point equation. The runtime counterpart is
+`test/transact/multi_asset.test.ts`.
 -/
 
 namespace Lelantos
@@ -40,17 +39,15 @@ def pbGroupRhs (nOut : ℕ) (outCv : ℕ → G) (pubOutPt : G) (inRH : ℕ → G
 /-! ## `PointSum`, over coordinates
 
 `PointSum(N)` (`src/lib/value_commit.circom:157-183`) is what the constraint is written in
-terms of, and it is a chain of `BabyAdd` over **coordinate pairs**. Modelling it that way
-matters for more than tidiness: the earlier group-level formulation forced `TransactSat` to
-carry six fields asserting that each published `cv` / `rH` pair is the image under `coords`
-of a subgroup element, which the circuit does not check. Those were the only fields in the
-whole model with no circom counterpart, and they were in the dangerous direction of
-`FIDELITY.md`'s table — a model constraint the prover need not satisfy. Stating the sum over
-`Pt` removes them.
+terms of, a chain of `BabyAdd` over coordinate pairs, and is modelled over `Pt`. A
+group-level sum would require `TransactSat` to assert that each published `cv` / `rH` pair
+is the image under `coords` of a subgroup element. The circuit does not check that, so
+such fields would be model constraints the prover need not satisfy, the unsafe direction
+of `FIDELITY.md`'s table.
 
-The three-case shape is circom's, not a convenience: `N = 0` emits the identity literally
-and `N = 1` emits the single point, neither through `BabyAdd`. Folding those into the
-recursive case would assume `babyAdd ⟨0,1⟩ p = p`, which the gadget axioms do not give. -/
+The three cases follow circom: `N = 0` emits the identity literally and `N = 1` emits the
+single point, neither through `BabyAdd`. Folding those into the recursive case would
+assume `babyAdd ⟨0,1⟩ p = p`, which the gadget axioms do not provide. -/
 noncomputable def ptSum (pts : ℕ → Pt) : ℕ → Pt
   | 0 => ⟨0, 1⟩
   | 1 => pts 0
@@ -74,15 +71,15 @@ theorem ptSum_coords (pts : ℕ → G) : ∀ n, 1 ≤ n →
       simp [pointSum, Finset.sum_range_succ]
 
 /-- The left-hand summand list: every input `cv`, then the public bucket's point, then
-every output `rH` — `src/lib/balance.circom:156-168`. -/
+every output `rH` — `src/lib/balance.circom:154-166`. -/
 def pbLhs (nIn : ℕ) (inCv : ℕ → Pt) (pubInPt : Pt) (outRH : ℕ → Pt) : ℕ → Pt := fun i =>
   if i < nIn then inCv i else if i = nIn then pubInPt else outRH (i - nIn - 1)
 
-/-- The right-hand summand list — `src/lib/balance.circom:173-185`. -/
+/-- The right-hand summand list — `src/lib/balance.circom:171-183`. -/
 def pbRhs (nOut : ℕ) (outCv : ℕ → Pt) (pubOutPt : Pt) (inRH : ℕ → Pt) : ℕ → Pt := fun j =>
   if j < nOut then outCv j else if j = nOut then pubOutPt else inRH (j - nOut - 1)
 
-/-- The constraint of `PerAssetPointBalance(N_IN, N_OUT)` — `src/lib/balance.circom:144-188`,
+/-- The constraint of `PerAssetPointBalance(N_IN, N_OUT)` — `src/lib/balance.circom:142-186`,
 whose last two lines are the coordinate equalities, over the two `PointSum` chains above. -/
 def PerAssetPointBalanceSat (nIn nOut : ℕ) (inCv outCv inRH outRH : ℕ → Pt)
     (pubInPt pubOutPt : Pt) : Prop :=
@@ -146,9 +143,8 @@ theorem pbRhs_coords (nOut : ℕ) (outCv : ℕ → G) (pubOutPt : G) (inRH : ℕ
       = fun j => coords (pbGroupRhs nOut outCv pubOutPt inRH j) := by
   funext j; simp only [pbRhs, pbGroupRhs]; split_ifs <;> rfl
 
-/-- **A group-level identity gives a satisfying coordinate assignment.** The direction the
-counterexample needs: it is built where the arithmetic is legible and lands on the
-constraint the circuit actually writes. -/
+/-- **A group-level identity gives a satisfying coordinate assignment.** The counterexample
+is built in the group and transferred to the constraint the circuit writes. -/
 theorem perAssetPointBalance_of_group {nIn nOut : ℕ} {inCv outCv inRH outRH : ℕ → G}
     {pubInPt pubOutPt : G}
     (h : pointSum (pbGroupLhs nIn inCv pubInPt outRH) (nIn + 1 + nOut)
@@ -159,10 +155,9 @@ theorem perAssetPointBalance_of_group {nIn nOut : ℕ} {inCv outCv inRH outRH : 
   rw [PerAssetPointBalanceSat, pbLhs_coords, pbRhs_coords,
     ptSum_coords _ _ (by omega), ptSum_coords _ _ (by omega), h]
 
-/-- The same equation read in the group. Available only when every published pair really is
-a subgroup element's coordinates — which the circuit does not check, so this is a lemma
-taking that as a hypothesis rather than a field of the model. Nothing consumes it; it exists
-so the counterexample below can be built where the arithmetic is legible. -/
+/-- The same equation read in the group. Requires every published pair to be a subgroup
+element's coordinates, which the circuit does not check, so this is a lemma taking that as
+a hypothesis rather than a field of the model. It has no consumers. -/
 theorem perAssetPointBalance_group {nIn nOut : ℕ} {inCv outCv inRH outRH : ℕ → G}
     {pubInPt pubOutPt : G}
     (h : PerAssetPointBalanceSat nIn nOut (fun i => coords (inCv i))
@@ -183,8 +178,7 @@ theorem assetGen_collinear : assetGen 1 + assetGen 3 = (2 : ZMod ell) • assetG
 /-! ## The counterexample
 
 One unit of asset 1 and one unit of asset 3 in; two units of asset 2 out, plus an empty
-second output slot so the shape is square rather than a convenient 2-in/1-out variant.
-Nothing public.
+second output slot so the shape is 2-in/2-out. Nothing public.
 -/
 
 /-- Input asset ids: slot 0 holds asset 1, slot 1 holds asset 3. -/
@@ -193,8 +187,8 @@ def attackInA : ℕ → F := fun i => if i = 0 then 1 else 3
 /-- Both input slots carry one unit. -/
 def attackInV : ℕ → F := fun _ => 1
 
-/-- Both output slots hold asset 2. The second one is padding — asset ids must be non-zero
-even on a zero-value output (`output.circom:49-51`), so `2` is the legal choice. -/
+/-- Both output slots hold asset 2. The second one is padding; asset ids must be non-zero
+even on a zero-value output (`output.circom:49-51`). -/
 def attackOutA : ℕ → F := fun _ => 2
 
 /-- Slot 0 carries two units, minted out of nothing; slot 1 carries none. -/
@@ -229,8 +223,8 @@ theorem attack_satisfies_pointBalance_group :
   norm_num
   linear_combination hg
 
-/-- **…and therefore accepts it as written**, over the coordinate pairs the circuit
-compares. -/
+/-- **The point equation accepts the attack as written**, over the coordinate pairs the
+circuit compares. -/
 theorem attack_satisfies_pointBalance :
     PerAssetPointBalanceSat 2 2 (fun i => coords (attackInCv r0 r1 i))
       (fun j => coords (attackOutCv s0 s1 j)) (fun i => coords (attackInRH r0 r1 i))
@@ -249,13 +243,12 @@ theorem attack_violates_conservation :
   exact one_ne_zero h
 
 /-- **`PerAssetPointBalance` is not sound as a conservation check.** There is an assignment
-satisfying the point equation whose per-asset value balance fails — at a full
-`(N_IN, N_OUT) = (2, 2)` shape, so no reader can dismiss it as an artefact of the sizes.
-The attack is shape-generic; `2x2` is used because the concrete slot arithmetic is smallest
-there.
+satisfying the point equation whose per-asset value balance fails, at the
+`(N_IN, N_OUT) = (2, 2)` shape. The attack is shape-generic; `2x2` keeps the concrete slot
+arithmetic smallest.
 
-This is why `PerAssetValueBalance` exists and why nothing downstream may substitute the
-point equation for it. -/
+`PerAssetValueBalance` is required for this reason, and nothing downstream may substitute
+the point equation for it. -/
 theorem pointBalance_not_sound :
     ∃ (inCv outCv inRH outRH : ℕ → Pt) (pubInPt pubOutPt : Pt) (inA inV outA outV : ℕ → F),
       PerAssetPointBalanceSat 2 2 inCv outCv inRH outRH pubInPt pubOutPt ∧

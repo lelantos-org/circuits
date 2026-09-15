@@ -1,15 +1,14 @@
-// Note-identity defences against faerie-gold notes, tracked as audit findings
-// F1 and F3.
+// Note-identity defences against faerie-gold notes.
 //
-// F1 — output rho uniqueness. Output rho is forced to
-//      rho = Poseidon(TAG_RHO, nullifier[0], out_index), so two outputs of one
-//      transaction cannot share a rho.
+// Output rho uniqueness: output rho is forced to
+//   rho = Poseidon(TAG_RHO, nullifier[0], out_index),
+// so two outputs of one transaction cannot share a rho.
 //
-// F3 — the nullifier binds cm. Output rho is publicly derivable from
-//      nullifier[0], and the deposit path (tree_update_batch's cms[])
-//      constrains no rho, so rho alone is not a safe nullifier key. Without cm
-//      in the preimage, a dust note planted at a victim's pk reusing a rho they
-//      already hold produces a colliding nullifier.
+// The nullifier binds cm: output rho is publicly derivable from nullifier[0],
+// and the deposit path (tree_update_batch's cms[]) constrains no rho, so rho
+// alone is not a safe nullifier key. Without cm in the preimage, a dust note
+// sent to a victim's pk with a rho the victim already holds produces a
+// colliding nullifier.
 
 import { expect } from "chai";
 

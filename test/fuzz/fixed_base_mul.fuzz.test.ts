@@ -2,9 +2,8 @@
 //
 // The unit suite [test/fixed_base_mul.test.ts](../fixed_base_mul.test.ts)
 // enumerates the small widths exhaustively and sweeps the window boundaries at
-// full width. This file covers what enumeration cannot reach: the 252-bit
-// scalar space, where 63 windows interact and a carry-shaped bug shows only for
-// particular nibble patterns.
+// full width. This file covers the 252-bit scalar space, where 63 windows
+// interact and a carry bug appears only for particular nibble patterns.
 //
 // Agreement with circomlib's EscalarMulFix is checked over arbitrary scalars.
 // The committed `vectors/` pin the same equality for the witnesses they carry;
@@ -66,8 +65,8 @@ describe("fuzz: FixedBaseMul", function () {
         );
     });
 
-    // Homomorphism pins the gadget to scalar multiplication rather than to some
-    // other function that happens to agree on the values enumerated elsewhere.
+    // Homomorphism pins the gadget to scalar multiplication rather than another
+    // function that agrees on the values enumerated elsewhere.
     // Both addends stay under 2^251 so the sum stays inside Num2Bits(252).
     it("is additively homomorphic in the scalar", async () => {
         const half = fc.bigInt(0n, (1n << 251n) - 1n);
@@ -80,8 +79,8 @@ describe("fuzz: FixedBaseMul", function () {
         );
     });
 
-    // The gadget never reduces the scalar; the group does. Adding the subgroup
-    // order must be invisible.
+    // The gadget does not reduce the scalar; the group does. Adding the subgroup
+    // order must not change the result.
     it("is invariant under adding the subgroup order", async () => {
         const room = fc.bigInt(0n, MAX_BLINDER - BABYJUB_SUBGROUP_ORDER);
         await fc.assert(
@@ -92,9 +91,8 @@ describe("fuzz: FixedBaseMul", function () {
         );
     });
 
-    // An off-curve or small-order result would mean the window tables or the
-    // accumulator had left the group — the failure mode a wrong table constant
-    // produces.
+    // An off-curve or small-order result indicates the window tables or the
+    // accumulator left the group, as a wrong table constant would cause.
     it("always lands in the prime-order subgroup", async () => {
         await fc.assert(
             fc.asyncProperty(arbBlinder(), async (s) => {

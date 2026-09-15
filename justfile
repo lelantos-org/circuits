@@ -4,39 +4,35 @@ set shell := ["bash", "-ceuo", "pipefail"]
 ROOT := justfile_directory()
 BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
-# The Hermez files were served from `https://storage.googleapis.com/zkevm/ptau`
-# until that bucket started refusing anonymous reads (403 on every object); the
-# hermez and PSE S3 mirrors are gone the same way. `lelantos-org/ptau` holds
-# byte-identical copies as release assets, which are unauthenticated and not
-# metered against any bandwidth quota.
+# Byte-identical copies of the Hermez ptau files, hosted as unauthenticated
+# GitHub release assets in `lelantos-org/ptau`.
 PTAU_URL_BASE := "https://github.com/lelantos-org/ptau/releases/download/hermez"
-# Transact(11,4,6) is on the 2^17 ceremony at 100,304 constraints, which does not
-# fit 2^16. TreeUpdateBatch(11,8) is on the 2^16 ceremony at 55,190. snarkjs
-# picks the domain from `nConstraints + nPubInputs + nOutputs`, which caps a 2^16
-# ceremony at 65,533 constraints and a 2^17 one at 131,069. See `budget` below.
+# Transact(11,4,6) uses the 2^17 ceremony (100,304 constraints; exceeds 2^16).
+# TreeUpdateBatch(11,8) uses the 2^16 ceremony (55,190). snarkjs sizes the domain
+# from `nConstraints + nPubInputs + nOutputs`, capping a 2^16 ceremony at 65,533
+# constraints and a 2^17 one at 131,069. See `budget` below.
 #
 # `_setup` takes the ptau as an argument, so each shape names its own.
 PTAU16 := "powersOfTau28_hez_final_16.ptau"
 PTAU17 := "powersOfTau28_hez_final_17.ptau"
 
-# Checked on every fetch, including on a cache hit. A truncated or substituted
-# ptau is not self-describing: snarkjs reports it as `Invalid File format` from
-# somewhere deep in the setup, long after the bad bytes landed.
+# Verified on every fetch, including cache hits. snarkjs reports a truncated or
+# substituted ptau only as `Invalid File format` late in setup.
 PTAU16_SHA := "1c401abb57c9ce531370f3015c3e75c0892e0f32b8b1e94ace0f6682d9695922"
 PTAU17_SHA := "6b662a324867139fb1a20a324d90b6ff61856dfb23f59326909f14b0e2483ae0"
 
 # Pinned revision of iden3/circom-witnesscalc, which supplies the relayer's
-# native witness calculator. `build-circuit` is not published to crates.io; it
-# lives in that repo's `extensions/` and pulls the circom compiler from git, so
-# it is installed from a fixed commit rather than a version range.
+# native witness calculator. `build-circuit` is not on crates.io (it lives in
+# that repo's `extensions/` and pulls the circom compiler from git), so it is
+# installed from a fixed commit.
 #
-# The relayer's `circom-witnesscalc` dependency must be pinned to this SAME
-# revision: the graph format is versioned, and a mismatched reader rejects the
-# file with "Invalid magic".
+# The relayer's `circom-witnesscalc` dependency must use the same revision: the
+# graph format is versioned, and a mismatched reader rejects the file with
+# "Invalid magic".
 #
-# `--locked` below is required: build-circuit depends on the circom compiler
-# crates by branch (`master`), so without the committed lockfile the install
-# resolves an incompatible circom and fails to build.
+# `--locked` is required: build-circuit depends on the circom compiler crates by
+# branch (`master`), and without the committed lockfile the install resolves an
+# incompatible circom and fails to build.
 CWC_REV := "d48eb7c97857d46b8a75c94ab96f769207263245"
 CWC_REPO := "https://github.com/iden3/circom-witnesscalc"
 TOOLS := ROOT / ".tools"
@@ -67,16 +63,16 @@ build-artifacts-4x6: compile-4x6 setup-4x6
 # Compile tree_update_batch.circom -> r1cs + wasm + sym, print constraint count.
 compile-batch: (_compile "tree_update_batch")
 
-# The relayer evaluates this graph in-process instead of running the
-# circom-emitted wasm witness generator. Two invariants are enforced below:
+# The relayer evaluates this graph in-process instead of the circom-emitted wasm
+# witness generator. Two invariants are enforced:
 #
-#   --O1   `_compile` uses circom's default optimisation while build-circuit
-#          defaults to --O2, which yields a different constraint system; the
-#          graph would then index signals the zkey does not have.
+#   --O1   matches `_compile`'s circom default; build-circuit defaults to --O2,
+#          which yields a different constraint system whose signal indices do
+#          not match the zkey.
 #
-#   cmp    build-circuit re-runs the circom front end, so its R1CS is diffed
-#          against `_compile`'s output. A graph that disagrees with the zkey
-#          produces witnesses that fail verification at prove time.
+#   cmp    build-circuit re-runs the circom front end, so its R1CS is compared
+#          with `_compile`'s output. A graph that disagrees with the zkey
+#          produces witnesses that fail verification.
 
 # Build the native witness-calculation graph the relayer proves against.
 build-graph: compile-batch _ensure-build-circuit
@@ -85,18 +81,17 @@ build-graph: compile-batch _ensure-build-circuit
         -l "{{ROOT}}/node_modules" --O1 --r1cs "{{BUILD}}/tree_update_batch.graph.r1cs"
     echo "==> Checking the graph's constraint system matches the compiled one"
     cmp "{{BUILD}}/tree_update_batch.graph.r1cs" "{{BUILD}}/tree_update_batch.r1cs"
-    # The r1cs is emitted only for that diff; build-circuit also drops two
+    # The r1cs is emitted only for the comparison; build-circuit also writes two
     # signal-map debug files into the working directory.
     rm -f "{{BUILD}}/tree_update_batch.graph.r1cs" \
           "{{ROOT}}/log_input_signals.txt" "{{ROOT}}/log_input_signals_new.txt"
     echo "==> Graph at {{BUILD}}/tree_update_batch.wcd"
 
-# Install the pinned build-circuit into .tools/ unless it is already there.
-#
 # `circom-witnesscalc` compiles its protobuf schema in a build script, so the
-# install needs `protoc` on PATH. Checked up front because prost-build's own
-# failure surfaces from inside a dependency's build script and reads as a
-# compile error rather than a missing tool.
+# install needs `protoc` on PATH. It is checked up front because prost-build's
+# failure appears as a dependency compile error rather than a missing tool.
+
+# Install the pinned build-circuit into .tools/ unless it is already there.
 _ensure-build-circuit:
     @if [ ! -x "{{BUILD_CIRCUIT}}" ]; then \
         if ! command -v protoc >/dev/null 2>&1; then \
@@ -112,18 +107,17 @@ _ensure-build-circuit:
 
 # tree_update_batch at MAX_L=8, depth 11 is 55,190 constraints against a 65,533
 # ceiling on the 2^16 domain (snarkjs sizes the domain from nConstraints +
-# nPubInputs + nOutputs and needs the sum below 2^16). A leaf slot costs 3,626
-# and a depth level 2,534, so 2^16 holds through depth 15 at MAX_L=8, and MAX_L=16
-# needs 2^17 again. `just budget` pins the domain so growth past it fails CI;
-# `groth16 setup` is a second check on the same bound, failing outright when the
-# constraint count exceeds the ptau.
+# nPubInputs + nOutputs and requires the sum below 2^16). A leaf slot costs 3,626
+# and a depth level 2,534, so 2^16 suffices through depth 15 at MAX_L=8, and
+# MAX_L=16 requires 2^17. `just budget` pins the domain so growth past it fails
+# CI; `groth16 setup` also fails when the constraint count exceeds the ptau.
 
 # Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
 setup-batch: (_setup "tree_update_batch" PTAU16)
 
-# The four snarkjs calls every phase-2 setup makes, written once so the ptau
-# cannot drift between shapes. `groth16 setup` fails outright when the
-# constraint count exceeds the ptau.
+# The four snarkjs calls of every phase-2 setup, shared so the procedure is
+# identical across shapes. `groth16 setup` fails when the constraint count
+# exceeds the ptau.
 _setup shape ptau:
     just _fetch-ptau "{{ptau}}"
     echo "==> Phase-2 setup ({{shape}}, {{ptau}})"
@@ -155,8 +149,8 @@ all-tree: build-artifacts-4x6 compile-batch setup-batch
 # === rebuild + sync into contracts/ ===
 #
 # WARNING: every recipe here re-runs the prototype single-contributor ceremony
-# (INSECURE — see `_setup`). Existing proofs and the committed contract fixtures
-# become invalid.
+# (insecure; see `_setup`), invalidating existing proofs and the committed
+# contract fixtures.
 
 # Full rebuild of the transact shape, syncing the verifier into contracts/.
 rebuild-4x6: build-artifacts-4x6
@@ -182,14 +176,13 @@ test:
 test-unit:
     npm run test:unit
 
-# Every run pins a fast-check seed and announces it on stderr, so a failure is
-# reproducible. Set FUZZ_SEED to replay one:
+# Every run pins a fast-check seed and prints it on stderr, so failures are
+# reproducible. Set FUZZ_SEED to replay a run:
 #
 #   FUZZ=heavy FUZZ_SEED=1234 just test-fuzz
 #
-# To land straight on a single shrunk counterexample, add the `path` from the
-# fast-check report and grep to that test — a path belongs to one property, so
-# it needs the grep:
+# To replay a single shrunk counterexample, pass the `path` from the fast-check
+# report and grep to its test (a path is specific to one property):
 #
 #   FUZZ_SEED=1234 FUZZ_PATH=<path> npm run test:fuzz -- --grep "<test name>"
 #
@@ -201,16 +194,16 @@ test-fuzz:
 
 # === underconstraint search ===
 #
-# Mutates an honest WITNESS VECTOR and asks the R1CS whether it still satisfies,
-# which is the half `test-tamper` cannot reach: the tamper suites mutate the
-# input object, and the witness calculator turns any input it accepts into a
-# self-consistent witness, so a signal the template computes but never
-# constrains is invisible from there. See test/lib/underconstrained.ts.
+# Mutates a valid witness vector and checks whether the R1CS is still satisfied.
+# The tamper suites mutate the input object, and the witness calculator turns
+# any accepted input into a self-consistent witness, so they cannot detect a
+# signal that is computed but not constrained. See test/lib/underconstrained.ts.
 #
-# Unlike `picus` this needs no docker, so it runs in the normal suite. The batch
-# shape dominates the runtime: a few minutes at FUZZ=medium, more at heavy. It is strictly weaker: single-signal only. `picus` decides
-# multi-signal underconstraints and is the tool to reach for when this is clean
-# but the question is still open.
+# Requires no Docker, so it runs in the normal suite. The batch shape dominates
+# runtime: a few minutes at FUZZ=medium, longer at heavy. It detects
+# single-signal underconstraints only; `picus` decides multi-signal cases.
+
+# Search for underconstrained signals by mutating valid witnesses.
 underconstrained:
     FUZZ=${FUZZ:-medium} NODE_OPTIONS="--import tsx/esm" \
         ./node_modules/.bin/mocha --reporter spec --timeout 1800000 --exit \
@@ -219,9 +212,9 @@ underconstrained:
 
 # === constraint budget ===
 
-# Every shape must fit its FFT domain and its exact count must match
-# budget.json, so a change lands as a reviewable diff. Reads the r1cs, so run
-# after `compile*`.
+# Every shape must fit its FFT domain and match its exact count in budget.json,
+# so any change appears as a reviewable diff. Reads the r1cs; run after
+# `compile*`.
 
 # Check every shape against its constraint budget.
 budget:
@@ -234,35 +227,35 @@ budget-update:
 
 # === asset id separation ===
 #
-# A deposit leaf is pinned only by cv_dep = leaf_public_in · V^leaf_asset + rcv·H,
-# and every V^a is a known multiple m(a)·BASE0 (src/README.md § 5), so two ids
-# whose multipliers share a large factor admit v·V^a == v'·V^a' inside the
-# circuit's 64-bit value range, letting a depositor pay the cheap side and spend
-# the leaf as the expensive one. Run this over the id set BEFORE registering it:
-# `AssetRegistry.addAsset` takes an arbitrary uint64 and checks nothing here.
+# A deposit leaf is bound only by cv_dep = leaf_public_in · V^leaf_asset + rcv·H,
+# and every V^a is a known multiple m(a)·BASE0 (src/README.md § 5). Two ids whose
+# multipliers share a large factor admit v·V^a == v'·V^a' within the circuit's
+# 64-bit value range, letting a depositor pay in the lower-value asset and spend
+# the leaf as the higher-value one. Run this over the id set before registering
+# it: `AssetRegistry.addAsset` accepts an arbitrary uint64 without this check.
 
 # Check a set of asset ids for deposit-binding collisions.
 asset-ids +ids:
     @echo "==> Asset id separation"
     NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/check-asset-ids.ts" {{ids}}
 
-# Check the gate itself against a known colliding pair.
+# Check the asset id checker against a known colliding pair.
 asset-ids-self-test:
     NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/check-asset-ids.ts" --self-test
 
 # === golden vectors ===
 
-# Every `y` is read out of a witness produced by the compiled circuit and
-# compared against the TypeScript Horner evaluation; the generator refuses to
-# write on disagreement. Slot names come from lean/expected/layout-<shape>.txt,
-# so run `just lean-update` first if the layout changed.
+# Every `y` is read from a witness produced by the compiled circuit and compared
+# against the TypeScript Horner evaluation; on mismatch nothing is written. Slot
+# names come from lean/expected/layout-<shape>.txt, so run `just lean-update`
+# first if the layout changed.
 
-# Regenerate vectors/ — the cross-repo contract consumed by @lelantos-org/sdk.
+# Regenerate vectors/, the cross-repo test vectors consumed by @lelantos-org/sdk.
 vectors:
     NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/gen-vectors.ts"
 
-# Run in CI: a circuit or layout change not accompanied by `just vectors` fails
-# here.
+# Runs in CI: fails if a circuit or layout change is not accompanied by
+# `just vectors`.
 
 # Regenerate into a temp dir and diff against the committed files.
 vectors-check:
@@ -278,17 +271,13 @@ vectors-check:
     fi
     echo "==> vectors/ up to date"
 
+# `contracts/` tests `PubInputs.compress` against copies of vectors/ files
+# committed to its own repo, because forge cannot read across repositories. A
+# stale copy lets the Solidity suite pass against an outdated layout.
+#
+# Skips when the sibling checkout is absent, so this repo builds standalone.
+
 # Check the copies downstream consumers keep of vectors/.
-#
-# `contracts/` pins `PubInputs.compress` against a COPY of
-# vectors/tree-update-batch-8.json, checked into its own repo because forge
-# cannot read across a repository boundary. A copy is a second source of truth:
-# regenerate here, forget to re-copy, and the Solidity suite keeps passing
-# against the old layout while the circuit has moved. That is precisely the
-# binding the copy exists to anchor.
-#
-# Skips cleanly when the sibling checkout is absent, so the circuits repo still
-# builds alone.
 vectors-consumers-check:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -327,12 +316,12 @@ vectors-consumers-check:
 # Scope is `src/lib/` plus the top-level `src/*.circom` entry points. The tree
 # contains no `<--`, so the CS0005 / CS0015 / CS0017 passes (signal-assignment,
 # unconstrained-division, under-constrained-signal) run unwaived on every
-# compiled circuit. Re-check `grep -rn '<--' src/lib src/*.circom` before adding
-# any waiver.
+# compiled circuit. Run `grep -rn '<--' src/lib src/*.circom` before adding any
+# waiver.
 #
-# Suppressed analysis passes and their rationale. To audit, run without the
-# `--allow` flags and confirm every reported site falls under one of these
-# categories. Re-evaluate whenever the listed sites change.
+# Suppressed passes and their rationale. To audit, run without the `--allow`
+# flags and confirm every reported site falls under one of these categories.
+# Re-evaluate when the listed sites change.
 #
 #   CS0010 non-strict-binary-conversion
 #       Each Num2Bits site uses n < 254 bits, so 2^n < p and the field-element
@@ -363,7 +352,7 @@ lint:
     circomspect "{{ROOT}}/src/lib" "{{ROOT}}/src"/*.circom -L "{{ROOT}}/node_modules" \
         --allow CS0010 --allow CS0014 --allow CS0018
 
-# Delete build/ — artifacts, keys and verifiers alike.
+# Delete build/, including artifacts, keys and verifiers.
 clean:
     rm -rf "{{BUILD}}"
 
@@ -373,10 +362,11 @@ clean:
 lean-build:
     cd "{{ROOT}}/lean" && lake build
 
-# Model-to-circuit signal parity. Needs build/*.sym, so it is the one check that
-# wants the production compile rather than circom_tester's own artifacts; run
-# `just compile-4x6 compile-batch` first. REQUIRE_ARTIFACTS=1 makes a missing
-# artifact a failure instead of a skip, so this can never pass by doing nothing.
+# Requires build/*.sym from the production compile rather than circom_tester's
+# artifacts; run `just compile-4x6 compile-batch` first. REQUIRE_ARTIFACTS=1
+# turns a missing artifact into a failure instead of a skip.
+
+# Check model-to-circuit signal parity (needs build/*.sym).
 signal-parity:
     @echo "==> Model signal parity"
     cd "{{ROOT}}" && REQUIRE_ARTIFACTS=1 NODE_OPTIONS="--import tsx/esm" \
@@ -391,14 +381,14 @@ lean-check:
 lean-update:
     cd "{{ROOT}}/lean" && ./scripts/check-axioms.sh --update && ./scripts/dump-layout.sh --update
 
-# Complements the Lean proofs: those cover the modeled constraint system, while
-# Picus reads the R1CS circom emits. Not part of `lean-check` or CI, since it
+# Complements the Lean proofs, which cover the modelled constraint system, by
+# analysing the R1CS circom emits. Excluded from `lean-check` and CI because it
 # needs Docker and a 4.5 GB image, built once with:
 #
 #   docker build -t picus:local https://github.com/Veridise/Picus.git
 #
-# Upstream publishes amd64 only, so on arm64 `just picus-image` builds a native
-# image and `picus` prefers it when present. Picus recommends --O0 input, so a
+# Upstream publishes amd64 only; on arm64 `just picus-image` builds a native
+# image, which `picus` prefers when present. Picus recommends --O0 input, so a
 # separate artifact is compiled rather than reusing build/4x6.r1cs.
 
 # Build the native arm64 Picus image, avoiding the emulated upstream one.
@@ -433,9 +423,8 @@ picus CIRCUIT="4x6" STRONG="":
     docker run --rm -v "{{BUILD}}/picus:/data" "$image" \
         ./run-picus --solver z3 --timeout 10000 {{ if STRONG != "" { "--strong" } else { "" } }} /data/{{CIRCUIT}}.r1cs \
         || code=$?
-    # Picus signals its verdict through the exit code (picus/exit.rkt): 8 safe,
-    # 9 unsafe, 0 unknown. A passing run exits non-zero, so the code is
-    # translated below.
+    # Picus reports its verdict via exit code (picus/exit.rkt): 8 safe, 9 unsafe,
+    # 0 unknown. A safe result exits non-zero, so the code is translated below.
     case "$code" in
         8)  echo "==> {{CIRCUIT}}: properly constrained" ;;
         9)  echo "==> {{CIRCUIT}}: UNDER-CONSTRAINED"; exit 1 ;;
@@ -443,12 +432,11 @@ picus CIRCUIT="4x6" STRONG="":
         *)  echo "==> {{CIRCUIT}}: Picus error (exit $code)"; exit 1 ;;
     esac
 
-# `picus tree_update_batch` can only be run at weak safety — IsZero's inverse hint
-# is free by design when its input is zero — and weak safety over the whole circuit
-# speaks only for its single output, `y`. `BatchAppend` alone has no hints, so it
-# is checked at strong safety at the deployed shape: every signal, both roots
-# among them, is a function of `start_index`, `actual_count`, `leaves` and
-# `frontier_in`.
+# `picus tree_update_batch` passes only at weak safety, because IsZero's inverse
+# hint is unconstrained when its input is zero, and weak safety covers only the
+# single output `y`. `BatchAppend` has no hints, so it is checked at strong
+# safety at the deployed shape: every signal, including both roots, is a function
+# of `start_index`, `actual_count`, `leaves` and `frontier_in`.
 
 # Strong-safety Picus over a standalone BatchAppend(DEPTH, MAX_L) (needs Docker).
 picus-batch-append DEPTH="11" MAX_L="8":
@@ -479,8 +467,8 @@ picus-batch-append DEPTH="11" MAX_L="8":
         *)  echo "==> $name: Picus error (exit $code)"; exit 1 ;;
     esac
 
-# Continues past a failing circuit so one result does not hide the others, then
-# exits non-zero if any failed.
+# Continues past a failing circuit so every result is reported, then exits
+# non-zero if any failed.
 
 # Run `picus` over every top-level circuit. STRONG=1 for strong safety.
 picus-all STRONG="":
@@ -499,29 +487,28 @@ picus-all STRONG="":
 
 # === package ===
 
-# Full rebuild + verify for npm publish. RE-RUNS THE TRANSACT CEREMONY and so
-# invalidates existing proofs; `package-check` runs the gate alone. Copies the
-# witness wasm out of `build/4x6_js/` to a flat `build/4x6.wasm` so the package
-# `files` whitelist and `exports` subpath map resolve without shipping the
-# `4x6_js/` glue, then runs `scripts/check-artifacts.ts`.
+# Full rebuild and verification for npm publish. Re-runs the transact ceremony,
+# invalidating existing proofs; `package-check` runs only the verification.
+# Copies the witness wasm from `build/4x6_js/` to a flat `build/4x6.wasm` so the
+# package `files` whitelist and `exports` subpath map resolve without shipping
+# the `4x6_js/` glue, then runs `scripts/check-artifacts.ts`.
 #
-# Depends on `build-artifacts-4x6` and NOT `rebuild-4x6`, so the publish workflow
-# does not require a sibling contracts/ checkout for the Verifier.sol sync step.
+# Depends on `build-artifacts-4x6`, not `rebuild-4x6`, so the publish workflow
+# does not require a sibling contracts/ checkout for the Verifier.sol sync.
 
 # Full rebuild + publish gate. RE-RUNS THE CEREMONY, invalidating existing proofs.
 package: build-artifacts-4x6
     @just package-check
 
-# Stage the flat wasms and run the publish gate against whatever is ALREADY in
-# build/ — no compile, no ceremony.
+# Stages the flat wasm and runs the publish check against the existing build/
+# contents, without compiling or running a ceremony.
 #
-# Separate from `package`, which runs a trusted-setup ceremony: that mints a
-# fresh zkey from fresh entropy and invalidates every proof built against the
-# previous one, including the committed fixtures in ../contracts
-# (proof_transfer.json, proof_deposit_batch_n1.json).
+# Separate from `package`, whose trusted-setup ceremony produces a new zkey from
+# fresh entropy and invalidates every proof built against the previous one,
+# including the committed fixtures in ../contracts (proof_transfer.json,
+# proof_deposit_batch_n1.json).
 #
-# Missing artifacts are reported by check-artifacts.ts, which names each one and
-# how to rebuild it.
+# check-artifacts.ts reports each missing artifact and how to rebuild it.
 
 # Run the publish gate against whatever is already in build/. No compile, no ceremony.
 package-check:
@@ -533,8 +520,8 @@ package-check:
 # === internal helpers (prefixed `_`) ===
 
 # Compile one src/<circuit>.circom to r1cs + wasm + sym and print its constraint
-# count. The named `compile*` recipes are thin wrappers so the flags cannot drift
-# between shapes; the constraint budget compares the shapes against one another.
+# count. The named `compile*` recipes wrap this so all shapes use identical flags,
+# which the constraint budget comparison relies on.
 _compile circuit:
     mkdir -p "{{BUILD}}"
     echo "==> Compiling {{ROOT}}/src/{{circuit}}.circom"
@@ -554,10 +541,9 @@ _fetch-ptau file:
     dest="{{PTAU_DIR}}/{{file}}"
     if [ ! -f "$dest" ]; then
         echo "==> Downloading {{file}}"
-        # -f matters: without it curl writes the HTTP error body into the file
-        # and exits 0, so a dead mirror looks like a corrupt ceremony.
-        # Downloads to .part so an interrupted fetch is not mistaken for a
-        # complete file on the next run.
+        # -f makes curl fail on HTTP errors instead of writing the error body and
+        # exiting 0. Downloading to .part prevents an interrupted fetch from being
+        # treated as a complete file on the next run.
         curl -fL --retry 3 --retry-all-errors "{{PTAU_URL_BASE}}/{{file}}" -o "$dest.part"
         mv "$dest.part" "$dest"
     fi

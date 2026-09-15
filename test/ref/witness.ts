@@ -23,9 +23,8 @@ export interface ClueInputs {
  * The public slots the circuit evaluates: `TransactCompressN`'s coefficients,
  * in `PubInputs.compress(Transact)` order.
  *
- * Every one is pinned by a constraint elsewhere in `4x6.circom`. That is the
- * membership rule, not a coincidence of the layout — see `coeffs` in
- * `ref/compress.ts`.
+ * Each is pinned by a constraint elsewhere in `4x6.circom`; that is the
+ * membership rule for this set (see `coeffs` in `ref/compress.ts`).
  */
 export type CircomCoeffInputs = {
     merkle_root: string;
@@ -43,18 +42,20 @@ export type CircomCoeffInputs = {
 /**
  * Logical public inputs that are **not** circuit signals.
  *
- * The circuit constrains none of them, so as PolyEval coefficients they were
- * free variables a prover could solve `y = Σ c_k z^k` with. They are bound
- * instead by being hashed into the Fiat-Shamir challenge: alter one and `z`
- * moves, so `y` moves, so the proof fails. `flatten` includes them; `coeffs`
- * does not; `toCircomInput` carries them alongside the witness but
- * `circuitSignals` drops them before the witness calculator sees them.
+ * The circuit constrains none of them, so as PolyEval coefficients they would be
+ * free variables a prover could use to solve `y = Σ c_k z^k`. They are bound by
+ * being hashed into the Fiat-Shamir challenge: changing one changes `z`, hence
+ * `y`, and the proof fails. `flatten` includes them and `coeffs` does not;
+ * `toCircomInput` carries them alongside the witness and `circuitSignals` drops
+ * them before witness calculation.
  */
 export type TransactBinding = {
     recipient_address: string;
     chain_id: string;
     payer_address: string;
     relayer_address: string;
+    /** Hash of the swap intent `SwapWrapper` checks; `0` for other spends. */
+    intent_hash: string;
     out_clue_Rx: string[];
     out_clue_Ry: string[];
     out_clue_bits: string[];
@@ -92,11 +93,10 @@ export type CircomTransactInput = CircomCoeffInputs & {
 };
 
 /**
- * What a builder produces: the circuit's witness plus the binding fields that
- * only reach the challenge. Kept as one object because every consumer needs
- * both — `flatten` to derive `z`, the witness calculator to prove — and
- * splitting them at the source would make it easy to hash one transaction and
- * prove another.
+ * Builder output: the circuit's witness plus the binding fields that only reach
+ * the challenge. One object, because consumers need both (`flatten` to derive
+ * `z`, the witness calculator to prove), and keeping them together prevents
+ * hashing one transaction while proving another.
  */
 export type TransactWitnessBundle = CircomTransactInput & TransactBinding;
 
@@ -104,9 +104,9 @@ export type TransactWitnessBundle = CircomTransactInput & TransactBinding;
  * Project a bundle onto the circuit's signal set.
  *
  * The wasm witness calculator rejects an unknown key outright ("Too many values
- * for input signal"), so the binding fields must be dropped here rather than
- * left for circom to ignore. Written as an explicit pick, not a delete list: a
- * signal added to the circuit and forgotten here fails to compile.
+ * for input signal"), so the binding fields are dropped here. Written as an
+ * explicit pick rather than a delete list, so a signal added to
+ * `CircomTransactInput` but missing here fails to compile.
  */
 export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
     return {
@@ -155,12 +155,14 @@ export interface BuildOpts {
     payerAddress?: Field;
     /** Must equal `msg.sender` of the on-chain `transact` call; blocks relayer front-running. */
     relayerAddress?: Field;
+    /** `SwapWrapper`'s intent hash for a swap's withdraw leg; zero elsewhere. */
+    intentHash?: Field;
     /** Fiat-Shamir challenge. Tests default to 1n; production derives it from a transcript. */
     z?: Field;
     /**
-     * `auxDigest(aux)` over the outputs' encrypted-note payloads. Required, not
-     * defaulted: the contract always recomputes this slot from calldata, so a
-     * silent 0 would build a witness the verifier rejects.
+     * `auxDigest(aux)` over the outputs' encrypted-note payloads. Required: the
+     * contract recomputes this slot from calldata, so a default of 0 would build
+     * a witness the verifier rejects.
      */
     outputAuxDigest: Field;
 }
@@ -184,6 +186,7 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
     const chainId = opts.chainId ?? 0n;
     const payerAddress = opts.payerAddress ?? 0n;
     const relayerAddress = opts.relayerAddress ?? 0n;
+    const intentHash = opts.intentHash ?? 0n;
 
     const outCm = outputs.map((o) => buildNoteCommitment(P, o));
     const inCv: Point[] = inputs.map((i) =>
@@ -214,6 +217,7 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
         chain_id: chainId.toString(),
         payer_address: payerAddress.toString(),
         relayer_address: relayerAddress.toString(),
+        intent_hash: intentHash.toString(),
         out_cv_dep: outCvDep.map((p) => [p[0].toString(), p[1].toString()]),
 
         in_asset: inputs.map((i) => i.asset.toString()),

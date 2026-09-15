@@ -18,15 +18,15 @@ include "../../node_modules/circomlib/circuits/bitify.circom";
 // constraints over ceil(N/k) windows, so at N = 252, k=2 costs 1008, k=3 and
 // k=4 tie at 756, and k=5 costs 969.
 //
-// The coefficient table must reach the gadget as a template parameter, never as
-// a `var` computed in a template body. circom emits a template body into the
-// witness generator as well as into the constraint system and does not prove
-// that a `var` chain is input-independent, so a `windowTable` call in a body is
+// The coefficient table reaches the gadget as a template parameter, never as a
+// `var` computed in a template body. circom emits template bodies into the
+// witness generator as well as the constraint system and does not prove that a
+// `var` chain is input-independent, so a `windowTable` call in a body is
 // compiled to wasm and re-executed on every proof, per component instance. Each
 // `bjAdd` costs two modular inversions and a window needs 18 of them, so over
-// 63 windows the 20 `MulH` instances of `Transact(11, 4, 6)` would cost roughly
-// 45,000 inversions per witness. Template arguments are compile-time known, so
-// `fixedBaseCoefs` is called only from an argument position and
+// 63 windows the 20 `MulH` instances of `Transact(11, 4, 6)` would cost about
+// 45,000 inversions per witness. Template arguments are known at compile time,
+// so `fixedBaseCoefs` is called only from an argument position and
 // `FixedBaseMulBits` takes coefficients rather than a base point.
 
 // Baby-Jubjub twisted Edwards addition, evaluated at compile time. Same formula
@@ -149,15 +149,15 @@ function fixedBaseCoefs(BASE) {
 //
 // Precondition: the caller must constrain every e[i] to {0,1}. The window lookup
 // is a multilinear extension of the table and agrees with it only on the boolean
-// cube; off it a prover steers the output to an arbitrary field pair. That pair
-// need not be on the curve, and BabyAdd's
+// cube; off it a prover can steer the output to an arbitrary field pair. That
+// pair need not be on the curve, and BabyAdd's
 // `(1 + d*tau) * xout === beta + gamma` leaves `xout` unconstrained when
-// `1 + d*tau` vanishes, so a missing booleanity constraint leaves the circuit
+// `1 + d*tau` vanishes, so without booleanity the circuit is
 // under-constrained.
 //
-// Prefer `FixedBaseMul` below unless the caller already holds a constrained bit
-// array to share: it derives COEFS itself and so cannot be handed a table that
-// disagrees with the intended base.
+// Use `FixedBaseMul` below unless the caller already holds a constrained bit
+// array to share: it derives COEFS itself, so the table always matches the
+// intended base.
 //
 // Bits above the top window are zero-padded, so N_BITS need not be a multiple of
 // 4. No range check is implied: the scalar is reduced by the group order.

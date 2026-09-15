@@ -3,41 +3,36 @@ import Lelantos.Model.Bits
 /-!
 # Baby Jubjub, as the circuit uses it
 
-The circuit only ever manipulates points of the **prime-order subgroup** of Baby Jubjub:
+The circuit only manipulates points of the **prime-order subgroup** of Baby Jubjub:
 `EscalarMulAny` requires its base to lie there (`circomlib/escalarmulany.circom:129`), and
 every point in the circuit is produced by `Pedersen`, `FixedBaseMul`, `EscalarMulAny` or
 `BabyAdd` applied to such points.
 
-That subgroup is cyclic of prime order `ell`, so it is *isomorphic to* `ZMod ell` — and
-modelling it as literally `ZMod ell` is not a loss of generality, it is an honest
-statement of the situation. It also makes the central negative result unavoidable rather
-than easy to overlook: in a cyclic group written additively, "known relative discrete
-logs" is not a weakness one has to remember to model, it is the default.
+That subgroup is cyclic of prime order `ell`, hence isomorphic to `ZMod ell`, so modelling
+it as `ZMod ell` loses no generality. In this representation known relative discrete logs
+between generators are the default rather than an extra modelling step.
 
-Constraints in circom compare *coordinates*, not abstract group elements, so we keep a
-`coords : G → Pt` embedding and require it to be injective. Coordinate equality is then
-group equality, which is what `PerAssetPointBalance` actually checks.
+Constraints in circom compare coordinates, not abstract group elements, so the model uses
+a `coords : G → Pt` embedding required to be injective. Coordinate equality is then group
+equality, which is what `PerAssetPointBalance` checks.
 
-`coords_injective` reaches **no** headline theorem, and its absence from every entry in
-`lean/expected/axioms.txt` is a fact worth reading rather than a loose end. Its only consumer
-is `perAssetPointBalance_group`, which lifts the point equation into the group — and nothing
-consumes *that*, because `pointBalance_not_sound` proves nothing may be derived from the point
-equation. The axiom is therefore load-bearing for the negative result and for nothing else. If
-it ever starts appearing in the axiom set of a positive theorem, something has begun deriving
-conservation from the point balance, which is exactly what this development forbids.
+`coords_injective` reaches no headline theorem and appears in no entry of
+`lean/expected/axioms.txt`. Its only consumer is `perAssetPointBalance_group`, which lifts
+the point equation into the group and has no consumers, because `pointBalance_not_sound`
+shows nothing may be derived from the point equation. If it appears in the axiom set of a
+positive theorem, some proof derives conservation from the point balance, which this
+development does not permit.
 
 ## What is axiomatized here
 
 * `ell_prime` — arithmetic, same situation as `Lelantos.p_prime`.
 * `coords_injective` — distinct subgroup elements have distinct affine coordinates. True
-  of any affine embedding of an elliptic curve group. See the note above on where it is and
-  is not used.
+  of any affine embedding of an elliptic curve group. See above for where it is used.
 * `babyAdd_spec` — circomlib's `BabyAdd` computes the group law. Its two `<--` divisions
-  (`babyjub.circom:45,48`) are immediately re-constrained by
-  `(1 ± d·τ) * out === …`, which pins `out` **provided** `1 ± d·τ ≠ 0`. On Baby Jubjub
-  `a = 168700` is a square and `d = 168696` is a non-square, so the twisted Edwards
-  addition law is complete and the denominators never vanish for on-curve inputs. That
-  completeness fact is what `babyAdd_spec` packages.
+  (`babyjub.circom:45,48`) are re-constrained by `(1 ± d·τ) * out === …`, which pins `out`
+  provided `1 ± d·τ ≠ 0`. On Baby Jubjub `a = 168700` is a square and `d = 168696` is a
+  non-square, so the twisted Edwards addition law is complete and the denominators never
+  vanish for on-curve inputs. `babyAdd_spec` packages that completeness fact.
 * `escalarMul_spec` — `EscalarMulAny(n)` / `FixedBaseMul(n)` compute `k • P`.
 * `assetGen_dl` — `HashToAssetGen` is a *single-segment* Pedersen hash, so it is a known
   multiple of one fixed base. See `Lelantos.Gadgets.PointBalance` for the consequence.
@@ -75,10 +70,10 @@ instance : Inhabited Pt := ⟨⟨0, 0⟩⟩
 opaque coords : G → Pt
 
 /-- Distinct group elements have distinct coordinates, so the coordinate-wise equalities
-that `PerAssetPointBalance` checks really are group equalities.
+that `PerAssetPointBalance` checks are group equalities.
 
-Used by `perAssetPointBalance_group` and by nothing else, which is why it appears in no
-entry of `lean/expected/axioms.txt` — see the module note. -/
+Used only by `perAssetPointBalance_group`, so it appears in no entry of
+`lean/expected/axioms.txt`; see the module note. -/
 axiom coords_injective : Function.Injective coords
 
 theorem coords_inj {g h : G} (hgh : coords g = coords h) : g = h := coords_injective hgh
@@ -113,7 +108,7 @@ noncomputable def assetGen (a : F) : G := (assetMul a : ZMod ell) • BASE0
 Pedersen-hashes a 72-bit message, which circomlib packs into a *single* segment, so the
 result is always `assetMul a • BASE[0]` for a multiplier anyone can compute. This is
 `assetGen` by definition above; the axiom is that `assetMul` exists and is computable,
-which `src/lib/balance.circom:56-56` and `src/README.md § 5` already state in prose. -/
+as stated in prose at `src/lib/balance.circom:56-56` and `src/README.md § 5`. -/
 theorem assetGen_dl (a : F) : assetGen a = (assetMul a : ZMod ell) • BASE0 := rfl
 
 /-- Asset ids `1, 2, 3` differ only in the lowest 4-bit Pedersen window (the tag occupies
@@ -121,8 +116,8 @@ message bits 0-7, `asset_id` bits 8-71), and circomlib's signed 4-bit encoding m
 three windows to the consecutive multipliers `2, 3, 4`. Since `assetMul` is affine in the
 window contribution, the multipliers form an arithmetic progression.
 
-This is the concrete instance that makes `pointBalance_not_sound` bite. It is checked at
-runtime by `test/transact/multi_asset.test.ts`. -/
+`pointBalance_not_sound` uses this concrete instance. It is checked at runtime by
+`test/transact/multi_asset.test.ts`. -/
 axiom assetMul_arith : assetMul 1 + assetMul 3 = 2 * assetMul 2
 
 /-- `PointSum(n)` (`src/lib/value_commit.circom:157-183`): the identity for `n = 0`, otherwise a

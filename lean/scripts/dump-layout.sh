@@ -1,33 +1,31 @@
 #!/usr/bin/env bash
-# Dump the public-input layout that the Lean model uses, and diff it against the
-# checked-in expectation, for every shape the repository ships.
+# Dumps the Lean model's public-input layout for every shipped shape and diffs it
+# against the checked-in expectation.
 #
-# The layout is the highest-risk piece of hand transcription in the whole development:
-# it must agree with `src/lib/poly_eval.circom :: TransactCompressN`,
+# The layout is hand-transcribed and must agree with
+# `src/lib/poly_eval.circom :: TransactCompressN`,
 # `contracts/src/lib/PubInputs.sol :: compress(Transact, aux)` and
-# `test/ref/compress.ts :: coeffs`. Four implementations, one order.
+# `test/ref/compress.ts :: coeffs`: four implementations of one order.
 #
-# `lean/expected/layout-4x6.txt` is additionally consumed by
-# `test/formal/layout_parity.test.ts`, which checks it against `test/ref/compress.ts`
-# — the same implementation the published `vectors/` are generated from, which is how this
-# order reaches the SDK without either repo importing the other.
+# `lean/expected/layout-4x6.txt` is also consumed by `test/formal/layout_parity.test.ts`,
+# which checks it against `test/ref/compress.ts`, the generator of the published
+# `vectors/`. This links the order to the SDK without either repo importing the other.
 #
-# Two layouts are dumped: the transact shapes and `BatchCompress(MAX_L)`. They are not
-# the same kind of object, and the difference is the point.
+# Two layouts are dumped, the transact shapes and `BatchCompress(MAX_L)`, and they
+# differ in kind.
 #
-# The 46-slot transact dump is the POLYNOMIAL, not the challenge preimage. `PubInputs.sol`
-# hashes 69 words to derive `z` and evaluates only these 46 — the four address
-# words, the FMD clue triples and the payload digest are bound through the
-# challenge because the circuit constrains none of them, and an unconstrained
-# coefficient is a free variable a prover can solve `y = Σ c_k z^k` with. The
-# calldata prefix is still 50 words, which fixes the offsets of the uint64 and
-# address words `compress` re-masks in assembly.
+# The 46-slot transact dump is the polynomial, not the challenge preimage.
+# `PubInputs.sol` hashes 70 words to derive `z` and evaluates only these 46. The five
+# address words, the FMD clue triples and the payload digest are bound through the
+# challenge because the circuit does not constrain them; an unconstrained coefficient
+# would be a free variable a prover could use to solve `y = Σ c_k z^k`. The calldata
+# prefix is 50 words, which fixes the offsets of the uint64 and address words
+# `compress` re-masks in assembly.
 #
-# The batch dump has no such split: all `4 + 6*MAX_L` words are coefficients, because
-# every one of them is a signal of `tree_update_batch.circom`. There are no words that
-# could be bound through the challenge alone, so evaluating all 52 is the only sound
-# option. `test/formal/batch_layout_parity.test.ts` asserts the same thing against the
-# published vector; this file is the Lean anchor it asked for.
+# The batch dump has no such split: all `4 + 6*MAX_L` words are signals of
+# `tree_update_batch.circom`, so all 52 are coefficients and must be evaluated for
+# soundness. `test/formal/batch_layout_parity.test.ts` asserts the same against the
+# published vector, with this file as the Lean reference.
 #
 # Regenerate after an intentional layout change:  lean/scripts/dump-layout.sh --update
 set -euo pipefail

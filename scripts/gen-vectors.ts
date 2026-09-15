@@ -1,20 +1,21 @@
-// Golden test-vector generator: the cross-repo contract with @lelantos-org/sdk.
+// Golden test-vector generator defining the cross-repo interface with
+// @lelantos-org/sdk.
 //
-// This repo owns the circom and therefore the layout. The two repos are held
-// together by data rather than shared code: versioned vectors published in the
-// npm package and checked by the SDK's own test suite.
+// This repo owns the circom and therefore the public-input layout. The SDK
+// depends on it through versioned vectors published in the npm package and
+// checked by the SDK's test suite, not through shared code.
 //
-// Two properties make the vectors a contract rather than a snapshot:
+// Guarantees:
 //
-//   1. Every `y` is read out of a witness produced by the compiled circuit and
-//      compared against the TypeScript Horner evaluation. On disagreement the
-//      generator refuses to write.
+//   1. Every `y` is read from a witness produced by the compiled circuit and
+//      compared against the TypeScript Horner evaluation; on mismatch the
+//      generator exits without writing.
 //   2. The slot-name layout is read from the Lean model's dump at
-//      `lean/expected/layout-<shape>.txt` rather than regenerated here, so the
-//      vector file carries Lean's ordering to the SDK.
+//      `lean/expected/layout-<shape>.txt`, so the vector files carry Lean's
+//      ordering to the SDK.
 //
-// Determinism is required, since `just vectors-check` diffs a regeneration
-// against the committed files: no randomness, no timestamps, no absolute paths.
+// Output must be deterministic (no randomness, timestamps or absolute paths)
+// because `just vectors-check` diffs a regeneration against the committed files.
 //
 //   just vectors        regenerate
 //   just vectors-check  regenerate into a temp dir and diff
@@ -56,8 +57,8 @@ async function main() {
         };
     }
 
-    // The generator version lives here and not in the per-file bodies, so a
-    // patch bump does not invalidate every file digest.
+    // The generator version is recorded only in the index so a version bump
+    // does not change every file digest.
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
     writeJson(path.join(outDir, "index.json"), {
         schema: SCHEMA,

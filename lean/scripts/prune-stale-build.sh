@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# Delete the build outputs of `Lelantos` modules whose source no longer exists.
+# Deletes build outputs of `Lelantos` modules that have no `.lean` source.
 #
-# `lake build` writes an olean per module and never removes one, so deleting or
-# renaming a `.lean` file leaves its old olean behind — and CI restores `.lake`
-# from cache, so the orphan outlives a clean checkout too. The build does not
-# care, because nothing imports it. `leanchecker` does: it replays every olean
-# under the `Lelantos` prefix, imported or not, against the current oleans of
-# the modules the orphan once imported, and fails on the first declaration that
-# moved ("unknown constant", "constant has already been declared").
+# `lake build` never removes oleans, and CI restores `.lake` from cache, so a deleted
+# or renamed module leaves an orphaned olean. `lake build` ignores it because nothing
+# imports it, but `leanchecker` replays every olean under the `Lelantos` prefix against
+# the current oleans of its imports and fails on mismatched declarations ("unknown
+# constant", "constant has already been declared").
 #
-# Only files under `.lake/build` are touched, and only those whose module has no
-# `.lean` source.
+# Only files under `.lake/build` whose module has no `.lean` source are removed.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -21,7 +18,7 @@ for root in .lake/build/lib/lean .lake/build/ir; do
   while IFS= read -r -d '' file; do
     rel="${file#"$root"/}"
     # `Lelantos/Gadgets/Insert.olean.hash` -> `Lelantos/Gadgets/Insert`. Module
-    # directories carry no dots, so the first dot starts the extension.
+    # directories contain no dots, so the first dot starts the extension.
     module="${rel%%.*}"
     if [ ! -f "$module.lean" ]; then
       rm -f "$file"

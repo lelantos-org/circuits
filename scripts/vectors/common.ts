@@ -62,7 +62,7 @@ export function writeJson(file: string, value: unknown): string {
  * Curve, field and tag values repeated in every vector file.
  *
  * Published so the SDK can check agreement on them before comparing derived
- * values; a mismatch here explains every downstream mismatch.
+ * values, since a mismatch here causes downstream mismatches.
  */
 export function sharedConstants(P: Poseidon, J: Jubjub) {
     const tree = new MerkleTree(P, DEPTH);
@@ -85,9 +85,9 @@ export interface Compression {
      * `z = keccak256(abiEncodedChallenge) mod r`.
      *
      * A superset of `coeffs`. The four address words, the FMD clue triples and
-     * the payload digest are hashed and never evaluated — the circuit constrains
-     * none of them, and an unevaluated word binds with no constraint at all
-     * because moving it moves `z`, hence `y`.
+     * the payload digest are hashed but not evaluated: the circuit constrains
+     * none of them, and hashing binds them because changing any word changes
+     * `z`, and hence `y`.
      */
     challenge: string[];
     abiEncodedChallenge: string;

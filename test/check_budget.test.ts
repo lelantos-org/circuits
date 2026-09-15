@@ -132,7 +132,7 @@ describe("check-budget.mjs", function () {
         expect(code).to.equal(1);
     });
 
-    // The failure this gate exists for: crossing the FFT domain.
+    // The primary failure mode the gate guards against.
     it("FAILS when the circuit exceeds its FFT domain", () => {
         scaffold(budgetWith(actualConstraints, 1));
         const { code, out } = run();
@@ -141,11 +141,9 @@ describe("check-budget.mjs", function () {
     });
 
     // snarkjs sizes the FFT from nConstraints + nPubInputs + nOutputs and
-    // requires that sum to be at most domain - 1, so the gate must count public
-    // signals as well. The domain: 1 case above is far enough over to miss the
-    // boundary; this case and the next pin both sides of it.
+    // requires that sum to be at most domain - 1, so the gate counts public
+    // signals as well. This case and the next pin both sides of that boundary.
     it("counts public signals against the FFT domain", () => {
-        // sized == domain is one too large: snarkjs needs sized <= domain - 1.
         scaffold(budgetWith(actualConstraints, sizedSignals));
         const tight = run();
         expect(tight.out, "sized == domain must not fit").to.contain("EXCEEDS");

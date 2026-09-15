@@ -13,14 +13,14 @@ import { layoutDigest } from "../../scripts/vectors/common";
 // The slot ordering exists in four places: `TransactCompressN`
 // (src/lib/poly_eval.circom), `PubInputs.sol :: compress(Transact, aux)`,
 // `test/ref/compress.ts :: flatten`, and `Lelantos.piSlot`
-// (lean/Lelantos/Circuit/Witness.lean). A transposition between any two breaks
-// proof verification silently, and PolyEval binding is stated about this
-// layout, so a wrong layout in Lean would empty `transact_sound`'s compression
-// clause.
+// (lean/Lelantos/Circuit/Witness.lean). A transposition between any two makes
+// proof verification fail with no diagnostic. PolyEval binding is stated over
+// this layout, so a wrong Lean layout makes `transact_sound`'s compression
+// clause vacuous.
 //
 // `lean/expected/layout-4x6.txt` is generated from the Lean definition by
-// `lean/scripts/dump-layout.sh`, which also guards it against drift on the Lean side.
-// This test closes the other side: it checks that file against `ref/compress.ts`.
+// `lean/scripts/dump-layout.sh`, which also guards it against drift on the Lean
+// side. This test checks that file against `ref/compress.ts`.
 //
 // `ref/compress.ts :: flatten` is also what `scripts/gen-vectors.ts` uses to
 // produce `vectors/`, which the SDK consumes. The final case below pins the
@@ -44,28 +44,27 @@ const SHIPPED_SHAPES = ["4x6"] as const;
 // The polynomial's slots, which is what the Lean model lays out.
 const COEFF_COUNT = 4 + 3 * N_IN + 5 * N_OUT;
 
-// The challenge preimage: a superset, adding the four address words, the clue
-// triples and the aux digest. Those are logical public inputs bound through `z`
-// rather than through `y`, so they are outside the Lean layout by construction —
-// see `TRANSACT_COEFFS` in PubInputs.sol and `coeffs` in ref/compress.ts.
-const CHALLENGE_WORDS = 9 + 3 * N_IN + 8 * N_OUT;
+// The challenge preimage: a superset, adding the five unpinned struct words, the
+// clue triples and the aux digest. These are logical public inputs bound through
+// `z` rather than `y`, so they are outside the Lean layout by construction (see
+// `TRANSACT_COEFFS` in PubInputs.sol and `coeffs` in ref/compress.ts).
+const CHALLENGE_WORDS = 10 + 3 * N_IN + 8 * N_OUT;
 
-// Distinct sentinel per logical field, so any transposition shows up as a
-// mismatch rather than coincidentally agreeing.
+// Distinct sentinel per logical field, so a transposition shows up as a
+// mismatch.
 //
-// Generated from the Lean layout's slot NAMES rather than hand-written. The
-// independence the test needs is in `SENTINEL_INPUT` below, which assigns each
-// sentinel to a field by name: that assignment is the transcription under test,
-// and `flatten` has to reproduce Lean's order from it.
+// Generated from the Lean layout's slot names. The transcription under test is
+// `SENTINEL_INPUT` below, which assigns each sentinel to a field by name;
+// `flatten` must reproduce Lean's order from it.
 const S = sentinels(readLayout(LAYOUT_FILE), 1000, "layout_parity");
 
 /**
- * Sentinels for the fields that are hashed but never evaluated.
+ * Sentinels for the fields that are hashed but not evaluated.
  *
- * Separate from `S.map` because that one is derived from the Lean layout,
- * and these are exactly the names the Lean layout must NOT contain. Written out
- * rather than generated, so adding one back to the coefficient vector by mistake
- * fails the superset case below instead of silently regenerating.
+ * Separate from `S.map`, which is derived from the Lean layout; these are the
+ * names the Lean layout must not contain. Listed explicitly rather than
+ * generated, so moving one into the coefficient vector fails the superset case
+ * below.
  */
 const CHALLENGE_ONLY = sentinels(
     [
@@ -73,14 +72,15 @@ const CHALLENGE_ONLY = sentinels(
         "chainId",
         "payer",
         "relayer",
+        "intentHash",
         "auxDigest",
         ...["clueRx", "clueRy", "clueBits"].flatMap((f) =>
             Array.from({ length: N_OUT }, (_, i) => `${f} ${i}`),
         ),
     ],
-    // A second family in one test, which is what `base` is for: these must not
+    // A second family in one test, hence a distinct `base`: these must not
     // collide with the coefficient sentinels, or a word moving between the two
-    // vectors would go unnoticed.
+    // vectors would go undetected.
     9000,
     "layout_parity challenge-only",
 );
@@ -100,6 +100,7 @@ const SENTINEL_INPUT = {
     chain_id: CHALLENGE_ONLY.at("chainId"),
     payer_address: CHALLENGE_ONLY.at("payer"),
     relayer_address: CHALLENGE_ONLY.at("relayer"),
+    intent_hash: CHALLENGE_ONLY.at("intentHash"),
     out_clue_Rx: CHALLENGE_ONLY.scalars("clueRx", N_OUT),
     out_clue_Ry: CHALLENGE_ONLY.scalars("clueRy", N_OUT),
     out_clue_bits: CHALLENGE_ONLY.scalars("clueBits", N_OUT),
@@ -125,10 +126,9 @@ describe("formal model / public-input layout parity", () => {
     });
 
     it("the challenge preimage is a strict superset of the coefficients", () => {
-        // The unconstrained fields must be hashed and not evaluated. Both halves
-        // matter: dropping them from the preimage would leave a relayer free to
-        // rewrite the recipient, and adding them back to the coefficients would
-        // restore the free variables that made `y` forgeable.
+        // The unconstrained fields must be hashed and not evaluated. Omitting them
+        // from the preimage lets a relayer rewrite the recipient; including them
+        // in the coefficients makes them free variables and `y` forgeable.
         const c = refCoeffs(SENTINEL_INPUT);
         const pre = flatten(SENTINEL_INPUT);
         expect(c.length).to.equal(COEFF_COUNT);
@@ -172,8 +172,8 @@ describe("formal model / public-input layout parity", () => {
         });
     });
 
-    // Carries the ordering across the package boundary: without it a published
-    // vector could drift from the Lean model and the SDK would match the drift.
+    // Carries the ordering across the package boundary; otherwise a published
+    // vector could drift from the Lean model and the SDK would follow the drift.
     for (const shape of SHIPPED_SHAPES) {
         it(`the published ${shape} vector carries the Lean layout verbatim`, () => {
             const layout = readLayout(resolve(ROOT, `lean/expected/layout-${shape}.txt`));
@@ -192,12 +192,12 @@ describe("formal model / public-input layout parity", () => {
                 "coefficient count must equal 4 + 3·N_IN + 5·N_OUT",
             );
             expect(vector.circuit.challengeWords).to.equal(
-                9 + 3 * vector.circuit.shape.nIn + 8 * vector.circuit.shape.nOut,
-                "challenge preimage must equal 9 + 3·N_IN + 8·N_OUT",
+                10 + 3 * vector.circuit.shape.nIn + 8 * vector.circuit.shape.nOut,
+                "challenge preimage must equal 10 + 3·N_IN + 8·N_OUT",
             );
 
-            // Computed with the generator's own function: what this pins is the
-            // layout LIST, not the digest algorithm.
+            // Computed with the generator's own function: this pins the layout
+            // list, not the digest algorithm.
             expect(vector.circuit.layoutDigest).to.equal(
                 layoutDigest(layout),
                 "layoutDigest does not match the Lean slot names it claims to digest",

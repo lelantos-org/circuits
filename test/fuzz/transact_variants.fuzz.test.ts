@@ -3,17 +3,14 @@
 // [test/fuzz/transact.fuzz.test.ts](./transact.fuzz.test.ts) covers
 // balanced random witnesses, unbalanced mutations, ghost-note asset, wrong-nsk
 // and value overflow. This file adds:
-//   - role symmetry: which real note occupies which slot is free, so an honest
-//     rebuild after swapping slots must still verify. A raw JSON swap does not,
+//   - role symmetry: the assignment of real notes to slots is free, so an honest
+//     rebuild after swapping slots must verify. A raw JSON swap does not,
 //     because output rho is bound to (nullifier[0], out_index) and slot order
-//     feeds that derivation — the F1 defence, not a soundness hole.
+//     feeds that derivation (the rho-uniqueness defence in transact/rho.test.ts).
 //   - public-value boundary: publicIn / publicOut at 2^64 - 1 and at 2^64.
 //   - path-element perturbation: mutating a random level of one input's Merkle
 //     authentication path must reject, since the Poseidon image no longer
 //     matches `merkle_root`.
-//
-// Each property builds one or two production-depth witnesses per trial, so the
-// run count is halved against the shared `fcParams`.
 
 import * as fc from "fast-check";
 
@@ -24,12 +21,12 @@ import { useTransactCircuit } from "../transact/setup";
 import { arbBalancedSplit, arbNsk, MAX_VALUE, fcParamsFor } from "./arbitraries";
 import { DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 
-// `TRANSACT_VARIANTS` builds at least one production-depth witness per trial, so
-// SUITE_SCALE halves NUM_RUNS. Override: FUZZ_RUNS_TRANSACT_VARIANTS=N.
+// Each trial builds one or two production-depth witnesses, so SUITE_SCALE halves
+// NUM_RUNS. Override: FUZZ_RUNS_TRANSACT_VARIANTS=N.
 const fcParams = fcParamsFor("TRANSACT_VARIANTS");
 
-// Construct an honest balanced 2-in-2-out witness (same asset, same
-// owner-nsk for inputs). Returns the freshly-built circom input dict.
+// Builds an honest balanced 2-in-2-out witness (same asset, same owner nsk for
+// both inputs) and returns the circom input dict.
 async function buildBalanced(
     tx: TxBuilder,
     v1: bigint, v2: bigint, o1: bigint, o2: bigint,
@@ -100,9 +97,9 @@ describe("transact_4x6 variants [fuzz]", function () {
     });
 
     it("public-value boundary: publicIn = 2^64 - 1 balanced witness passes", async () => {
-        // One input full at MAX_VALUE; outputs sum to MAX_VALUE; publicIn=0,
-        // publicOut=0 (transfer-only) ⇒ honest balanced witness. This pins
-        // the Num2Bits(64) accepts at the upper boundary.
+        // One input at MAX_VALUE, outputs summing to MAX_VALUE, publicIn =
+        // publicOut = 0 (transfer only). Pins Num2Bits(64) acceptance at the
+        // upper boundary.
         const aliceNsk = 11n, bobNsk = 22n;
         const tree = ctx.tx.newTree();
         let inA = ctx.tx.insert(tree, ctx.tx.note(MAX_VALUE, aliceNsk, 1n), aliceNsk);
@@ -120,8 +117,8 @@ describe("transact_4x6 variants [fuzz]", function () {
     });
 
     it("public-value boundary: input value = 2^64 (overflow) rejects", async () => {
-        // SDK or ctx.circuit must catch the range violation. Either layer's
-        // rejection counts — both gates protect the same invariant.
+        // The SDK or the circuit must reject the range violation; both enforce
+        // the same invariant, so either rejection passes.
         const aliceNsk = 11n, bobNsk = 22n;
         const overflow = 1n << 64n;
         let threw = false;
@@ -169,9 +166,9 @@ describe("transact_4x6 variants [fuzz]", function () {
     });
 
     it("cross-note attack: swapping in_nsk between two differently-owned inputs rejects", async () => {
-        // Inputs owned by nsk0 and nsk1 respectively. Swapping in_nsk[0] ↔
-        // in_nsk[1] breaks both the pk-derivation check (DerivePk(nsk1) ≠ pk0)
-        // and the nullifier check (Poseidon(DeriveNk(nsk1), rho0) ≠ nf0).
+        // Inputs owned by nsk0 and nsk1. Swapping in_nsk[0] ↔ in_nsk[1] breaks
+        // both the pk-derivation check (DerivePk(nsk1) ≠ pk0) and the nullifier
+        // check (nf0 is derived from DeriveNk(nsk0)).
         await fc.assert(fc.asyncProperty(
             arbBalancedSplit(), arbNsk(), arbNsk(),
             async ({ v1, v2, o1, o2 }, nsk0, nsk1) => {
@@ -189,11 +186,10 @@ describe("transact_4x6 variants [fuzz]", function () {
                     inputs: [inA, inB], outputs: [outA, outB], merkleRoot: root,
                 });
                 await ctx.circuit.calculateWitness(input, true);
-                // Transpose the first two entries IN PLACE on a copy of the
-                // full array. Rebuilding it as a two-element literal drops the
-                // padded slots, and the witness calculator then rejects the
-                // input object — "Not enough values for input signal in_nsk" —
-                // rather than the key check, which is what this case is about.
+                // Transpose the first two entries on a copy of the full array.
+                // A two-element literal would drop the padded slots, and the
+                // witness calculator would reject the input shape ("Not enough
+                // values for input signal in_nsk") instead of the key check.
                 const nsk = [...input.in_nsk];
                 [nsk[0], nsk[1]] = [nsk[1], nsk[0]];
                 const swapped = { ...input, in_nsk: nsk };

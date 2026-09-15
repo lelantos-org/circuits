@@ -4,24 +4,23 @@ import Lelantos.Proofs.Completeness
 /-!
 # Non-vacuity of the batch results
 
-`Circuit/TreeUpdateBatch.lean` proves a dozen theorems of the form `BatchChainSat … → P`.
-Read literally, all of them are vacuous unless something satisfies `BatchChainSat`, and
-nothing in `Proofs/Completeness.lean` does — that file exhibits assignments for the transact
-circuit only. This file closes the gap for `TreeUpdateBatch(11, 8)`, the deployed shape.
+`Circuit/TreeUpdateBatch.lean` proves theorems of the form `BatchChainSat … → P`, which are
+vacuous unless something satisfies `BatchChainSat`; `Proofs/Completeness.lean` covers the
+transact circuit only. This file exhibits satisfying assignments for
+`TreeUpdateBatch(11, 8)`, the deployed shape.
 
-`batchAt S fr` is one assignment per start position `S` and frontier `fr`, committing **three**
-leaves into eight slots: an odd, partially-filled batch, where the padding constraints and
-the leaf zeroing do work rather than being satisfied by `active ≡ 1`. Two instances are
-exhibited:
+`batchAt S fr` is one assignment per start position `S` and frontier `fr`, committing three
+leaves into eight slots: an odd, partially-filled batch, so the padding constraints and the
+leaf zeroing are exercised rather than satisfied by `active ≡ 1`. Two instances:
 
 * `batch`, at `start_index = 0` over an empty frontier — the base the named theorems use;
 * `batchSat_nonzero_frontier`, at `start_index = 21` over a frontier holding a non-zero value
-  in every slot a root reads — so both roots take their frontier branches and the zero pin
-  is shown not to reject an honest filled frontier.
+  in every slot a root reads, so both roots take their frontier branches and the zero pin
+  accepts an honestly filled frontier.
 
 The empty-subtree fills are `emptyChain`, so `ZerosCoherent` is discharged rather than assumed.
-Every leaf is a spend (`is_deposit = 0`), which is what lets `BatchChainSat` be exhibited
-without reaching a curve axiom.
+Every leaf is a spend (`is_deposit = 0`), so `BatchChainSat` is exhibited without reaching
+a curve axiom.
 -/
 
 namespace Lelantos
@@ -30,8 +29,8 @@ namespace BatchWitness
 
 /-! ## Shape
 
-Named rather than written as numerals so the arithmetic below reads as the circuit's own,
-and so a change of shape is a change in one place.
+Named constants rather than numerals, so the arithmetic below matches the circuit's and the
+shape is defined in one place.
 -/
 
 /-- `MAX_L`: slots per batch. -/
@@ -57,11 +56,8 @@ theorem act_eq (k : ℕ) (hk : k < slots) : act k = if k < filled then 1 else 0 
   interval_cases k <;> norm_num [lessThanActive, natBits]
 
 /-- The padding constraints. An active slot zeroes the `1 - active` factor; a padding slot
-carries zero in every per-leaf field, which is the `hx` hypothesis.
-
-`hx` quantifies over the padding slots rather than naming one. At `slots = 4` there was
-exactly one (`k = 3`) and the hypothesis could be the point value `x 3 = 0`; `filled = 3`
-of `slots = 8` leaves five, so the statement has to range over all of them. -/
+carries zero in every per-leaf field, which is the `hx` hypothesis. `hx` ranges over all
+padding slots (five, for `filled = 3` of `slots = 8`). -/
 theorem pad_mul {x : ℕ → F} (hx : ∀ j, ¬ j < filled → x j = 0) (k : ℕ) (hk : k < slots) :
     (1 - act k) * x k = 0 := by
   rw [act_eq k hk]
@@ -77,7 +73,7 @@ first three degenerate.
 -/
 
 /-- Slot `k`'s note commitment. Distinct across the filled slots; zero on every padding
-slot, which is what `pad_cm` requires. -/
+slot, as `pad_cm` requires. -/
 def cm (k : ℕ) : F := if k < filled then ((k : ℕ) : F) + 7 else 0
 
 theorem cm_pad : ∀ j, ¬ j < filled → cm j = 0 := by
@@ -149,8 +145,8 @@ theorem batchAt_chain_sat {S : ℕ} {fr : ℕ → ℕ → F} (hS : S + filled �
   spend_zero_public_in k _ := by simp [batchAt]
 
 /-- **`BatchDepositSat` is satisfiable too.** Every slot is a spend, so `active_dep` is zero
-and the binding is gated off — but the wiring it gates (`HashToAssetGen`, the range check
-and the `ValueCommit`) is still discharged in full, which is what `batch_deposit_opens`
+and the binding is gated off, but the wiring it gates (`HashToAssetGen`, the range check
+and the `ValueCommit`) is discharged in full, which is what `batch_deposit_opens`
 quantifies over. -/
 theorem batchAt_deposit_sat (S : ℕ) (fr : ℕ → ℕ → F) : BatchDepositSat (batchAt S fr) where
   active_dep_def k _ := by simp [batchAt]
@@ -186,7 +182,7 @@ non-empty domain. -/
 theorem batchSat_satisfiable : ∃ w : BatchSignals 11 8, BatchSat 3 emptyChain w :=
   ⟨BatchWitness.batch, BatchWitness.batch_sat⟩
 
-/-- …and it is not the degenerate full batch: three leaves in eight slots, so the padding
+/-- The assignment is not the degenerate full batch: three leaves in eight slots, so the padding
 constraints and the leaf zeroing are exercised rather than satisfied by `active ≡ 1`. -/
 theorem batchSat_partial_batch :
     BatchWitness.batch.actualCount = ((3 : ℕ) : F) ∧ BatchWitness.batch.append.active 3 = 0 :=
@@ -215,7 +211,7 @@ theorem batch_advances_witness :
         BatchWitness.batch.leaves BatchWitness.batch.frontierIn emptyChain 11 0 :=
   batch_advances_by_count BatchShape.deployed emptyChain_coherent BatchWitness.batch_chain_sat
 
-/-- …and so is the count range, on a real assignment rather than a hypothetical one. -/
+/-- The count range is also derivable on this assignment. -/
 theorem batch_count_range_witness :
     1 ≤ BatchWitness.batch.actualCount.val ∧ BatchWitness.batch.actualCount.val ≤ 8 :=
   batch_count_range BatchShape.deployed BatchWitness.batch_chain_sat

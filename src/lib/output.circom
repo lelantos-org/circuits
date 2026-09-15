@@ -15,7 +15,7 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 // cv_dep feeds leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) in
 // tree_update_batch. rH and cv_dep are exposed to the caller.
 template OutputNote() {
-    // ---- private witness ----
+    // ===== PRIVATE =====
     signal input asset_id;
     signal input value;
     signal input pk;
@@ -24,11 +24,11 @@ template OutputNote() {
     signal input rcv;
     signal input rcv_dep;
 
-    // ---- public binding ----
+    // ===== PUBLIC BINDING =====
     signal input cm;
     signal input cv[2];
 
-    // ---- exposed to caller ----
+    // ===== OUTPUTS =====
     signal output rH[2];
     signal output cv_dep[2];
 

@@ -1,4 +1,4 @@
-// Pre-publish sanity for @lelantos-org/circuits.
+// Pre-publish artifact check for @lelantos-org/circuits.
 //
 // Asserts every published artifact exists, falls within a size band, and, for
 // a vkey, parses as the expected JSON shape. Covers the package `files`
@@ -8,11 +8,11 @@
 // The trusted-setup contribution (`snarkjs zkey contribute`) is
 // non-deterministic: snarkjs mixes fresh `crypto.randomBytes(64)` into the
 // entropy source before applying the user-supplied entropy (see snarkjs
-// `getRandomRng`), so the zkey and vkey SHA-256 differ on every rebuild and
-// cannot be pinned here.
+// `getRandomRng`), so zkey and vkey SHA-256 digests differ on every rebuild and
+// are not pinned.
 //
-// The gate therefore emits per-artifact SHA-256 to stdout (one `name=sha` line
-// each) plus a `circuits-shas` line for GitHub Actions to pipe into
+// Instead, the check prints per-artifact SHA-256 to stdout (one `name=sha` line
+// each) plus a `circuits-shas` line that GitHub Actions pipes into
 // `$GITHUB_STEP_SUMMARY` and the release notes. It fails only on a missing
 // file, an out-of-range size, or a malformed vkey.
 //
@@ -36,10 +36,10 @@ interface ArtifactCheck {
     json?: (value: unknown) => boolean;
 }
 
-/// Size bands catch a truncated or missing artifact; they do not pin a byte
-/// count, since a re-ceremony changes the zkey size slightly on every run. zkey
-/// size follows the FFT domain and the wire count, so the bands are re-measured
-/// whenever the circuits change size.
+/// Size bands detect truncated artifacts without pinning a byte count, since
+/// each setup run changes the zkey size slightly. zkey size follows the FFT
+/// domain and wire count, so the bands must be re-measured when circuit size
+/// changes.
 const FILES: ArtifactCheck[] = [
     /// 4x6 = `Transact(11, 4, 6)`, the only published transact shape, on ptau-17
     /// at 100,320 constraints (76.5% of the 2^17 domain).
@@ -69,12 +69,10 @@ function isGroth16Vkey(v: unknown): boolean {
     return isRecord(v) && v.protocol === "groth16" && v.curve === "bn128";
 }
 
-/// The golden vectors are byte-deterministic: `scripts/gen-vectors.ts` uses no
-/// randomness, no timestamps and no absolute paths, and `just vectors-check`
-/// confirms it by regenerating and diffing. They therefore carry an exact
-/// SHA-256 pin, taken from the `vectors/index.json` the generator writes. A
-/// mismatch means the committed vectors were hand-edited or a regeneration was
-/// not committed.
+/// The golden vectors are byte-deterministic (`scripts/gen-vectors.ts` uses no
+/// randomness, timestamps or absolute paths; `just vectors-check` verifies this),
+/// so each is pinned to the exact SHA-256 recorded in `vectors/index.json`. A
+/// mismatch indicates hand-edited vectors or an uncommitted regeneration.
 const VECTORS = resolve(ROOT, "vectors");
 
 /** Narrowing helper for values parsed from JSON. */

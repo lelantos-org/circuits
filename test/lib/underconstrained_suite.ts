@@ -2,14 +2,13 @@
 //
 // `test/fuzz/underconstrained.fuzz.test.ts` (4x6) and
 // `underconstrained_batch.fuzz.test.ts` run the same search over different
-// circuits. What differs between them is genuinely per-circuit — which honest
-// witnesses to sweep, how to project a published witness into circom inputs, and
-// which gadget census the detector must see — and that stays in each suite.
+// circuits. Per-circuit parts stay in each suite: which honest witnesses to
+// sweep, how to project a published witness into circom inputs, and which gadget
+// census the detector must see.
 //
-// What does not differ is everything here: loading the two builds, assembling
-// the group sources, and the judgement applied to a finding list. Those were
-// copied verbatim between the two files, which meant a change to the search's
-// verdict (a new severity, a different vacuity guard) had to be made twice.
+// This module holds the shared parts: loading the two builds, assembling the
+// group sources, and the verdict applied to a finding list, so a change to the
+// verdict (a new severity, a different vacuity guard) applies to both suites.
 
 import { expect } from "chai";
 
@@ -41,8 +40,8 @@ export interface SearchContext {
 /**
  * Compile a circuit both ways and build the search inputs.
  *
- * Bit decompositions are searched in the UNOPTIMIZED system: `--O2` substitutes
- * the weighted sum away and nothing structural survives to match. See
+ * Bit decompositions are searched in the unoptimized system: `--O2` substitutes
+ * the weighted sum away and leaves no structure to match. See
  * `compileConstraintsOnly` for why a result there carries over to the optimized
  * system a proof binds.
  *
@@ -67,14 +66,14 @@ export async function loadSearchContext(circuitPath: string): Promise<SearchCont
 /**
  * Run both witness-level searches over one honest witness and assert the result.
  *
- * Takes the witness VECTOR rather than a bundle, so each suite keeps its own
- * projection into circom inputs — the one thing the two genuinely disagree on.
+ * Takes the witness vector rather than a bundle, so each suite keeps its own
+ * projection into circom inputs.
  *
  * Every finding is re-checked against the whole system by `confirm` before it is
- * judged. The algebra is exact, so a refutation here is a bug in the search
- * rather than in the circuit, and it must fail loudly instead of quietly
- * shrinking the finding list — a search that silently reports nothing is
- * indistinguishable from a circuit with nothing to report.
+ * judged. The algebra is exact, so a refutation indicates a bug in the search
+ * rather than the circuit. It fails the test instead of being dropped from the
+ * finding list, since a search that reports nothing is indistinguishable from a
+ * circuit with nothing to report.
  */
 export function assertNoSecondWitness(
     ctx: SearchContext,
@@ -83,8 +82,8 @@ export function assertNoSecondWitness(
 ): Finding[] {
     const { view, symbols, groups } = ctx;
 
-    // Without this the roots the searches compute are meaningless: both assume
-    // `t = 0` is already a root of every constraint they look at.
+    // Both searches assume `t = 0` is a root of every constraint they examine,
+    // which holds only for a satisfying witness.
     expect(view.firstViolation(witness)).to.equal(
         -1,
         `${label}: the honest witness must satisfy the R1CS before it can be mutated`,
@@ -117,11 +116,9 @@ export function assertNoSecondWitness(
 /**
  * The three witness-independent structural checks, declared for one suite.
  *
- * They read `ctx` and nothing else, so they were byte-identical between the two
- * fuzz suites — the most mechanically duplicated part of the pair, and the part
- * the first extraction stopped short of. The census test is NOT here: which
- * gadgets a circuit is known to contain is exactly what differs, and pinning it
- * is what stops the detector silently matching nothing.
+ * They depend only on `ctx`, so both fuzz suites share them. The census test is
+ * per-suite: the gadgets a circuit contains differ, and pinning them detects a
+ * detector that matches nothing.
  *
  * `ctx` is passed as a thunk because `loadSearchContext` runs in `before`, after
  * the `it`s are declared.

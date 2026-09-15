@@ -1,40 +1,33 @@
 #!/usr/bin/env python3
-"""Every constraint the circom emits is cited by something in `lean/`.
+"""Check that every constraint the circom emits is cited from `lean/`.
 
-`FIDELITY.md` opens by claiming that every `===` and `<==` in the transitive closure
-of `src/4x6.circom` and `src/tree_update_batch.circom` — minus circomlib — appears in
-its tables, with stated exceptions. That is the claim the whole fidelity argument
-rests on, and it was checked by eye.
+`FIDELITY.md` states that every `===` and `<==` in the transitive closure of
+`src/4x6.circom` and `src/tree_update_batch.circom`, excluding circomlib, appears in
+its tables, with stated exceptions. This script verifies that claim.
+`check-citations.py` checks that each citation resolves; this checks the converse,
+that the citations together reach every constraint-emitting line. An uncited
+constraint may be absent from the model (the "model omits" direction of
+`FIDELITY.md`'s table). Omissions are sound for `transact_sound`, so they are
+recorded rather than forbidden, but every one must be known.
 
-This checks it. `check-citations.py` asks whether each citation resolves; this asks
-the other direction: whether the citations, taken together, reach every line that
-emits a constraint. A constraint no citation names is a constraint the model may
-simply not have — the "model omits" direction of `FIDELITY.md`'s table. That
-direction is safe for `transact_sound`, which is why it can be recorded rather than
-forbidden; what is not safe is not knowing.
+## Coverage classes
 
-## Covered, and covered how
+A constraint line is **transcribed** when a citation of at most `NARROW` (20) lines
+contains it. Citations of that width name one constraint or one contiguous wiring
+block abstracted by a single model field (e.g. `:225-243`, the nineteen
+`pe.<x> <== …` lines behind `PolyEvalSat`). Wider citations name a template
+(`merkle.circom:19-72`, `batch_append.circom:107-249`); the model field describes the
+template as a whole and is not evidence for any individual line.
 
-A constraint line is **transcribed** when some citation of at most `NARROW` lines
-contains it. Twenty is where the data separates: a citation of twenty lines or fewer
-names one constraint, or one contiguous wiring block that a single model field
-abstracts (`:225-243`, the nineteen `pe.<x> <== …` lines behind `PolyEvalSat`). A
-wider one names a template — `merkle.circom:19-72`, `batch_append.circom:107-249` — and the
-model field carrying it describes the template rather than transcribing its lines, so
-it is not evidence about any particular line inside.
+The **residue** is every uncited line plus every line reached only by a template-wide
+citation. It is pinned in `expected/coverage.txt` and diffed, as `check-axioms.sh`
+pins the trusted base, so a new untranscribed constraint appears in review to be
+cited or accepted.
 
-Everything else is the **residue**: uncited lines, and lines reached only by a
-template-level pointer. The residue is pinned in `expected/coverage.txt` and diffed,
-exactly as `check-axioms.sh` pins the trusted base. A new constraint that nothing
-transcribes shows up in that diff, and the reviewer either cites it or accepts it
-into the expectation with the rest.
-
-Recording rather than forbidding is deliberate. Two parts of the circuit are
-covered on purpose by a pointer or by nothing — `fixed_base_mul.circom` collapses
-into the `escalarMul` axiom pair, and `EmptySubtreeHashes` is a free parameter in
-Lean — and a hand-written allowlist
-for those would need maintaining in step with a second hand-written list of reasons.
-The expectation file is that list, generated.
+Some parts of the circuit are intentionally covered only by a pointer or not at all:
+`fixed_base_mul.circom` is modelled by the `escalarMul` axiom pair, and
+`EmptySubtreeHashes` is a free parameter in Lean. The generated expectation file
+records these instead of a hand-maintained allowlist.
 
 Run:  python3 lean/scripts/check-coverage.py             # check, from lean/
       python3 lean/scripts/check-coverage.py --update    # accept a new residue
@@ -55,18 +48,18 @@ from citations import citations_in, strip_comment
 
 EXPECTED = os.path.join(LEAN, "expected", "coverage.txt")
 
-# The two top-level circuits whose transitive closure is the circuit under proof.
+# Top-level circuits whose transitive closure is the circuit under proof.
 ROOTS = ["src/4x6.circom", "src/tree_update_batch.circom"]
 
-# `include` of a circomlib path leaves the repo; those templates are collapsed into
-# axioms (`Lelantos.Meta.Assumptions`) and have no Lean counterpart by design.
+# circomlib includes resolve outside the repo; those templates are modelled as axioms
+# (`Lelantos.Meta.Assumptions`) and have no Lean counterpart.
 INCLUDE = re.compile(r'^\s*include\s+"(?P<path>[^"]+)"')
 
-# circom's two constraint-emitting operators. `<--` assigns without constraining and
-# `-->` is its mirror; neither appears in this repo, and neither would count.
+# circom's constraint-emitting operators. `<--` assigns without constraining (as does
+# its mirror `-->`) and is not counted.
 CONSTRAINT = re.compile(r"===|<==")
 
-# A citation wider than this names a template, not a constraint. See the module note.
+# A citation wider than this names a template, not a constraint. See the module docstring.
 NARROW = 20
 
 
@@ -121,14 +114,11 @@ def spans_by_width() -> tuple[dict[str, list[tuple[int, int]]],
 
 
 def residue() -> tuple[list[str], dict[str, tuple[int, int]]]:
-    """The residue, tagged, and per-file (transcribed, total) counts.
+    """The tagged residue lines and per-file (transcribed, total) counts.
 
-    Two tags, because they are not the same finding. `POINTER` is a constraint some
-    citation reaches, but only through a span naming its whole template — the model
-    describes that template rather than this line. `UNCITED` is a constraint nothing
-    in `lean/` names at all, which is the one worth reading: either the model gained
-    a field whose citation is missing, or the circuit has a constraint the model does
-    not know about.
+    `POINTER` marks a constraint reached only by a template-wide citation. `UNCITED`
+    marks a constraint no citation in `lean/` reaches: either a model field lacks its
+    citation, or the circuit has a constraint the model does not represent.
     """
     narrow, wide = spans_by_width()
     lines: list[str] = []

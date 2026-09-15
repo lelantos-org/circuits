@@ -3,7 +3,7 @@ import Lelantos.Gadgets.Note
 /-!
 # The quaternary commitment tree
 
-What the batch circuit is proved *against*, with no signals in it: the tree an append run
+The specification the batch circuit is proved against, with no signals: the tree an append run
 produces, and the single-leaf insert that run is made of. Nothing here mirrors a template;
 `Gadgets/BatchAppend.lean` proves its constraint system computes these objects.
 
@@ -30,7 +30,7 @@ theorem mul_four_pow_succ (x d : ℕ) : x * 4 ^ (d + 1) = 4 ^ d * (4 * x) := by 
 
 /-! ## The empty-subtree chain
 
-`EMPTY_SUBTREE(d)` (`src/lib/common.circom:29-60`) is a table of constants, pinned by
+`EMPTY_SUBTREE(d)` (`src/lib/common.circom:29-58`) is a table of constants, pinned by
 `test/merkle.test.ts` to the chain `zeros[0] = 0`, `zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] ×
 4)`. Lean treats Poseidon as opaque and cannot evaluate the constants, so the model keeps
 `zeros` a free parameter and states the chain as a hypothesis wherever a result needs it.
@@ -60,7 +60,7 @@ theorem ZerosCoherent.eq_emptyChain {zeros : ℕ → F} (h : ZerosCoherent zeros
 
 /-- The four children of a level: `cur` at the insertion digit, frontier siblings to its
 left, empty-subtree hash to its right — the OLD ROOT table in the header of
-`src/lib/batch_append.circom:35-40`. -/
+`src/lib/batch_append.circom:34-39`. -/
 def insertSlots (t : ℕ) (cur : F) (fr : ℕ → F) (zero : F) : ℕ → F := fun k =>
   if k = t then cur else if k < t then fr k else zero
 
@@ -68,7 +68,7 @@ def insertSlots (t : ℕ) (cur : F) (fr : ℕ → F) (zero : F) : ℕ → F := f
 def frontierUpd (t : ℕ) (cur : F) (fr : ℕ → F) : ℕ → F := fun k =>
   if k = t then cur else fr k
 
-/-- What an insert *means*, with no reference to selector or intermediate signals: a hash
+/-- The meaning of an insert, with no reference to selector or intermediate signals: a hash
 chain folding the leaf upwards through the fill table, together with the frontier it leaves
 behind. The counterpart of `MerkleMember` for the append direction. -/
 def InsertsTo (depth : ℕ) (leaf : F) (dig : ℕ → F) (frIn : ℕ → ℕ → F) (zeros : ℕ → F)
@@ -83,10 +83,9 @@ def InsertsTo (depth : ℕ) (leaf : F) (dig : ℕ → F) (frIn : ℕ → ℕ →
 /-- **The insert is a function of its inputs.** Two `InsertsTo` witnesses over the same
 leaf, digits, frontier and empty-subtree hashes produce the same root and the same frontier.
 
-This is what stops `InsertsTo` being the near-tautology `MerkleMember` is. There the chain is
-witnessed and only Poseidon collision resistance ties it to the root (`merkleMember_inj`);
-here `chain 0 = leaf` and the step equation determine every node outright, so the root is
-pinned by plain induction and no hash assumption appears. -/
+Unlike `MerkleMember`, whose witnessed chain is tied to the root only by Poseidon collision
+resistance (`merkleMember_inj`), here `chain 0 = leaf` and the step equation determine
+every node, so the root is pinned by induction with no hash assumption. -/
 theorem InsertsTo.unique {depth : ℕ} {leaf root root' : F} {dig zeros : ℕ → F}
     {frIn frOut frOut' : ℕ → ℕ → F}
     (h : InsertsTo depth leaf dig frIn zeros frOut root)
@@ -267,7 +266,7 @@ noncomputable def appendRoot (depth S : ℕ) (L : ℕ → F) (frIn : ℕ → ℕ
     (k : ℕ) : F :=
   insChain (L k) (S + k) (seqFr S L frIn zeros k) zeros depth
 
-/-- **Each step of the run is a genuine insert**, at tree position `S + k`. -/
+/-- **Each step of the run is an insert**, at tree position `S + k`. -/
 theorem append_insertsTo (depth S : ℕ) (L : ℕ → F) (frIn : ℕ → ℕ → F) (zeros : ℕ → F)
     (k : ℕ) :
     InsertsTo depth (L k) (fun d => ((quatDigit (S + k) d : ℕ) : F)) (seqFr S L frIn zeros k)

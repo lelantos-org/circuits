@@ -9,10 +9,9 @@ all. Each result takes `TransactSat w` plus a description of the malformation an
 `False`, so it rules out a family rather than one hand-built counterexample. These are the
 Lean counterparts of the rejecting cases in `test/transact/`.
 
-`cross_asset_cancellation_rejected` is the one to read first: the assignment that
-`Lelantos.pointBalance_not_sound` shows the Edwards point balance *accepts* has no
-satisfying assignment of the full system. The two together are exactly what the
-defence-in-depth comment at `src/lib/balance.circom:34-41` claims.
+`cross_asset_cancellation_rejected` shows that the assignment the Edwards point balance
+accepts (`Lelantos.pointBalance_not_sound`) has no satisfying assignment of the full system.
+Together they establish the defence-in-depth claim at `src/lib/balance.circom:34-41`.
 -/
 
 namespace Lelantos
@@ -56,9 +55,8 @@ exactly, because `V¹ + V³ = 2·V²` (see `Lelantos.pointBalance_not_sound`). T
 value balance rejects it, because asset ids are compared as field elements rather than as
 curve points.
 
-This is the in-Lean counterpart of the `F2` case in `test/transact/multi_asset.test.ts`,
-and the
-reason `PerAssetValueBalance` exists. -/
+This is the Lean counterpart of the `F2` case in `test/transact/multi_asset.test.ts`, and
+the reason for `PerAssetValueBalance`. -/
 theorem cross_asset_cancellation_rejected (h : TransactSat w)
     (hnIn : nIn = 2) (hnOut : nOut = 2)
     (hin0 : inAsset w 0 = 1) (hin1 : inAsset w 1 = 3)
@@ -101,16 +99,16 @@ theorem inflation_rejected (h : TransactSat w) (hnIn : nIn = 2) (hnOut : nOut = 
 
 /-! ## Structural malformations -/
 
-/-- **A padding slot carrying value is rejected.** This is what makes a dummy input neutral
-for conservation, and hence what makes the bypassed Merkle check safe. -/
+/-- **A padding slot carrying value is rejected.** This makes a dummy input neutral for
+conservation, and hence makes skipping its Merkle check safe. -/
 theorem dummy_with_value_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7)
     {i : ℕ} (hi : i < nIn) (hdummy : (w.spent i).isDummy = 1)
     (hval : (w.spent i).value ≠ 0) : False :=
   hval ((transact_sound hnIn hnOut h).dummySlots i hi hdummy)
 
 /-- **A zero asset id on an output is rejected**, unconditionally — the check is not gated
-on a dummy flag, unlike the input side. This is what keeps `packed_av ≥ 2^64` and so keeps
-the commitment preimage separated from the tag-prefixed hashes. -/
+on a dummy flag, unlike the input side. This keeps `packed_av ≥ 2^64` and so keeps the
+commitment preimage separated from the tag-prefixed hashes. -/
 theorem zero_asset_output_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7)
     {j : ℕ} (hj : j < nOut) (hzero : outAsset w j = 0) : False :=
   ((transact_sound hnIn hnOut h).outputs j hj).assetNonzero hzero
@@ -129,9 +127,9 @@ theorem foreign_root_rejected (h : TransactSat w) {i : ℕ} (hi : i < nIn)
     (hne : (w.spent i).root ≠ w.merkleRoot) : False :=
   hne (h.spent_root i hi)
 
-/-- **Two outputs sharing a `rho` are rejected**, which is what stops two notes of one
-transaction from sharing a future nullifier. Needs collision resistance, so it is stated
-against `TxBinding` rather than `TxWellFormed`. -/
+/-- **Two outputs sharing a `rho` are rejected**, so two notes of one transaction cannot
+share a future nullifier. Requires collision resistance, so it is stated against
+`TxBinding` rather than `TxWellFormed`. -/
 theorem shared_rho_rejected (hnc : ¬ PoseidonCollision) (h : TransactSat w)
     (hnOut : nOut ≤ 7)
     {j j' : ℕ} (hj : j < nOut) (hj' : j' < nOut) (hne : j ≠ j')

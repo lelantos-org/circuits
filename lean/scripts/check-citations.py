@@ -1,32 +1,23 @@
 #!/usr/bin/env python3
 """Resolve every source citation in the Lean development.
 
-Doc comments cite the circom they mirror, either in full —
+Doc comments cite circom sources in full form, `src/lib/transact.circom:97-122`, or,
+after a file is named earlier in the same Lean module, in the bare continuation form
+`:150-151`, which resolves against that file.
 
-    `src/lib/transact.circom:97-122`
+Each citation is checked for:
 
-— or, once a file has been named earlier in the same Lean module, in the bare
-continuation form `:150-151`, which resolves against that file.
+  1. existence of the named file, including paths named without a line number;
+  2. the cited lines lying within that file;
+  3. the cited lines still matching the doc comment (anchoring).
 
-Three things about a citation can be checked mechanically:
+Checks 1 and 2 detect renamed, deleted or shortened sources. Check 3 detects spans
+that shifted because lines were inserted above them while remaining in range.
 
-  1. the file it names exists — including a path named with no line number at all,
-     which is how a deleted circuit stays quoted as though it still shipped;
-  2. the lines it names are inside that file;
-  3. the lines it names still say what the doc comment claims they say.
-
-The first two rot when a source is renamed, deleted or shortened. The third rots
-whenever anything is inserted above the cited lines, which is far more common and
-was invisible until this check existed: `src/lib/transact.circom` had drifted by 18
-lines and `src/tree_update_batch.circom` by 25 and 72, every number still inside the
-file and so every citation still "resolving".
-
-Check 3 is anchoring. A doc comment that cites a line almost always quotes something
-from it — `` `acc[0] <== 0` ``, `` `HashToAssetGen` ``, `` `is_deposit` ``. An
-*anchor* is an identifier inside backticks on the citing line that also occurs
-somewhere in the cited file: quoting it makes it that file's vocabulary rather than
-the prose's, so it should occur in the cited span too. If it does not, the span moved.
-A citation quoting nothing from its file is unanchored and gets checks 1 and 2 only.
+An *anchor* is an identifier inside backticks on the citing line (for example
+`` `acc[0] <== 0` ``, `` `HashToAssetGen` ``, `` `is_deposit` ``) that also occurs in
+the cited file. An anchor must occur within the cited span; otherwise the span has
+moved. A citation with no anchors receives checks 1 and 2 only.
 
     python3 scripts/check-citations.py            # check, from lean/
     python3 scripts/check-citations.py --list     # also print every citation
@@ -44,14 +35,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from checks import SEARCH_ROOTS, outside_checkout, report, scanned_files
 from citations import Citation, citations_in, strip_comment
 
-# Identifiers that appear in nearly every circom line, so finding one inside a span
-# says nothing about whether it is the right span.
+# Identifiers common to most circom lines, which cannot distinguish one span from another.
 STOPWORDS = {"signal", "input", "output", "component", "template", "var", "for", "out", "in"}
 
-# Anchors come only from backticked code on the citing line — the form every doc comment
-# and every `FIDELITY.md` row already uses to quote the circom it mirrors. Prose words are
-# not anchors: "balance" appears in a comment somewhere in `balance.circom` and would
-# match a span it has nothing to do with.
+# Anchors are taken only from backticked code on the citing line, the form doc comments
+# and `FIDELITY.md` rows use to quote circom. Unquoted prose words are excluded because
+# they can match unrelated spans.
 QUOTED = re.compile(r"`([^`\n]+)`")
 PATHLIKE = re.compile(r"[\w./-]*[\w-]/[\w./-]+")
 
@@ -72,20 +61,18 @@ def file_lines(path: str, cache: dict[str, list[str]]) -> list[str]:
 
 
 def anchors(citation: Citation, lines: list[str]) -> set[str]:
-    """Words on the citing line that belong to the cited file's vocabulary.
+    """Backticked words on the citing line that also occur in the cited file's code.
 
-    A word appearing in the doc comment *and* somewhere in the circom source is a
-    quotation from that source, so it should appear in the span the comment points at.
-    A word appearing only in the prose says nothing about which lines are meant.
+    Such a word is a quotation from the source and is expected within the cited span.
     """
-    # Vocabulary from constraint lines only. A word occurring solely in circom comments
-    # ("depth", "balance", "level") is prose on both sides and anchors nothing.
+    # Vocabulary excludes circom comments, so words appearing only in comments do not
+    # anchor.
     vocabulary: set[str] = set()
     for line in lines:
         vocabulary.update(WORD.findall(strip_comment(line)))
-    # Paths are written in backticks in the full form, so drop every path on the line
-    # before looking for quotations — otherwise `src/lib/note.circom:14` anchors on
-    # "note", and a line naming two files anchors each on the other's directory.
+    # Full-form paths are backticked, so paths are removed first; otherwise
+    # `src/lib/note.circom:14` would anchor on "note", and a line naming two files would
+    # anchor each on the other's directory.
     context = PATHLIKE.sub(" ", citation.context)
     quoted: set[str] = set()
     for fragment in QUOTED.findall(context):
@@ -108,7 +95,7 @@ def unresolvable(citation: Citation, source_cache: dict[str, list[str]],
     )
     if target is None:
         return f"{citation.describe()} — no such file"
-    if citation.hi == 0:  # a bare mention: existence is the whole check
+    if citation.hi == 0:  # a mention without lines: only existence is checked
         return None
     lines = file_lines(citation.path, source_cache)
     if citation.hi > len(lines):
@@ -117,10 +104,9 @@ def unresolvable(citation: Citation, source_cache: dict[str, list[str]],
     found = anchors(citation, lines)
     if not found:
         return None
-    # A doc line may carry several spans — `` `:71-78, 119-120` ``, one gadget
-    # instantiated in one block and bound to an output in another. It has one comment,
-    # so its quotations describe the blocks together; anchoring each span separately
-    # would demand every word appear in every block.
+    # A doc line may carry several spans, e.g. `` `:71-78, 119-120` `` for a gadget
+    # instantiated in one block and bound to an output in another. Its quotations
+    # describe the spans jointly, so anchors are matched against their union.
     spans = group if group is not None else [(citation.lo, citation.hi)]
     span = "\n".join("\n".join(lines[lo - 1 : hi]) for lo, hi in spans)
     hits = {word for word in found if word in span}
@@ -133,11 +119,10 @@ def unresolvable(citation: Citation, source_cache: dict[str, list[str]],
 
 
 def suggest(found: set[str], lines: list[str]) -> str:
-    """Where the anchors actually are now, if they sit together somewhere.
+    """A hint for the span where the anchors occur together.
 
-    Only a hint: it finds the tightest run of lines covering the most anchors, which is
-    right when a block moved wholesale and wrong when a constraint was genuinely
-    rewritten. The person editing decides; this saves them the grep.
+    Returns the narrowest run of lines covering the most anchors. This is accurate when
+    a block moved intact and misleading when a constraint was rewritten.
     """
     hits: dict[str, list[int]] = {}
     for number, line in enumerate(lines, 1):
@@ -148,7 +133,7 @@ def suggest(found: set[str], lines: list[str]) -> str:
     if not hits:
         return ""
     covered = sorted(hits)
-    # Slide a window over every start line and keep the narrowest span covering the most.
+    # Slide a 13-line window over each start line; keep the narrowest covering the most.
     best: tuple[tuple[int, int, int], int, int] | None = None
     for start in sorted({n for numbers in hits.values() for n in numbers}):
         reached = [w for w in covered if any(start <= n <= start + 12 for n in hits[w])]

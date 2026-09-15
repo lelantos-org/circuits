@@ -22,22 +22,20 @@ export const NUM_RUNS =
 
 // ===== replayability =====
 //
-// Left to itself fast-check seeds from the clock, so a nightly `FUZZ=heavy`
-// failure is a witness nobody can regenerate: the run that found it is gone,
-// and re-running draws a different sequence. fast-check does print the seed in
-// its failure report, but only into CI log scrollback that expires.
+// By default fast-check seeds from the clock, so a failing run cannot be
+// regenerated, and the seed it prints appears only in CI logs that expire.
 //
-// So the seed is chosen HERE, pinned when `FUZZ_SEED` is set and otherwise
-// drawn once per process and announced on stderr. Every suite shares the one
-// value, so a single `FUZZ_SEED=... just test-fuzz` reproduces the whole run.
+// The seed is therefore chosen here: pinned when `FUZZ_SEED` is set, otherwise
+// drawn once per process and printed to stderr. Every suite shares the value,
+// so a single `FUZZ_SEED=... just test-fuzz` reproduces the whole run.
 // `.github/workflows/fuzz.yml` sets it and writes the replay line into the job
 // summary, which outlives the log.
 //
-// `FUZZ_PATH` replays a single shrunk counterexample: paste the `path` from a
-// fast-check report alongside its seed to land straight on that case, without
-// re-running the trials before it. A path is meaningful only for the property
-// that produced it, and this sets it for every property in the process — so
-// pair it with a mocha `--grep` that isolates the failing test:
+// `FUZZ_PATH` replays a single shrunk counterexample: pass the `path` from a
+// fast-check report with its seed to go directly to that case. A path is
+// meaningful only for the property that produced it, and this sets it for every
+// property in the process, so combine it with a mocha `--grep` that isolates
+// the failing test:
 //
 //   FUZZ_SEED=<seed> FUZZ_PATH=<path> npm run test:fuzz -- --grep "<test name>"
 
@@ -56,9 +54,8 @@ export const FUZZ_SEED = readSeed();
 /** Set only when replaying; `undefined` lets fast-check run the full sequence. */
 const FUZZ_PATH = process.env.FUZZ_PATH || undefined;
 
-// Announced once per process, on stderr so it survives a reporter that buffers
-// stdout. Printed unconditionally: the seed is worth having on a green run too,
-// since it is what makes that run repeatable.
+// Printed once per process, on stderr so a reporter that buffers stdout does
+// not hide it. Printed on passing runs too, so they are repeatable.
 console.error(
     `[fuzz] FUZZ=${FUZZ} FUZZ_SEED=${FUZZ_SEED}` +
         (FUZZ_PATH ? ` FUZZ_PATH=${FUZZ_PATH}` : "") +
@@ -73,8 +70,7 @@ export const MAX_VALUE = (1n << 64n) - 1n;
 // BN254 scalar field modulus — used by every gadget that constrains a Field.
 export const R = BN254_FR;
 
-// Canonical-positive modulo, re-exported rather than redefined: the reference
-// implementation owns it.
+// Canonical-positive modulo, re-exported from the reference implementation.
 export { mod } from "../helpers";
 
 // Random bigint in [0, max] from a fast-check uint sequence (deterministic seed).
@@ -150,9 +146,8 @@ const SUITE_SCALE: Record<string, number> = {
     // Each trial builds a witness and then sweeps all ~100k of its entries,
     // re-checking the full system once per finding.
     UNDERCONSTRAINED: 0.25,
-    // Same search over the larger batch R1CS, ~8.5s per trial. An unlisted
-    // suite falls through to scale 1, which put this one at four times its
-    // sibling's trial count.
+    // Same search over the larger batch R1CS, ~8.5s per trial. Unlisted suites
+    // default to scale 1.
     UNDERCONSTRAINED_BATCH: 0.25,
 };
 

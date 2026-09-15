@@ -43,7 +43,7 @@ An exact transcription cannot be caught by a transcription check. What catches t
 counting degrees of freedom. The layout now carries 46 coefficients, one per slot that some
 constraint pins, and the pinning table in `Lelantos/Circuit/Transact.lean` names the
 constraint behind each. The 23 are bound through the Fiat-Shamir challenge instead:
-`PubInputs.sol` hashes 69 words and evaluates 46, so altering any of them moves `z`, hence
+`PubInputs.sol` hashes 70 words and evaluates 46, so altering any of them moves `z`, hence
 `y`, and needs no constraint at all.
 
 **Adding a public input is therefore a fidelity question with a second half:** transcribe
@@ -173,18 +173,18 @@ it described; `batch_capacity` consumes the one range check that replaced it.
 | `:24-41` `ValueTimesGen` = `RangeCheck64` + `ValueScalarMul` | no single definition: the two halves are modelled separately as `TransactSat.pub_in_range` / `pub_in_mul` and `pub_out_range` / `pub_out_mul`. The template has no state of its own, so splitting it is an exact transcription, not a weakening. |
 | `:48` `dummy*(dummy-1) === 0` | `DummyZeroValueSat` (first conjunct) |
 | `:49` `dummy*value === 0` | `DummyZeroValueSat` (second conjunct) |
-| `:110-112` `pub_eq[c] = IsEqual(pa, cand[c])` | `PerAssetValueBalanceSat.pubEq_sat` |
-| `:115` `lhs[c][0] <== public_in * pub_eq[c]` | `lhs_chain` initial value |
-| `:116` `rhs[c][0] <== public_out * pub_eq[c]` | `rhs_chain` initial value |
-| `:119-121` `in_eq[c][i] = IsEqual(in_asset[i], cand[c])` | `inEq_sat` |
-| `:122` `in_term[c][i] <== in_value[i] * in_eq[c][i]` | `inTerm_def` |
-| `:123` `lhs[c][i+1] <== lhs[c][i] + in_term[c][i]` | `lhs_chain` step |
-| `:126-128` `out_eq[c][j] = IsEqual(out_asset[j], cand[c])` | `outEq_sat` |
-| `:129` `out_term[c][j] <== out_value[j] * out_eq[c][j]` | `outTerm_def` |
-| `:130` `rhs[c][j+1] <== rhs[c][j] + out_term[c][j]` | `rhs_chain` step |
-| `:133` `lhs[c][N_IN] === rhs[c][N_OUT]` | `balanced` |
-| `:92-99` `cand[]` fill | `candAt` |
-| `:187-188` point equality | `PerAssetPointBalanceSat` (`PointBalance.lean`) |
+| `:108-110` `pub_eq[c] = IsEqual(pa, cand[c])` | `PerAssetValueBalanceSat.pubEq_sat` |
+| `:113` `lhs[c][0] <== public_in * pub_eq[c]` | `lhs_chain` initial value |
+| `:114` `rhs[c][0] <== public_out * pub_eq[c]` | `rhs_chain` initial value |
+| `:117-119` `in_eq[c][i] = IsEqual(in_asset[i], cand[c])` | `inEq_sat` |
+| `:120` `in_term[c][i] <== in_value[i] * in_eq[c][i]` | `inTerm_def` |
+| `:121` `lhs[c][i+1] <== lhs[c][i] + in_term[c][i]` | `lhs_chain` step |
+| `:124-126` `out_eq[c][j] = IsEqual(out_asset[j], cand[c])` | `outEq_sat` |
+| `:127` `out_term[c][j] <== out_value[j] * out_eq[c][j]` | `outTerm_def` |
+| `:128` `rhs[c][j+1] <== rhs[c][j] + out_term[c][j]` | `rhs_chain` step |
+| `:131` `lhs[c][N_IN] === rhs[c][N_OUT]` | `balanced` |
+| `:90-97` `cand[]` fill | `candAt` |
+| `:185-186` point equality | `PerAssetPointBalanceSat` (`PointBalance.lean`) |
 
 ### `src/lib/asset_gen.circom`
 
@@ -229,29 +229,29 @@ instance in `BatchShape`.
 
 | circom | Lean |
 |---|---|
-| `:58-71` `BATCH_WINDOW` | `batchWindow`; `batchWindow_eq_circom` against the literal clamp |
-| `:76-85` `BATCH_SRC`, `p = 4 * j + k - r` | `batchSrc`; `batchSrc_eq_circom` against the signed `ℤ` computation |
-| `:89-105` `BATCH_NPROD` | none needed — it only sizes `prod`, and `assert(pi == NPROD)` fails compilation on a mismatch |
-| `:116` `assert(EMPTY_SUBTREE(0) == 0)` | `ZerosCoherent`, first conjunct — a hypothesis, see exception 2 |
-| `:130` `assert((1 << COUNT_BITS) == MAX_L)` | `BatchShape.pow_count` |
-| `:131-132` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchAppendSat.count_bits` |
-| `:134-140` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchAppendSat.active_def` |
-| `:145-146` `Num2Bits(BITS)(start_index)` | `BatchAppendSat.index_bits` |
-| `:147-148` `last_idx_bits.in <== start_index + actual_count - 1` | `BatchAppendSat.last_idx_bits` |
-| `:154` `bb[d] <== idx_bits.out[2 * d] * idx_bits.out[2 * d + 1]` | `BatchAppendSat.bb_def` / `bitPairs` |
-| `:155-158` `s[d][0..3]` over the bits and `bb` | `batchSel`, `appendSel` |
-| `:162-170` `(1 - read) * frontier_in[d][k] === 0` | `BatchAppendSat.frontier_pin` / `batchRead` |
-| `:176` `old_node[0] <== 0` | `BatchAppendSat.old_base` |
-| `:179` `old_h[d].inputs[0] <== tag` | `BatchAppendSat.old_def` via `merkleNode` |
-| `:180-188` `old_prod[d][k] <== s[d][k] * old_node[d]` with the frontier and empty-subtree terms | `BatchAppendSat.old_def` via `oldChild` |
-| `:191` `old_node[d + 1] <== old_h[d].out` | `BatchAppendSat.old_def` |
-| `:193` `old_root <== old_node[DEPTH]` | `BatchAppendSat.old_root_def` |
-| `:204` `assert(W[DEPTH] == 1)` | `batchWindow_top` |
-| `:208` `node[OFF[0] + t] <== active[t] * leaves[t]` | `BatchAppendSat.leaf_def` |
-| `:223` `h[hi].inputs[0] <== tag` | `BatchAppendSat.node_def` via `merkleNode` |
-| `:226-241` `prod[pi] <== s[d][r] * node[OFF[d] + src]` with the frontier and empty-subtree terms | `BatchAppendSat.node_def` via `batchChild` |
-| `:243` `node[OFF[d + 1] + j] <== h[hi].out` | `BatchAppendSat.node_def` |
-| `:248` `new_root <== node[OFF[DEPTH]]` | `BatchAppendSat.new_root_def` |
+| `:57-70` `BATCH_WINDOW` | `batchWindow`; `batchWindow_eq_circom` against the literal clamp |
+| `:75-84` `BATCH_SRC`, `p = 4 * j + k - r` | `batchSrc`; `batchSrc_eq_circom` against the signed `ℤ` computation |
+| `:88-104` `BATCH_NPROD` | none needed — it only sizes `prod`, and `assert(pi == NPROD)` fails compilation on a mismatch |
+| `:115` `assert(EMPTY_SUBTREE(0) == 0)` | `ZerosCoherent`, first conjunct — a hypothesis, see exception 2 |
+| `:129` `assert((1 << COUNT_BITS) == MAX_L)` | `BatchShape.pow_count` |
+| `:130-131` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchAppendSat.count_bits` |
+| `:133-139` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchAppendSat.active_def` |
+| `:144-145` `Num2Bits(BITS)(start_index)` | `BatchAppendSat.index_bits` |
+| `:146-147` `last_idx_bits.in <== start_index + actual_count - 1` | `BatchAppendSat.last_idx_bits` |
+| `:153` `bb[d] <== idx_bits.out[2 * d] * idx_bits.out[2 * d + 1]` | `BatchAppendSat.bb_def` / `bitPairs` |
+| `:154-157` `s[d][0..3]` over the bits and `bb` | `batchSel`, `appendSel` |
+| `:161-169` `(1 - read) * frontier_in[d][k] === 0` | `BatchAppendSat.frontier_pin` / `batchRead` |
+| `:175` `old_node[0] <== 0` | `BatchAppendSat.old_base` |
+| `:178` `old_h[d].inputs[0] <== tag` | `BatchAppendSat.old_def` via `merkleNode` |
+| `:179-187` `old_prod[d][k] <== s[d][k] * old_node[d]` with the frontier and empty-subtree terms | `BatchAppendSat.old_def` via `oldChild` |
+| `:190` `old_node[d + 1] <== old_h[d].out` | `BatchAppendSat.old_def` |
+| `:192` `old_root <== old_node[DEPTH]` | `BatchAppendSat.old_root_def` |
+| `:203` `assert(W[DEPTH] == 1)` | `batchWindow_top` |
+| `:207` `node[OFF[0] + t] <== active[t] * leaves[t]` | `BatchAppendSat.leaf_def` |
+| `:222` `h[hi].inputs[0] <== tag` | `BatchAppendSat.node_def` via `merkleNode` |
+| `:225-240` `prod[pi] <== s[d][r] * node[OFF[d] + src]` with the frontier and empty-subtree terms | `BatchAppendSat.node_def` via `batchChild` |
+| `:242` `node[OFF[d + 1] + j] <== h[hi].out` | `BatchAppendSat.node_def` |
+| `:247` `new_root <== node[OFF[DEPTH]]` | `BatchAppendSat.new_root_def` |
 
 `oldChild` and `batchChild` state the children exactly as the circuit sums them: the frontier
 slot as a linear term, then one term per digit — a selector product with a window node or the
@@ -283,26 +283,26 @@ not a signal, so it is an argument of `BatchChainSat` rather than a field of `Ba
 
 | circom | Lean |
 |---|---|
-| `:128-135` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
-| `:141-151` `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, `leaves`, `frontier_in` | `BatchChainSat.append` |
-| `:152` `old_root === append.old_root` | `BatchChainSat.old_root_def` |
-| `:153` `new_root === append.new_root` | `BatchChainSat.new_root_def` |
-| `:158` `(1-append.active)*cms === 0` | `BatchChainSat.pad_cm` |
-| `:159-160` `(1-append.active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
-| `:161-164` `(1-append.active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
-| `:171` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
-| `:172-173` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
-| `:180-185` `BabyCheck(cv_dep.x, cv_dep.y + (1-append.active))` | **absent** — no curve equation in the model |
-| `:198` `active_dep <== append.active * is_deposit` | `BatchDepositSat.active_dep_def` |
-| `:200-201` `IsZero(leaf_asset)` | `BatchDepositSat.asset_isZero` |
-| `:225-226` `IsZero(leaf_public_in)` | `BatchDepositSat.public_in_isZero` |
-| `:272` step 6a `active_dep * (leaf_asset_nz.out - pub_in_nz.out) === 0` | `BatchDepositSat.asset_matches_value` |
-| `:203-204` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
-| `:207-210` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
-| `:213-214` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
-| `:216-220` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
-| `:222-223` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
-| `:276-289` `BatchCompress(MAX_L)` | `batchPiSlot` / `batchSlotValue`, dumped to `expected/layout-batch-8.txt` by `dump-layout.sh`. The Horner chain itself is `polyEval_sound`, proved generically |
+| `:125-132` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
+| `:138-148` `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, `leaves`, `frontier_in` | `BatchChainSat.append` |
+| `:149` `old_root === append.old_root` | `BatchChainSat.old_root_def` |
+| `:150` `new_root === append.new_root` | `BatchChainSat.new_root_def` |
+| `:155` `(1-append.active)*cms === 0` | `BatchChainSat.pad_cm` |
+| `:156-157` `(1-append.active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
+| `:158-161` `(1-append.active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
+| `:168` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
+| `:169-170` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
+| `:177-182` `BabyCheck(cv_dep.x, cv_dep.y + (1-append.active))` | **absent** — no curve equation in the model |
+| `:195` `active_dep <== append.active * is_deposit` | `BatchDepositSat.active_dep_def` |
+| `:197-198` `IsZero(leaf_asset)` | `BatchDepositSat.asset_isZero` |
+| `:222-223` `IsZero(leaf_public_in)` | `BatchDepositSat.public_in_isZero` |
+| `:256` step 6a `active_dep * (leaf_asset_nz.out - pub_in_nz.out) === 0` | `BatchDepositSat.asset_matches_value` |
+| `:200-201` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
+| `:204-207` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
+| `:210-211` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
+| `:213-217` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
+| `:219-220` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
+| `:258-271` `BatchCompress(MAX_L)` | `batchPiSlot` / `batchSlotValue`, dumped to `expected/layout-batch-8.txt` by `dump-layout.sh`. The Horner chain itself is `polyEval_sound`, proved generically |
 
 One row is deliberately empty: `BabyCheck` is a genuine gap, listed in the README. The old
 root used to be a second — `FrontierRoot` was not modelled — and is now `batch_old_root`.
@@ -445,7 +445,7 @@ old root lived in an unmodelled `frontier_root.circom`, whose 29 uncited lines w
 
 Writing it found two things beyond drifted line numbers. `merkle.circom`'s
 `root <== cur[depth]` was cited three lines off, and — the more interesting one — the
-citation form `` `:71-78, 119-120` `` was being read as a single span, silently discarding
+citation form `` `:70-77, 118-119` `` was being read as a single span, silently discarding
 everything after the comma. Several fields that looked cited had no working citation over
 half of what they mirrored. The scanner now parses span lists, and anchors them together.
 

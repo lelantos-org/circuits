@@ -1,4 +1,4 @@
-// Transact vectors, for every shipped shape (4x6 is the only one).
+// Transact vectors for every shipped shape (4x6 only).
 //
 // One case produces one vector. The construction matches `TxBuilder` in
 // test/lib/transact.ts (same note derivation, forced output rho and aux digest)
@@ -32,7 +32,7 @@ import {
     type SpentNote,
 } from "../../test/ref/index.js";
 import { loadCircuit, readOutput, srcPath } from "../../test/lib/circuit.js";
-import { TEST_AUX_DIGEST } from "../../test/lib/transact.js";
+import { TEST_AUX_DIGEST, TEST_INTENT_HASH } from "../../test/lib/transact.js";
 import {
     SCHEMA,
     hex,
@@ -102,10 +102,10 @@ export const TRANSACT_SHAPES: TransactShape[] = [
         // the denomination ladder in one spend; four inputs because an input
         // slot costs roughly 3.4x an output slot.
         //
-        // These vectors pin the 69-slot layout the Lean development proves
-        // against, giving the `PubInputs.compress` overload a byte-exact target.
-        // Its calldata prefix is 50 words, which fixes every word `compress`
-        // re-masks in assembly.
+        // These vectors pin the 70-word challenge preimage, whose leading 46
+        // coefficients the Lean development proves against, as a byte-exact
+        // target for the `PubInputs.compress` overload. Its 51-word calldata
+        // prefix fixes every word `compress` re-masks in assembly.
         cases: [
             {
                 name: "internal-4in6out-balanced",
@@ -258,9 +258,8 @@ function fillSlots(P: Poseidon, depth: number, c: TransactCase, finalizedReal: S
  * challenge preimage, hash that into the real z, then rebuild. `z` is a public
  * input, so it cannot be part of what derives it.
  *
- * `flatten` and `coeffs` are different vectors — 69 words hashed, 46 evaluated —
- * and the split is a soundness requirement, not a saving. See `coeffs` in
- * test/ref/compress.ts.
+ * `flatten` and `coeffs` differ (70 words hashed, 46 evaluated); the split is
+ * required for soundness. See `coeffs` in test/ref/compress.ts.
  */
 function buildWitness(
     P: Poseidon,
@@ -280,6 +279,9 @@ function buildWitness(
         outputClues: clueList,
         merkleRoot,
         outputAuxDigest: TEST_AUX_DIGEST,
+        // Nonzero, so consumers exercise the word's position and full width
+        // rather than matching on a zero value.
+        intentHash: TEST_INTENT_HASH,
         z: 0n,
     });
     const challenge = flatten(base);
@@ -408,10 +410,8 @@ export async function buildTransactVectors(shape: TransactShape) {
                     cvDep: pt(J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcvDep)),
                 })),
                 merkle: {
-                    // The shape's own depth, not the global constant:
-                    // `TransactShape.depth` is per-shape, so reading the
-                    // constant would publish a wrong depth for any shape
-                    // instantiated at another one.
+                    // Per-shape depth rather than the global `DEPTH` constant,
+                    // which may differ from the shape's instantiation.
                     depth: shape.depth,
                     leaves: tree.leaves.map(s),
                     root: s(merkleRoot),
@@ -450,18 +450,19 @@ export async function buildTransactVectors(shape: TransactShape) {
             source: shape.source,
             shape: { depth: shape.depth, nIn: shape.nIn, nOut: shape.nOut },
             coeffCount: 4 + 3 * shape.nIn + 5 * shape.nOut,
-            challengeWords: 9 + 3 * shape.nIn + 8 * shape.nOut,
+            challengeWords: 10 + 3 * shape.nIn + 8 * shape.nOut,
             layout,
             layoutDigest: layoutDigest(layout),
-            // No in-circuit constraint binds these, so they are not signals and
-            // not coefficients: they enter the challenge preimage and bind
-            // through `z`. As coefficients they were free variables a prover
-            // could solve `y = Σ c_k z^k` with after reading `z`.
+            // No in-circuit constraint binds these, so they are neither signals
+            // nor coefficients: they enter the challenge preimage and bind
+            // through `z`. As coefficients they would be free variables a prover
+            // could use to solve `y = Σ c_k z^k` after reading `z`.
             challengeOnly: [
                 "recipient_address",
                 "chain_id",
                 "payer_address",
                 "relayer_address",
+                "intent_hash",
                 "out_clue_Rx",
                 "out_clue_Ry",
                 "out_clue_bits",

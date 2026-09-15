@@ -1,36 +1,29 @@
-// `z` carries no constraint, and that is deliberate.
+// The Fiat-Shamir challenge `z` is unconstrained in the circuit by design.
 //
-// `Transact` takes the Fiat-Shamir challenge as a public input and feeds it
-// straight to `PolyEval`, which computes y = Σ c[k]·z^k. Nothing ties `z` to
-// the coefficient vector: the circuit will evaluate the polynomial at whatever
-// challenge the prover hands it and emit the matching `y`, and both are public
-// signals, so the proof verifies. Soundness rests on the verifier RECOMPUTING
-// `z` from calldata — `PubInputs.sol :: _finalizeTransactRaw` — and comparing it
-// against the public signal.
+// `Transact` takes `z` as a public input and passes it to `PolyEval`, which
+// computes y = Σ c[k]·z^k. No constraint ties `z` to the coefficient vector:
+// the circuit evaluates the polynomial at any supplied challenge and emits the
+// matching `y`, and both are public signals, so the proof verifies. Soundness
+// requires the verifier to recompute `z` from calldata
+// (`PubInputs.sol :: _finalizeTransactRaw`) and compare it with the public signal.
 //
-// Recomputation is necessary and not sufficient. Because `z` is an input, the
-// prover reads it before choosing a witness, so the Schwartz-Zippel bound the
-// compression is usually justified by — which needs the coefficient vector fixed
-// FIRST — does not apply. What carries the rest of the argument is that every
-// coefficient is pinned by another constraint, leaving nothing to solve the one
-// linear equation `y = Σ c[k]·z^k` with. `binding.test.ts` pins that membership
-// rule; this file pins the delegation of `z` itself.
+// Recomputation is necessary but not sufficient. Because `z` is an input, the
+// prover reads it before choosing a witness, so the Schwartz-Zippel bound, which
+// requires the coefficient vector to be fixed first, does not apply. The
+// remaining argument is that every coefficient is pinned by another constraint,
+// leaving no free variable to solve the linear equation `y = Σ c[k]·z^k` for.
+// `binding.test.ts` checks that membership rule; this file checks the
+// delegation of `z` itself.
 //
-// This file states that property as executable tests rather than prose, for
-// two reasons:
-//
-//   - Nothing else does. `reference.test.ts` notes in a comment that `z` is
-//     unconstrained; `binding.test.ts` asserts the *derived* z is not 1. Neither
-//     runs an attacker-chosen challenge through the circuit.
-//   - It is negative space, and negative space rots silently. Someone deleting
-//     the contract-side recomputation, on the reading that "the circuit checks
-//     z", breaks nothing here or in any other suite. These cases say plainly
-//     that the circuit does not, and name where the check lives.
+// These tests are the only ones that run an attacker-chosen challenge through
+// the circuit (`binding.test.ts` asserts only that the derived z is not 1).
+// Removing the contract-side recomputation fails no circuit test, so these
+// cases document that the circuit does not check `z` and name where the check
+// lives.
 //
 // The final pair shows why the recomputation must never yield z = 1: at that
-// challenge Horner collapses to a plain sum and the circuit accepts two
-// witnesses that differ only by a transposition of the layout, emitting the
-// same `y` for both.
+// challenge Horner reduces to a plain sum, and two coefficient layouts that
+// differ by a transposition produce the same `y`.
 
 import { expect } from "chai";
 
@@ -69,10 +62,9 @@ function buildBase(tx: TxBuilder): TransactWitnessBundle {
 /**
  * The base at a caller-chosen challenge.
  *
- * `z` is a plain public input that `build` only stores — nothing else in the
- * bundle derives from it, which is the very property this file exists to
- * demonstrate — so one built base serves every challenge and the eight callers
- * below cost one `TxBuilder` run between them instead of eight.
+ * `z` is a public input that `build` only stores; nothing else in the bundle
+ * derives from it, so one built base serves every challenge and the callers
+ * below share a single `TxBuilder` run.
  */
 function witnessAt(base: TransactWitnessBundle, z: Field): TransactWitnessBundle {
     return { ...base, z: z.toString() };
@@ -83,16 +75,15 @@ describe("transact_4x6 / Fiat-Shamir challenge is unconstrained", function () {
 
     const ctx = useTransactCircuit();
 
-    // Built once: `z` is the only thing the cases vary, and `build` merely
-    // stores it.
+    // Built once: the cases vary only `z`, which `build` stores.
     let base: TransactWitnessBundle;
     before(() => {
         base = buildBase(ctx.tx);
     });
 
-    // Each case asserts BOTH that the circuit accepts the challenge and that it
-    // emits the `y` the reference Horner evaluation predicts — so the test
-    // cannot pass on a circuit that quietly ignored `z`.
+    // Each case asserts that the circuit accepts the challenge and emits the `y`
+    // predicted by the reference Horner evaluation, so a circuit that ignored `z`
+    // fails.
     const CHALLENGES: Array<{ label: string; z: () => Field }> = [
         { label: "z = 1", z: () => 1n },
         { label: "z = 2", z: () => 2n },
@@ -117,10 +108,9 @@ describe("transact_4x6 / Fiat-Shamir challenge is unconstrained", function () {
     });
 
     it("accumulates from the high coefficient down, not the low one", async () => {
-        // Anchor on the Horner direction. A reversed accumulation would agree
-        // with a reference `hornerEval` that was reversed the same way, so every
-        // case above would still pass; comparing against the reversed vector at
-        // the same z is what separates them.
+        // Pins the Horner direction. A reversed accumulation would agree with a
+        // reference `hornerEval` reversed the same way and pass every case above;
+        // comparing against the reversed vector at the same z distinguishes them.
         const { circuit } = ctx;
         const z = 2n;
         const input = witnessAt(base, z);
@@ -134,10 +124,9 @@ describe("transact_4x6 / Fiat-Shamir challenge is unconstrained", function () {
     });
 
     it("one coefficient vector is accepted at two different z, with different y", async () => {
-        // The delegation stated directly: a prover picks the challenge, so a
-        // verifier that reads `z` off calldata instead of recomputing it
-        // accepts a proof about a polynomial the prover chose the evaluation
-        // point for.
+        // The prover picks the challenge, so a verifier that reads `z` from
+        // calldata instead of recomputing it accepts a proof at a
+        // prover-chosen evaluation point.
         const { circuit } = ctx;
         const zA = 7n;
         const zB = 0x1234_5678n;
@@ -160,11 +149,9 @@ describe("transact_4x6 / Fiat-Shamir challenge is unconstrained", function () {
     /**
      * Transpose two adjacent coefficients of a vector.
      *
-     * Done on the vector rather than on a witness: every coefficient is pinned
-     * by some other constraint now, so no pair of them can be swapped in a
-     * witness the circuit still accepts. That is the point of the membership
-     * rule — but it also means the z = 1 degeneracy has to be stated about the
-     * evaluation itself.
+     * Operates on the vector rather than a witness: every coefficient is pinned
+     * by another constraint, so no pair can be swapped in an accepted witness,
+     * and the z = 1 degeneracy is stated about the evaluation itself.
      */
     function transposed(c: Field[], k: number): Field[] {
         const swapped = [...c];
@@ -177,11 +164,10 @@ describe("transact_4x6 / Fiat-Shamir challenge is unconstrained", function () {
     const HEAD = 0;
 
     it("at z = 1 a transposed layout evaluates to an identical y", async () => {
-        // Horner degenerates to Σ c[k], which is permutation-invariant. A
+        // Horner reduces to Σ c[k], which is permutation-invariant. A
         // `TransactCompressN` that emitted two slots in the wrong order would
-        // therefore agree with the contract at this challenge and disagree
-        // everywhere else, so a verifier that ever recomputed z = 1 could not
-        // tell the two layouts apart.
+        // agree with the contract at this challenge only, so a verifier that
+        // recomputed z = 1 could not distinguish the two layouts.
         const { circuit } = ctx;
         const input = witnessAt(base, 1n);
         const c = coeffs(input);
@@ -199,8 +185,7 @@ describe("transact_4x6 / Fiat-Shamir challenge is unconstrained", function () {
     });
 
     it("at z != 1 the same transposition moves y", async () => {
-        // The contrast that makes the case above specific to z = 1 rather than a
-        // general statement about the layout.
+        // Shows the case above is specific to z = 1.
         const { circuit } = ctx;
         const z = 0x5eedn;
         const input = witnessAt(base, z);

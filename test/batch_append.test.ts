@@ -119,9 +119,9 @@ for (const depth of [2, 4]) {
         });
 
         it("FAILS on a non-zero frontier slot at or above the digit", async () => {
-            // Slots neither root reads are pinned to zero,
-            // so the witness has no free frontier signal. The pin depends only on
-            // each level's digit, not on the count.
+            // Slots neither root reads are pinned to zero, so the witness has no
+            // free frontier signal. The pin depends only on each level's digit,
+            // not on the count.
             let checked = 0;
             for (const start of representative) {
                 for (let d = 0; d < depth; d++) {

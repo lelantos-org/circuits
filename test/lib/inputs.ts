@@ -90,10 +90,9 @@ export function treeUpdateBatchChallenge(a: TreeUpdateBatchPublicArgs): Field[] 
 }
 
 /**
- * PolyEval coefficients for a batch witness: 4 + 6·MAX_L of them — the same
- * words as the preimage, since every one is pinned. `ref/compress.ts ::
- * batchCoeffs` says why nothing is demoted, and which constraints do the
- * pinning.
+ * PolyEval coefficients for a batch witness: 4 + 6·MAX_L words, the same as the
+ * preimage, since every word is pinned. `ref/compress.ts :: batchCoeffs`
+ * explains why every word is evaluated and which constraints pin them.
  */
 export function treeUpdateBatchCoeffs(a: TreeUpdateBatchPublicArgs): Field[] {
     return batchCoeffs(publicJson(a));

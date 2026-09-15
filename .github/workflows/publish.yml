@@ -1,17 +1,17 @@
 name: publish
 
 # Tag-driven release. Pushing a tag matching `v*` (e.g. `v0.1.0`) rebuilds the
-# artifacts from circom and ptau, runs the sanity checks, publishes to GitHub
+# artifacts from circom and ptau, runs the artifact checks, publishes to GitHub
 # Packages, and writes per-release SHA-256 hashes into the release body for
 # downstream verification.
 #
-# The trusted-setup ceremony is non-deterministic — snarkjs mixes fresh
-# randomness into the contribution regardless of `-e` — so the zkey and vkey
-# SHA-256 are recorded per release rather than pinned in advance.
+# The trusted-setup ceremony is non-deterministic (snarkjs mixes fresh
+# randomness into the contribution regardless of `-e`), so zkey and vkey
+# SHA-256 digests are recorded per release rather than pinned in advance.
 #
-# Everything that can fail cheaply runs before `npm publish`, because publishing
-# to GitHub Packages cannot be undone: a version number is spent even if the
-# release step afterwards fails.
+# Builds and checks run before `npm publish`, because publishing to
+# GitHub Packages is irreversible: the version number is consumed even if the
+# subsequent release step fails.
 
 on:
   push:
@@ -55,19 +55,18 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
-      # Version pinned inside the action, so the release compiles with the same
-      # circom as CI. This job does not use ./.github/actions/setup: it needs
-      # registry-url / scope / always-auth on setup-node, and interleaves the
-      # tag-version check and the ptau cache between these steps.
+      # The action pins the circom version, so the release uses the same circom
+      # as CI. This job does not use ./.github/actions/setup because it needs
+      # registry-url / scope / always-auth on setup-node and interleaves the
+      # tag-version check and ptau cache between setup steps.
       - name: Setup circom
         uses: ./.github/actions/setup-circom
 
       # Each ceremony has its own ptau: Transact(11,4,6) at 100,304 constraints
-      # needs 2^17, TreeUpdateBatch(11,8) at 55,190 fits 2^16. `just` fetches
-      # both from lelantos-org/ptau and checks the digest on every run, cache
-      # hits included; each key carries that digest so a cache entry holding
-      # anything else misses and refetches instead of failing the build until
-      # someone purges it by hand.
+      # needs 2^17; TreeUpdateBatch(11,8) at 55,190 fits 2^16. `just` fetches
+      # both from lelantos-org/ptau and verifies the digest on every run,
+      # including cache hits. Each cache key includes the digest, so an entry
+      # with different contents misses and is refetched.
       - name: Cache ptau-17
         uses: actions/cache@v4
         with:
@@ -85,13 +84,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # The package ships vectors/ as the cross-repo contract the SDK checks
-      # itself against. Nothing else in this job would notice them being stale,
-      # and regenerating is far cheaper than the ceremonies below.
+      # The package ships vectors/, which the SDK tests against. No other step
+      # detects stale vectors, and regeneration is faster than the ceremonies
+      # below.
       - name: Golden vectors are current
         run: just vectors-check
 
-      # Runs the transact ceremony and the publish gate.
+      # Runs the transact ceremony and the artifact checks.
       - name: Build + verify 4x6 artifacts
         run: just package
 
@@ -104,14 +103,12 @@ jobs:
           # Stage the flat wasm next to its r1cs for release upload.
           cp build/tree_update_batch_js/tree_update_batch.wasm build/tree_update_batch.wasm
           # The witness-calculation graph the relayer proves against. Built
-          # after setup-batch so it diffs its r1cs against the same compile the
-          # ceremony consumed.
+          # after setup-batch so its r1cs is compared with the compile the
+          # ceremony used.
           just build-graph
 
-      # Every release asset is named for its shape rather than a bare
-      # `Verifier.sol`, so a downloader cannot install one circuit's verifier
-      # believing it is another's — the same filename hazard the justfile warns
-      # about for the contracts sync.
+      # Release assets are named by shape rather than a bare `Verifier.sol`, so
+      # one circuit's verifier cannot be mistaken for another's.
       - name: Stage release assets
         run: |
           set -euo pipefail
@@ -127,8 +124,8 @@ jobs:
           cp build/tree_update_batch_final.zkey      release/tree_update_batch_final.zkey
           cp build/tree_update_batch_verification_key.json \
                                                      release/tree_update_batch_verification_key.json
-          # The generated contract name collides with the transact verifiers, so
-          # rename it before anyone compiles the two together.
+          # The generated contract name collides with the transact verifier's, so
+          # it is renamed to allow compiling both together.
           sed 's/contract Groth16Verifier/contract TreeUpdateBatchGroth16Verifier/' \
             build/Verifier_tree_update_batch.sol > release/TreeUpdateBatchVerifier.sol
 
@@ -142,10 +139,10 @@ jobs:
               echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-      # `files` in package.json is a whitelist, and npm silently skips an entry
-      # that does not exist — so a stale filename there ships a package whose
-      # index.json references a vector the tarball does not contain. Assert the
-      # tarball actually holds what index.json advertises.
+      # `files` in package.json is a whitelist, and npm silently skips missing
+      # entries, so a stale filename would ship an index.json referencing a
+      # vector absent from the tarball. Asserts the tarball contains every file
+      # index.json lists.
       - name: Package contents match the vector index
         run: |
           set -euo pipefail

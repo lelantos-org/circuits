@@ -7,10 +7,10 @@ import Lelantos.Circuit.Transact
 `TransactSat` is unsatisfiable. This file rules that out by constructing satisfying
 assignments for `Transact(10, 2, 2)`. Each discharges every constraint
 — key chain, commitment, range checks, the full ten-level Merkle chain, nullifier, both
-value commitments, all five balance candidates, the point balance and the thirty-coefficient
-Horner evaluation — rather than dodging them with `nIn = nOut = 0`.
+value commitments, all five balance candidates, the point balance and the twenty-coefficient
+Horner evaluation — rather than avoiding them with `nIn = nOut = 0`.
 
-Three transactions, each ruling out a different way for the theorem to be empty:
+Three transactions, each ruling out a different way for the theorem to be vacuous:
 
 | Witness | What it rules out |
 |---|---|
@@ -21,8 +21,8 @@ Three transactions, each ruling out a different way for the theorem to be empty:
 `ofParts` assembles all three from the parts that differ; everything derived — comparator
 witnesses, accumulator chains, the Horner accumulator — is filled in once.
 
-What this is *not*: a completeness theorem about the SDK's witness generator, and not a
-claim that every legal transaction is satisfiable.
+This is not a completeness theorem about the SDK's witness generator, nor a claim that
+every legal transaction is satisfiable.
 -/
 
 namespace Lelantos
@@ -70,8 +70,8 @@ theorem num2Bits_two {n : ℕ} (hn : 1 < n) : Num2BitsSat n 2 twoBits := by
 /-! ## Generic witness builders
 
 Each definition here produces the signals one gadget expects, together with the proof that
-they satisfy it. The two transactions below are assembled from these, so the constraints are
-discharged by the same construction the circuit performs rather than side-stepped.
+they satisfy it. The transactions below are assembled from these, so the constraints are
+discharged by the same construction the circuit performs.
 -/
 
 /-- The generator for asset `a`. -/
@@ -168,9 +168,8 @@ theorem accChain_witness (n : ℕ) (init : F) (t : ℕ → F) :
     AccChainSat n init t (accOf init t) :=
   ⟨rfl, fun _ _ => rfl⟩
 
-/-- An accumulator over zero terms stays at its initial value, whatever its length. The
-padding transaction needs this at an arbitrary arity, where `simp` cannot just unfold the
-chain to a fixed depth. -/
+/-- An accumulator over zero terms stays at its initial value, whatever its length. Needed
+at an arbitrary arity, where `simp` cannot unfold the chain to a fixed depth. -/
 theorem accOf_zero {t : ℕ → F} (ht : ∀ i, t i = 0) (n : ℕ) : accOf 0 t n = 0 := by
   induction n with
   | zero => rfl
@@ -187,8 +186,7 @@ slot at index `0`, that one everywhere else". `pair` names the shape once and
 def pair {α : Type} (hd : α) (tl : ℕ → α) (i : ℕ) : α := if i = 0 then hd else tl i
 
 /-- An accumulator whose only non-zero term sits at index `0`. Needed because every
-transaction below now carries exactly one real input slot, at an arity the shape leaves
-open. -/
+transaction below carries exactly one real input slot, at an arity the shape leaves open. -/
 theorem accOf_single {t : ℕ → F} (ht : ∀ i, i ≠ 0 → t i = 0) :
     ∀ n, 0 < n → accOf 0 t n = t 0 := by
   intro n
@@ -253,9 +251,9 @@ noncomputable def chainFrom (leaf : F) : ℕ → F
 
 /-- The root a leaf is opened against, at tree depth `d`.
 
-Indexed by depth because the shipped shape is `Transact(11, 4, 6)` while the small concrete
-witnesses below sit at depth 10. Only the padding slot needs the generality: its path is
-all-zero, so the chain is the only thing depth touches. -/
+Indexed by depth because the deployed shape is `Transact(11, 4, 6)` while the small concrete
+witnesses below sit at depth 10. The path is all-zero, so depth affects only the chain
+length. -/
 noncomputable def rootFrom (d : ℕ) (leaf : F) : F := chainFrom leaf d
 
 theorem merkleRoot_chain (d : ℕ) (leaf : F) :
@@ -287,9 +285,9 @@ noncomputable def padCm : F := noteCommitment 0 0 0 0 0
 /-- …whose leaf hashes its (identity) deposit commitment. -/
 noncomputable def padLeaf : F := leafHash padCm (cvOf zeroBits 0).x (cvOf zeroBits 0).y
 
-/-- One padding input slot. Its `nsk` is `0`, so its nullifier is the honest nullifier of
-the all-zero note — which is exactly the prover-chosen value
-`dummy_nullifier_unconstrained` warns about. -/
+/-- One padding input slot. Its `nsk` is `0`, so its nullifier is the derived nullifier of
+the all-zero note, an instance of the prover-chosen value described by
+`dummy_nullifier_unconstrained`. -/
 noncomputable def padSlot (d : ℕ) (root : F) : SpentSlot d where
   assetId := 0
   value := 0
@@ -393,10 +391,9 @@ theorem padOut_sat (j : ℕ) : OutputNoteSat (padOut j) :=
 
 /-! ## A real (non-dummy) spent slot
 
-Every slot above is padding, so on its own this file would leave `SpentReal` — the
-conclusion of `spentNote_sound` — without a single inhabitant, and the theorem's hypothesis
-`is_dummy = 0` unshown to be satisfiable. This slot closes that: one unit of asset `1`,
-owned by `nsk = 0`, opened against a root its own path reaches.
+Inhabits `SpentReal`, the conclusion of `spentNote_sound`, showing its hypothesis
+`is_dummy = 0` is satisfiable: one unit of asset `1`, owned by `nsk = 0`, opened against a
+root its own path reaches.
 -/
 
 /-- The spender's key. `pk` must equal the derived key, since the ownership constraint is
@@ -406,7 +403,7 @@ noncomputable def realPk : F := pkOfNsk 0
 /-- One unit of asset `1`, committed. -/
 noncomputable def realCm : F := noteCommitment 1 1 realPk 0 0
 
-/-- Its leaf, hashing the deposit value commitment of a *non-zero* value. -/
+/-- Its leaf, hashing the deposit value commitment of a non-zero value. -/
 noncomputable def realLeaf : F := leafHash realCm (cvOf oneBits 1).x (cvOf oneBits 1).y
 
 /-- The root this note is opened against, at the shape's depth. -/
@@ -463,15 +460,14 @@ theorem realSlot_sat (d : ℕ) : SpentNoteSat (realSlot d) := by
 The three transactions below differ only in their slots, their public bucket and the group
 readings of the points they publish. `ofParts` derives everything else — the comparator
 witnesses, the accumulator chains, the forwarded deposit commitments and the Horner
-accumulator — so a witness is described by what makes it distinctive rather than by
-forty-odd fields of boilerplate.
+accumulator — so a witness is described only by its distinguishing parts.
 -/
 
 /-- The parts of a witness that differ between transactions.
 
-Indexed by `depth` as well as the shape: the shipped shape is `Transact(11, 4, 6)` while
-the small concrete witnesses below sit at depth 10. Nothing here depends on the value,
-since `ofParts` only forwards it, but the two cannot share one index. -/
+Indexed by `depth` as well as the shape: the deployed shape is `Transact(11, 4, 6)` while
+the small concrete witnesses below sit at depth 10. `ofParts` only forwards the depth, but
+the two types differ. -/
 structure Parts (depth nIn nOut : ℕ) where
   /-- The two spent-note slots. -/
   spent : ℕ → SpentSlot depth
@@ -510,9 +506,9 @@ noncomputable def rhsOf {depth nIn nOut : ℕ} (w : TxWitness depth nIn nOut) (c
   accOf (w.publicOut * eqOut w.publicAssetId (candOf w c)) (outTermOf w c)
 
 /-- Every witness below has zero blinding and an empty `public_out`; those are fixed here
-rather than repeated three times. The address and clue fields are absent from `TxWitness`
-entirely — they are bound through the challenge, not through `PolyEval`, so the circuit
-never carries them. -/
+rather than repeated three times. The address and clue fields are absent from `TxWitness`:
+they are bound through the challenge, not through `PolyEval`, so the circuit does not carry
+them. -/
 noncomputable def ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) :
     TxWitness depth nIn nOut :=
   let base : TxWitness depth nIn nOut :=
@@ -625,9 +621,9 @@ theorem transactSat_ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut)
   value_balance := valueBalance_ofParts p hbal
   point_balance := by
     -- Move the four coordinate arrays and the two bucket points onto the subgroup elements
-    -- the transaction actually commits to, then discharge the equation there. The
-    -- coordinate equations are hypotheses of this lemma rather than fields of the model:
-    -- the circuit imposes none of them, and `PerAssetPointBalanceSat` no longer needs any.
+    -- the transaction commits to, then discharge the equation there. The coordinate
+    -- equations are hypotheses of this lemma rather than fields of the model: the circuit
+    -- imposes none of them, and `PerAssetPointBalanceSat` needs none.
     show PerAssetPointBalanceSat nIn nOut (fun i => (p.spent i).cv) (fun j => (p.out j).cv)
       (fun i => (p.spent i).rH) (fun j => (p.out j).rH)
       (vTOf p.pubInBits p.pubAsset) (vTOf zeroBits p.pubAsset)
@@ -645,11 +641,10 @@ Every input is padding and every output is an empty note of asset `1`. It moves 
 but it discharges every constraint — the full ten-level Merkle chain, both value
 commitments, every balance candidate and the whole Horner evaluation.
 
-Written once for an arbitrary arity. Nothing about it is shape-specific: every slot vector
-is index-generic, and the balance sums are zero whichever candidate is selected. That is
-what lets the same construction serve the small `Transact(10, 2, 2)` used here and the
-deployed `Transact(11, 4, 6)`, whose soundness results each need a witness of their own
-type.
+Written once for an arbitrary arity: every slot vector is index-generic, and the balance
+sums are zero whichever candidate is selected. The same construction therefore serves the
+small `Transact(10, 2, 2)` used here and the deployed `Transact(11, 4, 6)`, whose soundness
+results each need a witness of their own type.
 -/
 
 /-- The dummy count of a slot vector whose head is real and whose tail is all padding. -/
@@ -680,11 +675,11 @@ Slot `0` spends the real note of asset `1`; every other input slot is padding op
 against the same root. Output `0` receives that unit; every other output is an empty note
 of asset `1`.
 
-It used to be all padding. `src/lib/transact.circom` now rejects that witness — with every
-slot dummy the Merkle check is skipped for all of them and `merkle_root` becomes a free
-`PolyEval` coefficient, which is a soundness break, not a nicety — so the smallest
-satisfying assignment carries one real spend. `TransactSat.not_all_dummy` is the modelled
-constraint and `notAllDummy_of_head` discharges it here.
+`src/lib/transact.circom` rejects an all-padding witness: with every slot dummy the Merkle
+check is skipped for all of them and `merkle_root` becomes a free `PolyEval` coefficient,
+a soundness break. The smallest satisfying assignment therefore carries one real spend.
+`TransactSat.not_all_dummy` is the modelled constraint and `notAllDummy_of_head`
+discharges it here.
 -/
 
 noncomputable def minIn (depth : ℕ) : ℕ → SpentSlot depth :=
@@ -787,8 +782,8 @@ theorem minTx_sat (depth nIn nOut : ℕ) (hnIn : 0 < nIn) (hnOut : 0 < nOut) :
 
 /-! ## The two-in/two-out instance of it
 
-`minTx 10 2 2` under its old name. The shape-specific abbreviations below are what the
-two-asset transaction and the downstream results are stated over.
+`spendTx` is `minTx 10 2 2`. The two-asset transaction and the downstream results are
+stated over the shape-specific abbreviations below.
 -/
 
 noncomputable abbrev spendIn : ℕ → SpentSlot 10 := minIn 10
@@ -826,8 +821,8 @@ theorem spendTx_sat : TransactSat spendTx := minTx_sat 10 2 2 (by norm_num) (by 
 
 /-! ## A transaction moving two different assets
 
-The witnesses above use a single asset id, so the per-asset machinery is proved but never
-exercised on a transaction whose five candidates differ. This one spends the shielded
+The witnesses above use a single asset id, so they do not exercise the per-asset machinery
+on a transaction whose five candidates differ. This one spends the shielded
 asset-`1` note and moves a unit of asset `2` in through the transparent bucket and out as a
 note. It is also the only witness with a non-zero public input.
 -/
@@ -892,60 +887,56 @@ end Witness
 /-- **`transact_sound` is not vacuous.** There is an assignment satisfying the whole
 constraint system, so the implication has non-empty domain.
 
-Stated at `TxWitness 10 2 2` rather than at the shipped shape. That is deliberate and the
-two things it proves are different: this file's *concrete* witnesses (`spendTx`, `dualTx`
-below) move real value through real Merkle openings, and building them at the smallest
-shape keeps them readable. `Transact(11, 4, 6)` gets its own witness further down.
+Stated at `TxWitness 10 2 2` rather than at the deployed shape: this file's concrete
+witnesses (`spendTx`, `dualTx` below) move value through real Merkle openings, and the
+smallest shape keeps them readable. `Transact(11, 4, 6)` has its own witness further down.
 
 No compiled circuit is needed to instantiate the type: every result here is proved for the
 generic `Transact(depth, nIn, nOut)`. -/
 theorem transactSat_satisfiable : ∃ w : TxWitness 10 2 2, TransactSat w :=
   ⟨Witness.minTx 10 2 2, Witness.minTx_sat 10 2 2 (by norm_num) (by norm_num)⟩
 
-/-- …and the conclusion really is derivable for it. -/
+/-- The conclusion is derivable for it. -/
 theorem transact_wellFormed_witness : TxWellFormed (Witness.minTx 10 2 2) :=
   transact_sound (by norm_num) (by norm_num) (Witness.minTx_sat 10 2 2 (by norm_num) (by norm_num))
 
-/-- **`transact4x6_sound` is not vacuous.** The shipped shape, `Transact(11, 4, 6)`.
+/-- **`transact4x6_sound` is not vacuous.** The deployed shape, `Transact(11, 4, 6)`.
 
 `Transact4x6` is a distinct type from the one above, so this does not follow from
-`transactSat_satisfiable` — without it the soundness result on the only path anyone runs
-would read vacuously. It is also what keeps the six-output end of the slot bound in
-`transact_sound` from being an unreachable hypothesis. -/
+`transactSat_satisfiable`; it shows the soundness result for the deployed shape is not
+vacuous, and that the six-output end of the slot bound in `transact_sound` is reachable. -/
 theorem transact4x6Sat_satisfiable : ∃ w : Transact4x6, TransactSat w :=
   ⟨Witness.minTx 11 4 6, Witness.minTx_sat 11 4 6 (by norm_num) (by norm_num)⟩
 
-/-- …and the conclusion is derivable at the target shape too. -/
+/-- The conclusion is derivable at the target shape. -/
 theorem transact4x6_wellFormed_witness : TxWellFormed (Witness.minTx 11 4 6) :=
   transact4x6_sound (Witness.minTx_sat 11 4 6 (by norm_num) (by norm_num))
 
 /-- **`SpentReal` is inhabited.** `spentNote_sound` concludes `SpentReal` from
-`is_dummy = 0`, and every slot in the padding witness is a dummy — so on its own that
-theorem could have been about an unreachable case. This exhibits a slot satisfying
-`SpentNoteSat` with the flag clear. -/
+`is_dummy = 0`; this exhibits a slot satisfying `SpentNoteSat` with the flag clear, so that
+case is reachable. -/
 theorem spentNoteSat_real_satisfiable : ∃ s : SpentSlot 10, SpentNoteSat s ∧ s.isDummy = 0 :=
   ⟨Witness.realSlot 10, Witness.realSlot_sat 10, rfl⟩
 
-/-- …and the ownership, non-zero asset and membership conclusions really are derivable. -/
+/-- The ownership, non-zero asset and membership conclusions are derivable for it. -/
 theorem spentReal_witness : SpentReal (Witness.realSlot 10) :=
   spentNote_sound (Witness.realSlot_sat 10) rfl
 
-/-- **A transaction that moves value is satisfiable.** The padding witness discharges every
-constraint with zero values, which leaves open whether the balance and value-commitment
-machinery is satisfiable at all once the sums are non-trivial. This witness spends one unit
-of asset `1` through a non-dummy input slot. -/
+/-- **A transaction that moves value is satisfiable.** Shows the balance and
+value-commitment machinery is satisfiable with non-trivial sums: this witness spends one
+unit of asset `1` through a non-dummy input slot. -/
 theorem transactSat_spend_satisfiable :
     ∃ w : TxWitness 10 2 2, TransactSat w ∧ (w.spent 0).isDummy = 0 ∧ (w.out 0).value = 1 :=
   ⟨Witness.spendTx, Witness.spendTx_sat, rfl, rfl⟩
 
-/-- …and its well-formedness conclusion, including per-asset conservation of a non-zero
+/-- Its well-formedness conclusion, including per-asset conservation of a non-zero
 amount. -/
 theorem transact_wellFormed_spend : TxWellFormed Witness.spendTx :=
   transact_sound (by norm_num) (by norm_num) Witness.spendTx_sat
 
-/-- **A transaction moving two distinct assets is satisfiable.** Both witnesses above use a
-single asset id, which leaves the per-asset balance exercised only where all five candidates
-agree. This one spends a shielded unit of asset `1` and moves a unit of asset `2` in through
+/-- **A transaction moving two distinct assets is satisfiable.** The witnesses above use a
+single asset id, exercising the per-asset balance only where all five candidates agree.
+This one spends a shielded unit of asset `1` and moves a unit of asset `2` in through
 the transparent bucket, so the candidate set holds two different assets and the public input
 is non-zero. -/
 theorem transactSat_twoAsset_satisfiable :

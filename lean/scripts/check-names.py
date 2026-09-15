@@ -1,39 +1,27 @@
 #!/usr/bin/env python3
-"""Resolve every Lean name the doc comments and the markdown claim exists.
+"""Resolve every Lean name the doc comments and markdown reference.
 
-`check-citations.py` checks the *circom* a doc comment points at. This checks the
-other half: the `Lelantos` declarations the prose names. A renamed theorem, or one
-described in a module note but never written, leaves the prose asserting something
-the development does not contain, and nothing else catches it — the build only sees
-identifiers in terms, never in comments.
-
-Both failures existed when this script was written:
-
-  * `transact_y_not_binding` was cited three times, in `Circuit/Transact.lean`'s
-    module note and twice in `Gadgets/PolyEval.lean`, as the result showing `y` does
-    not determine the transaction. It was never proved.
-  * `activeIdx_eq` was cited by `BatchChainSat.idx_bits` as "where that is used".
-    It did not exist either, and the constraint it justified was consumed by nothing.
+`check-citations.py` checks the circom a doc comment cites; this checks the
+`Lelantos` declarations the prose names. The build does not inspect identifiers in
+comments, so a renamed or unwritten theorem would otherwise go undetected.
 
 ## What counts as a claim
 
 A backticked token is checked when it is unambiguously a Lean name:
 
-  * `Lelantos.foo` — explicitly qualified;
-  * `Upper.lower` — a dotted name with a capitalised head, i.e. a structure field or
+  * `Lelantos.foo`: explicitly qualified;
+  * `Upper.lower`: a dotted name with a capitalised head, i.e. a structure field or
     a namespaced theorem (`PISlot.auxDigest`, `InsertsTo.unique`);
-  * a bare `snake_case` token that appears **nowhere in the circom sources**. Circom
-    signal names (`is_deposit`, `old_root`, `actual_count`) are quoted constantly and
-    are not Lean names; cross-referencing `src/` separates them without a
-    hand-maintained list, and keeps the separation correct as the circuits change.
+  * a bare `snake_case` token that appears nowhere in the circom sources. Circom
+    signal names (`is_deposit`, `old_root`, `actual_count`) are excluded by
+    cross-referencing `src/` rather than by a hand-maintained list.
 
-Everything else is left alone deliberately. A bare `lowerCamel` word is as often a
-signal being discussed as a definition being named, and a dotted name under a head this
-development does not declare (`Or.inr`, `ValueCommitPair.cv`) belongs to Lean or to
-circom. The rules above are the ones that decide; widening them trades the three real
-findings for a page of false positives.
+Other tokens are not checked. A bare `lowerCamel` word may be a signal or a
+definition, and a dotted name under a head this development does not declare
+(`Or.inr`, `ValueCommitPair.cv`) belongs to Lean or to circom. Broader rules would
+produce many false positives.
 
-`IGNORE` carries what the rules cannot classify: tactic and tool names.
+`IGNORE` lists tactic and tool names the rules cannot classify.
 
 Run:  python3 lean/scripts/check-names.py            # check, from lean/
       python3 lean/scripts/check-names.py --list     # also print every name checked
@@ -65,16 +53,14 @@ IGNORE = {
     "just_picus", "picus_all",
 }
 
-# `Assumptions` is a report, not a library: `lake build` does not produce an olean for it
-# (`check-axioms.sh` runs it with `lake env lean`), so it cannot be imported. It declares
-# nothing, so nothing is lost — its prose is still scanned like every other file.
+# `Assumptions` is a report run by `check-axioms.sh` via `lake env lean`; `lake build`
+# produces no olean for it, so it cannot be imported. It declares nothing, and its
+# prose is still scanned.
 NOT_BUILT = {"Lelantos.Meta.Assumptions"}
 
-# The Lean half of the model-to-circuit signal correspondence. The circom half is
-# checked by `test/formal/signal_parity.test.ts`, which asserts each value names a
-# real signal in the compiled `.sym`; this asserts each key names a real Lean field.
-# Checking one end without the other leaves the map able to drift on the unchecked
-# side, which is the whole failure mode it exists to prevent.
+# The Lean side of the model-to-circuit signal map: each key must name a Lean field.
+# `test/formal/signal_parity.test.ts` checks the circom side, that each value names a
+# signal in the compiled `.sym`. Both sides are checked so neither can drift.
 SIGNAL_MAP = "expected/signal-map.json"
 # A backticked token that could be a Lean name. Backticks keep prose out.
 TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_']*(?:\.[A-Za-z_][A-Za-z0-9_']*)*)`")
@@ -97,9 +83,8 @@ class Claim(NamedTuple):
 def declared_names() -> set[str]:
     """Every constant the built environment holds under `Lelantos`.
 
-    Taken from the environment rather than by parsing `theorem`/`def` headers, so
-    structure fields, projections and namespaced results are all present without a
-    second notion of what a declaration is.
+    Read from the environment rather than parsed from `theorem`/`def` headers, so
+    structure fields, projections and namespaced results are included.
     """
     modules = sorted(lean_modules())
     source = (
@@ -135,8 +120,8 @@ def declared_names() -> set[str]:
         if line.strip():
             add_citable(names, line.strip())
 
-    # Module names are citable too (`Lelantos.Model.Poseidon`), and are not constants,
-    # so the environment dump does not contain them.
+    # Module names (`Lelantos.Model.Poseidon`) are citable but are not constants, so
+    # they are added separately.
     for module in all_modules():
         add_citable(names, module)
     return names
@@ -145,9 +130,8 @@ def declared_names() -> set[str]:
 def add_citable(names: set[str], full: str) -> None:
     """Record a dotted name under every suffix it can be cited by.
 
-    `Lelantos.PISlot.auxDigest` also answers for `PISlot.auxDigest` and for
-    `auxDigest`, because prose names a result by whichever part reads best in the
-    sentence it appears in.
+    `Lelantos.PISlot.auxDigest` also matches `PISlot.auxDigest` and `auxDigest`,
+    since prose may cite any suffix.
     """
     names.add(full)
     parts = full.split(".")
@@ -158,8 +142,8 @@ def add_citable(names: set[str], full: str) -> None:
 def all_modules() -> list[str]:
     """Every module under `Lelantos/`, importable or not.
 
-    A module that cannot be imported is still a module, and citing it is still
-    correct, so the name set is built from this and only the *imports* are filtered.
+    Non-importable modules are still citable, so the name set uses this list and
+    only the imports are filtered.
     """
     modules: list[str] = []
     for dirpath, dirnames, filenames in os.walk(os.path.join(LEAN, "Lelantos")):
@@ -174,8 +158,8 @@ def all_modules() -> list[str]:
 def lean_modules() -> list[str]:
     """The modules the enumerator imports.
 
-    All of them, not just the `Lelantos` root: `Meta.AxiomGuard` sits outside it and
-    its declarations are cited like any other.
+    Includes every built module, not only the `Lelantos` root, because
+    `Meta.AxiomGuard` is not imported by it and its declarations are also cited.
     """
     return [m for m in all_modules() if m not in NOT_BUILT]
 
@@ -183,8 +167,8 @@ def lean_modules() -> list[str]:
 def circom_vocabulary() -> set[str]:
     """Every identifier appearing in the circom sources.
 
-    A bare snake_case token found here is a signal or template name being quoted, not a
-    claim about this development.
+    A bare snake_case token found here is a quoted signal or template name, not a Lean
+    name.
     """
     words: set[str] = set()
     for dirpath, dirnames, filenames in os.walk(SRC):
@@ -206,14 +190,13 @@ def is_claim(token: str, names: set[str], circom: set[str]) -> bool:
         return True
     head, _, rest = token.partition(".")
     if rest:
-        # `Upper.lower` — a field or a namespaced result, but only under a head this
-        # development actually declares. `Or.inr` is Lean's; `ValueCommitPair.cv` is a
-        # circom template's. Neither is a claim about `Lelantos`.
+        # `Upper.lower`: a field or namespaced result, only under a head this development
+        # declares. `Or.inr` belongs to Lean and `ValueCommitPair.cv` to circom.
         return head in names and not CAPITALISED.match(rest)
     if CAPITALISED.match(token) or "_" not in token:
-        # A bare capitalised token is as likely a circom template as a Lean structure,
-        # and a bare lowerCamel word is usually a signal under discussion. Only
-        # snake_case — the shape every theorem here has — is decidable.
+        # A bare capitalised token may be a circom template or a Lean structure, and a
+        # bare lowerCamel word may be a signal. Only snake_case, the form of theorem
+        # names here, is classified.
         return False
     return token not in circom
 
@@ -257,8 +240,7 @@ def main() -> int:
     failures: list[str] = []
     total = 0
 
-    # The signal map's keys and the prose's backticked names are the same claim in two
-    # notations, so they are checked in one pass.
+    # Signal-map keys and backticked prose names are checked in a single pass.
     for claim in itertools.chain(signal_map_claims(), prose_claims(names, circom)):
         total += 1
         if args.list:

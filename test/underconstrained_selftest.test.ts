@@ -1,17 +1,14 @@
-// Does the negative-test generator actually catch anything?
+// Self-test for the underconstrained-signal detectors.
 //
 // `test/fuzz/underconstrained.fuzz.test.ts` reports that `4x6` has no second
-// witness and no bad bit decomposition. That result is worth exactly as much as
-// the detector under it, and a detector that matches NOTHING reports the same
-// clean bill of health as a circuit with nothing to report. This is not a
-// hypothetical: the first draft of `bit_groups.ts` matched zero groups in a
-// circuit containing 87 of them, because circom emits the weighted sum with
-// negative coefficients, and both checks built on it passed vacuously.
+// witness and no bad bit decomposition. A detector that matches nothing produces
+// the same clean report, so each check here runs against a circuit with exactly
+// the defect it targets and must report it. Bit-group matching, for example,
+// must handle circom emitting the weighted sum with negative coefficients, or
+// both checks built on it pass vacuously.
 //
-// So each check is pointed at a circuit that is broken in exactly the way the
-// check exists to find, and is required to find it. The fixtures live in
-// `test/fixtures/test_leak_*.circom` and are deliberately unsound; nothing under
-// `src/` includes them.
+// The fixtures in `test/fixtures/test_leak_*.circom` are unsound by construction;
+// nothing under `src/` includes them.
 
 import { expect } from "chai";
 
@@ -41,9 +38,8 @@ describe("underconstrained generator self-test", function () {
         const { tester, r1csPath, symPath } = await loadCircuitArtifacts(path);
         const [view, symbols] = await Promise.all([loadR1cs(r1csPath), loadSymbols(symPath)]);
 
-        // The witness calculator is perfectly happy: it runs `out <-- in * in`
-        // and returns a consistent witness. Nothing at the input level can see
-        // the bug, which is the whole reason this module exists.
+        // The witness calculator runs `out <-- in * in` and returns a consistent
+        // witness, so the defect is not observable at the input level.
         const w = await tester.calculateWitness({ in: "7" } as CircuitInput, true);
         expect(view.firstViolation(w)).to.equal(-1, "the honest witness must satisfy");
         expect(w[1]).to.equal(49n, "the generator still computes in * in");
@@ -57,21 +53,19 @@ describe("underconstrained generator self-test", function () {
             "an output that admits a second value is a soundness break, not malleability",
         );
         expect(onOut[0].kind).to.equal("unconstrained");
-        // The alternate value really does satisfy the whole system.
+        // The alternate value satisfies the whole system.
         expect(confirm(view, w, onOut[0])).to.equal(-1);
 
-        // And nothing explains it away: an unconstrained public output is the
-        // thing the suite exists to catch, not a known-benign hint.
+        // An unconstrained public output is never a known-benign hint.
         expect(explain(onOut[0], w, symbols)).to.equal(
             null,
             "no explanation may account for an unconstrained output",
         );
     });
 
-    // The group search earns its cost only if it sees something the unit sweep
-    // cannot. This fixture is built so that it must: each signal of the pair is
-    // pinned while the other holds still, so the unit sweep is required to find
-    // NOTHING, and the freedom exists only along the direction where both move.
+    // Each signal of the pair is pinned while the other holds still, so the unit
+    // sweep must find nothing and the freedom exists only along the direction
+    // where both move. This isolates what the group search adds.
     it("finds a pair of signals that only move together", async () => {
         const path = fixturePath("test_leak_paired_signals.circom");
         const { tester, r1csPath, symPath } = await loadCircuitArtifacts(path);
@@ -127,8 +121,8 @@ describe("underconstrained generator self-test", function () {
         expect(widest.unconstrainedBits).to.deep.equal([5]);
     });
 
-    // The counterpart to the four above: the checks must also stay quiet on a
-    // circuit that is correct, or "it fires" would be worth nothing either.
+    // Negative control for the four cases above: the checks report nothing on a
+    // sound circuit.
     it("stays quiet on a sound circuit", async () => {
         const path = fixturePath("test_merkle_d2.circom");
         const { r1csPath } = await compileConstraintsOnly(path);

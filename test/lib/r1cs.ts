@@ -1,29 +1,27 @@
 // R1CS-level access to a compiled circuit.
 //
-// The rest of the suite works through `circom_tester`, which only ever runs the
-// witness CALCULATOR: it takes an input object, computes every intermediate from
-// the template body, and reports `Assert Failed` when a template's own assert
-// trips. That is the right tool for the tamper suites, and it cannot see the
-// class of bug those suites are blind to.
+// The rest of the suite works through `circom_tester`, which runs only the
+// witness calculator: it takes an input object, computes every intermediate from
+// the template body, and reports `Assert Failed` when a template assert fails.
+// The tamper suites use it; it cannot detect underconstrained signals.
 //
-// A circom template is two artifacts at once: the witness generator (`<--`, the
+// A circom template defines two artifacts: the witness generator (`<--`, the
 // assignment order, `assert`) and the constraint system (`===`, `<==`, the
-// R1CS). A proof binds the verifier to the SECOND one only. Any signal the
-// generator computes but the R1CS does not pin is a signal a malicious prover
-// picks freely, and no amount of mutating the INPUT object can reveal that,
-// because every input the generator accepts yields a consistent witness by
-// construction — that is what the generator is for.
+// R1CS). A proof binds the verifier only to the constraint system. A signal the
+// generator computes but the R1CS does not pin can be chosen freely by a
+// malicious prover, and mutating the input object cannot reveal it, because
+// every input the generator accepts yields a consistent witness by construction.
 //
-// Finding those requires bypassing the generator: take an honest witness vector,
-// change it directly, and ask the R1CS — not the template — whether it still
-// satisfies. This module is the R1CS half of that; `underconstrained.ts` is the
-// search.
+// Detecting such signals requires bypassing the generator: take an honest
+// witness vector, change it directly, and check it against the R1CS rather than
+// the template. This module provides the R1CS side; `underconstrained.ts` is
+// the search.
 //
-// Field elements are plain `bigint` in normal (non-Montgomery) form, which is
-// what `readR1cs` yields for coefficients and the wasm calculator yields for
-// witness entries. `ffjavascript`'s `F1Field` is deliberately not used: the
-// sweep in `underconstrained.ts` runs millions of multiplications and the
-// wrapper's dispatch dominates.
+// Field elements are plain `bigint` in normal (non-Montgomery) form, as
+// `readR1cs` yields for coefficients and the wasm calculator yields for witness
+// entries. `ffjavascript`'s `F1Field` is not used: the sweep in
+// `underconstrained.ts` runs millions of multiplications and the wrapper's
+// dispatch overhead dominates.
 
 import * as fs from "fs";
 import * as readline from "readline";
@@ -47,9 +45,9 @@ export const fmul = (a: bigint, b: bigint): bigint => mod(a * b);
 /**
  * Multiplicative inverse by the extended Euclidean algorithm.
  *
- * Throws on zero rather than returning it: every caller here divides by a
- * quantity it has already established is non-zero, so a zero argument is a bug
- * in the caller and silently yielding 0 would turn it into a wrong root.
+ * Throws on zero: every caller divides by a quantity it has established is
+ * non-zero, so a zero argument is a caller bug, and returning 0 would produce a
+ * wrong root.
  */
 export function finv(a: bigint): bigint {
     const x = mod(a);
@@ -79,10 +77,10 @@ export type Constraint = [LinearCombination, LinearCombination, LinearCombinatio
  * The witness vector's regions, in the order circom lays them out:
  * `[1, ...outputs, ...public inputs, ...private inputs, ...intermediates]`.
  *
- * The split matters for severity. A second witness that differs only in an
- * intermediate proves the same public statement — malleability, not a break.
- * One that differs in an output or a public input proves a DIFFERENT statement
- * under the same proof, which is a soundness break.
+ * The split determines severity. A second witness that differs only in an
+ * intermediate proves the same public statement: malleability, not a break. One
+ * that differs in an output or a public input proves a different statement
+ * under the same proof: a soundness break.
  */
 export type Region = "constant" | "output" | "publicInput" | "privateInput" | "intermediate";
 
@@ -104,10 +102,10 @@ export interface R1csView {
 /**
  * Read a `.r1cs` and index it.
  *
- * The occurrence index is the reason a full sweep is affordable. Changing one
- * witness entry can only disturb constraints that mention it, so re-checking a
- * single-signal mutation costs `deg(signal)` constraint evaluations rather than
- * all ~100k. Summed over every signal that is one pass over the non-zeros.
+ * The occurrence index makes a full sweep affordable. Changing one witness entry
+ * can only affect constraints that mention it, so re-checking a single-signal
+ * mutation costs `deg(signal)` constraint evaluations rather than all ~100k.
+ * Summed over every signal, that is one pass over the non-zeros.
  */
 export async function loadR1cs(r1csPath: string): Promise<R1csView> {
     const r1cs = await readR1cs(r1csPath, {
@@ -130,7 +128,7 @@ export async function loadR1cs(r1csPath: string): Promise<R1csView> {
                 let list = occurrences.get(s);
                 if (list === undefined) occurrences.set(s, (list = []));
                 // A signal may appear in A, B and C of the same constraint; the
-                // list is per-constraint, and k only ever grows.
+                // list holds each constraint once, and k is increasing.
                 if (list[list.length - 1] !== k) list.push(k);
             }
         }
@@ -182,10 +180,9 @@ export async function loadR1cs(r1csPath: string): Promise<R1csView> {
 /**
  * The `.sym` file, indexed both ways.
  *
- * Findings are produced by index and read by name, and the explanations in
- * `explain.ts` go the other way — from a signal's name to a SIBLING's name to
- * that sibling's value. Both directions are wanted often enough that handing
- * callers a raw `Map` just moves the second one into every caller.
+ * Findings are produced by index and read by name; the explanations in
+ * `explain.ts` go the other way, from a signal's name to a sibling's name to
+ * that sibling's value. Both lookups are frequent, so the table provides both.
  */
 export interface SymbolTable {
     /** Signal name for a witness index; `(no symbol)` when the label was folded away. */
@@ -203,15 +200,15 @@ export const NO_SYMBOL = "(no symbol)";
 
 /**
  * Read the `.sym` circom emits: one `labelIdx,varIdx,componentIdx,name` line per
- * LABEL.
+ * label.
  *
- * `varIdx` is -1 for a label the optimizer removed, and those own no witness
- * entry, so they are dropped. Among the rest circom emits at most one name per
- * index for these circuits; where it ever emitted more, the first wins, since a
- * finding needs one handle a reader can grep for rather than an alias set.
+ * `varIdx` is -1 for a label the optimizer removed; such labels own no witness
+ * entry and are dropped. Among the rest, circom emits at most one name per index
+ * for these circuits; if there are more, the first wins, since a finding needs
+ * one greppable name rather than an alias set.
  *
- * Streamed line by line — the file is ~11 MB for `4x6` and reading it whole
- * costs more than the sweep it is annotating.
+ * Streamed line by line: the file is ~11 MB for `4x6`, and reading it whole
+ * costs more than the sweep it annotates.
  */
 export async function loadSymbols(symPath: string): Promise<SymbolTable> {
     const byIndex = new Map<number, string>();

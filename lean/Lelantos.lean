@@ -43,6 +43,6 @@ import Lelantos.Proofs.Rejection
 Importing this module brings in the whole development. The layers are strictly ordered:
 `Model` depends on nothing else here, `Gadgets` on `Model`, `Spec` on the hash definitions in
 `Gadgets.Note` and `Gadgets.Common` (and the tree gadgets on `Spec`), `Circuit` on the gadgets,
-and `Proofs` on the finished circuit. `Meta` sits outside that chain — it imports this module and reports
-on it, which is why `lakefile.toml` names it as a separate build target.
+and `Proofs` on the finished circuit. `Meta` imports this module and reports on it, so
+`lakefile.toml` declares it as a separate build target.
 -/

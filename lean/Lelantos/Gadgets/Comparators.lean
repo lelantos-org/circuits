@@ -72,16 +72,16 @@ theorem indN_le_one (P : Prop) [Decidable P] : indN P ≤ 1 := by
 /-! ## `LessThan`
 
 circomlib `LessThan(n)` (`comparators.circom:89-99`) is the comparator
-`src/lib/batch_append.circom:134-139` uses to derive `active[k] = (k < actual_count)`:
+`src/lib/batch_append.circom:133-138` uses to derive `active[k] = (k < actual_count)`:
 
     component n2b = Num2Bits(n + 1);
     n2b.in <== in[0] + (1 << n) - in[1];
     out <== 1 - n2b.out[n];
 
 The offset `2^n` keeps the difference non-negative; the top bit of the `(n+1)`-bit
-decomposition is then the borrow flag, and `out` is its complement. The two range
-hypotheses are not decoration — `LessThan` is *unsound* without them. If `in[1]` may exceed
-`2^n` the subtraction wraps and the comparator reports the wrong order, which is why
+decomposition is then the borrow flag, and `out` is its complement. `LessThan` is unsound
+without the two range hypotheses: if `in[1]` may exceed `2^n` the subtraction wraps and the
+comparator reports the wrong order. For this reason
 `src/tree_update_batch.circom` sizes the gadget as `LessThan(COUNT_BITS + 1)` rather than
 `LessThan(COUNT_BITS)`.
 -/
@@ -112,8 +112,8 @@ structure LessThanSat (n : ℕ) (a b : F) (bs : ℕ → F) (out : F) : Prop wher
   /-- `comparators.circom:98` — `out <== 1 - n2b.out[n]`. -/
   out_def : out = 1 - bs n
 
-/-- **Soundness of `LessThan`.** Given that both operands really are `n`-bit, the output is
-the comparison indicator. -/
+/-- **Soundness of `LessThan`.** If both operands are `n`-bit, the output is the comparison
+indicator. -/
 theorem lessThan_sound {n : ℕ} {a b out : F} {bs : ℕ → F}
     (hp : 2 ^ (n + 1) ≤ p) (ha : a.val < 2 ^ n) (hb : b.val < 2 ^ n)
     (h : LessThanSat n a b bs out) : out = ind (a.val < b.val) := by

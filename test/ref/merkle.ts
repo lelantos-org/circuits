@@ -98,13 +98,13 @@ export class MerkleTree {
      * `valueOf(level, index)`, so the block's root is that constant hashed up
      * `level` times, and is seeded directly; blocks sharing a constant share the
      * chain, so a fill with `v` distinct constants costs `v · depth` hashes.
-     * `nodeAt` descends through exactly one
-     * partial node per level; everything else it reads is a seeded block or an
-     * empty subtree, so `root()` and `frontier()` agree with a naive fill of the
-     * same leaves (`reference.test.ts` checks it).
+     * `nodeAt` descends through exactly one partial node per level; everything
+     * else it reads is a seeded block or an empty subtree, so `root()` and
+     * `frontier()` agree with a naive fill of the same leaves (checked in
+     * `reference.test.ts`).
      *
      * With a distinct constant per block the frontier slots at one level differ,
-     * which is what lets a production-depth witness see a misrouted slot.
+     * so a production-depth witness exposes a misrouted slot.
      */
     fillBlocks(n: number, valueOf: (level: number, index: number) => Field): void {
         if (!Number.isInteger(n) || n < 0 || n > ARITY ** this.depth) {

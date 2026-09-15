@@ -41,7 +41,7 @@ export interface NoteCommitInput {
  * Arity-4 and untagged: the arity plus the (asset, value) packing provide the
  * domain separation. Mirrors NoteCommitment in src/lib/note.circom. Soundness
  * requires asset < 2^64 and value < 2^64; the circuit range-checks both, and
- * the throws here enforce the same bounds off-circuit.
+ * this function enforces the same bounds off-circuit.
  */
 export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
     if (n.asset >= POW_2_64) throw new Error("asset must fit in 64 bits");
@@ -54,8 +54,8 @@ export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
  * leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
  *
  * The commitment-tree leaf, as built by tree_update_batch.circom and
- * recomputed by spent.circom. `cv_dep` is what pins (asset, value) to the
- * leaf, so a spend cannot substitute either later.
+ * recomputed by spent.circom. `cv_dep` binds (asset, value) to the leaf, so a
+ * spend cannot substitute either.
  */
 export function buildLeaf(P: Poseidon, cm: Field, cvDep: Point): Field {
     return P.hash([TAG_LEAF, cm, cvDep[0], cvDep[1]]);
@@ -65,9 +65,9 @@ export function buildLeaf(P: Poseidon, cm: Field, cvDep: Point): Field {
  * nf = Poseidon(TAG_NF, nk, rho, cm). Mirrors Nullifier in note.circom.
  *
  * Takes nk directly so FVK holders (nk without nsk) can recompute nullifiers.
- * `cm` is in the preimage so the nullifier identifies the exact note. Without
- * it, two notes sharing a rho share a nullifier and spending either permanently
- * locks the other: the faerie-gold attack.
+ * `cm` is in the preimage so the nullifier identifies the exact note; otherwise
+ * two notes sharing a rho share a nullifier and spending either locks the other
+ * (the faerie-gold attack).
  */
 export function buildNullifier(P: Poseidon, nk: Field, rho: Field, cm: Field): Field {
     return P.hash([TAG_NF, nk, rho, cm]);

@@ -119,7 +119,7 @@ export interface ClueWitness {
  * Deterministic clue source for tests and the vector generator.
  *
  * The clue signals carry no in-circuit constraints, so any well-formed
- * Baby-Jubjub R with honest bits satisfies the circuit. The values are
+ * Baby-Jubjub R with correctly derived bits satisfies the circuit. The values are
  * published in `vectors/`, so they must be reproducible: the detection key uses
  * a fixed generator and `r` is counter-driven.
  */
@@ -136,8 +136,8 @@ export function deterministicClueGen(P: Poseidon, J: Jubjub, gamma = FMD_DEFAULT
             const r = (counter * 1234567n + 89n) % BABYJUB_SUBGROUP_ORDER;
             const rSafe = r === 0n ? 1n : r;
             const clue = fmdFlag(J, P, fk, rSafe);
-            // `clue.bits` is a packed BYTE array (ceil(gamma/8) bytes); this reads
-            // it back little-endian into the single field element the slot holds.
+            // `clue.bits` is a packed byte array (ceil(gamma/8) bytes), read back
+            // little-endian into the single field element the slot holds.
             let clueBits = 0n;
             for (let i = 0; i < clue.bits.length; i++) {
                 clueBits |= BigInt(clue.bits[i]) << BigInt(8 * i);

@@ -17,10 +17,10 @@
 // batch cannot corrupt the authoritative root.
 //
 // Each fast-check trial builds two production-depth batch witnesses. The
-// prefilled tree behind them reaches ~4^DEPTH leaves, so `buildHonest` relies on
-// `MerkleTree.fillBlocks` to build it from a few hash chains; a distinct-leaf fill
-// costs ~40s per trial and blows the suite timeout. Run count follows the shared
-// `FUZZ` env (`light` / `medium` / `heavy`).
+// prefilled tree behind them reaches ~4^DEPTH leaves, so `buildHonest` uses
+// `MerkleTree.fillBlocks` to build it from a few hash chains; a distinct-leaf
+// fill costs ~40s per trial and exceeds the suite timeout. Run count follows the
+// shared `FUZZ` env (`light` / `medium` / `heavy`).
 
 import * as fc from "fast-check";
 
@@ -39,19 +39,17 @@ const WRAPPER = srcPath("tree_update_batch.circom");
 // `FRONTIER` scales to 0.25x NUM_RUNS in arbitraries.ts; override with
 // `FUZZ_RUNS_FRONTIER=N`.
 
-/// Compose a `start_index` whose quaternary digits at every level are
-/// in {0, 3} — the "edge" slot positions at each tree level. Returns the
-/// integer, which is at most 4^DEPTH - 1 and so always fits the circuit's
-/// Num2Bits(2·DEPTH).
+/// Compose a `start_index` whose quaternary digits are all in {0, 3}, the edge
+/// slot positions at each level. The result is at most 4^DEPTH - 1, so it fits
+/// the circuit's Num2Bits(2·DEPTH).
 function startIndexFromEdgeDigits(digits: number[]): number {
     let n = 0;
     for (let lvl = digits.length - 1; lvl >= 0; lvl--) n = n * 4 + digits[lvl];
     return n;
 }
 
-/// Levels where the start_index has digit == 3 (i.e. all 3 frontier slots
-/// at that level hold real filled siblings, so tampering any of them must
-/// perturb the rebuild).
+/// Levels where start_index has digit 3: all three frontier slots there hold
+/// filled siblings, so tampering any of them must perturb the rebuild.
 function tamperableLevels(digits: number[]): number[] {
     const out: number[] = [];
     for (let lvl = 0; lvl < digits.length; lvl++) if (digits[lvl] === 3) out.push(lvl);
@@ -76,12 +74,12 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
                     return d;
                 })();
                 const startIndex = startIndexFromEdgeDigits(digits);
-                // The circuit range-checks start_index + k only for ACTIVE slots
+                // The circuit range-checks start_index + k only for active slots
                 // (k < actual_count), so the batch fits exactly when the last
                 // active index stays inside the tree. An all-3 draw puts
                 // startIndex at 4^DEPTH - 1, where the only legal count is 1;
-                // bounding by MAX_L alone would then hand the property an
-                // over-capacity batch and fail the honest-witness assertion.
+                // bounding by MAX_L alone would produce an over-capacity batch
+                // and fail the honest-witness assertion.
                 const headroom = Math.min(MAX_L, CAPACITY - startIndex);
                 return fc.integer({ min: 1, max: headroom }).map(k => ({ digits, k }));
             });
@@ -98,7 +96,7 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
             // isDeposit per active leaf (Pedersen binding path vs spend skip).
             // Per-leaf rather than per-batch: step 6a is a per-slot constraint
             // with no reference to a neighbour, so any interleaving of deposit
-            // and spend leaves is satisfiable and worth generating.
+            // and spend leaves is satisfiable.
             fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
             async ({ digits, k, level }, slotIdx, depositFlags) => {
                 const startIndex = startIndexFromEdgeDigits(digits);
@@ -109,8 +107,8 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
                 }
                 const honest = buildHonest(ctx.P, startIndex, leaves);
 
-                // Sanity: honest witness must verify. Without this, a
-                // tamper-rejection assertion below would be vacuous.
+                // The honest witness must verify, or the tamper-rejection
+                // assertion below is vacuous.
                 await expectAccepts(ctx.circuit, treeUpdateBatchInputJson(honest));
 
                 // At digit == 3 every slot 0..2 holds a filled sibling
@@ -125,9 +123,9 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
 
                 // No Fiat-Shamir rebind: the frontier is private, so it is in
                 // neither the challenge preimage nor the evaluated prefix (see
-                // `treeUpdateBatchChallenge` and `treeUpdateBatchCoeffs`), and
-                // the only possible failure is the
-                // `old_root === append.old_root` check rather than a (z, y) mismatch.
+                // `treeUpdateBatchChallenge` and `treeUpdateBatchCoeffs`), and the
+                // only possible failure is `old_root === append.old_root` rather
+                // than a (z, y) mismatch.
                 await expectWitnessFails(
                     ctx.circuit,
                     treeUpdateBatchInputJson(tampered),
@@ -135,9 +133,9 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
                 );
             },
         ), fcParamsFor("FRONTIER", { examples: [
-            // Boundary digit patterns + tamper at extremes. The third element
-            // must match the arbitrary above — an example of the wrong shape is
-            // fed to the property before any random draw, so it fails first.
+            // Boundary digit patterns with tampers at the extremes. The third
+            // element must match the arbitrary above: examples run before any
+            // random draw, so a wrongly shaped example fails first.
             [{ digits: Array<number>(DEPTH).fill(3).map((_, i) => i === DEPTH - 1 ? 0 : 3), k: 1, level: 0 }, 0, Array<0 | 1>(MAX_L).fill(1)],
             [{ digits: [...Array<number>(DEPTH - 1).fill(0), 3], k: 3, level: DEPTH - 1 }, 2, Array<0 | 1>(MAX_L).fill(0)],
         ] }));

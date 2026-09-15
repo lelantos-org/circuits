@@ -1,7 +1,7 @@
 // Tests for `tree_update_batch.circom`. Covers:
 //   - per-leaf format leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
 //   - per-leaf deposit binding cv_dep = leaf_public_in · V^leaf_asset + rcv · H
-//   - C-1: cross-asset and value-inflation rejection
+//   - cross-asset and value-inflation rejection
 //   - odd leaf counts (1, 3) and leaf-granular multiplexing
 //   - padding zero constraints
 //
@@ -86,9 +86,9 @@ describe("tree_update_batch", function () {
     });
 
     it("C-1 regression: deposit with mismatched binding (wrong asset) is rejected", async () => {
-        // Attacker pays with asset=7 (publicIn=1) but cv_dep commits to a
-        // different asset's value. The per-leaf Pedersen binding catches this
-        // since V^7 and V^99 are independent generators.
+        // The depositor pays with asset=7 (publicIn=1) but cv_dep commits to a
+        // different asset's value. The per-leaf Pedersen binding rejects this
+        // because V^7 and V^99 are independent generators.
         const honest = simpleLeaf({ J, P, val: 1n, isDeposit: 1, asset: 7n });
         const fakeAssetGen = J.hashToAssetGen(99n);
         const tampered: LeafWitness = {
@@ -103,22 +103,22 @@ describe("tree_update_batch", function () {
         );
     });
 
-    // ===== Frontier binding (H-1) =====
+    // ===== Frontier binding =====
     //
-    // BatchAppend rebuilds `old_root` from `frontier_in`, so a relayer
-    // cannot pair a real `oldRoot` with a forged frontier. Without the binding,
-    // a batch can corrupt the on-chain root permanently.
+    // BatchAppend rebuilds `old_root` from `frontier_in`, so a relayer cannot
+    // pair a real `oldRoot` with a forged frontier, which would permanently
+    // corrupt the on-chain root.
 
     it("frontier binding: honest non-zero start_index passes", async () => {
-        // start_index = 5 ⇒ digits [1,1,0,...]. Exercises pre/eq branches
+        // start_index = 5 ⇒ digits [1,1,0,...]; exercises the pre/eq branches
         // at low levels.
         const w = buildHonest(P, 5, [simpleLeaf({ J, P, val: 42n, isDeposit: 1 })]);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
     it("frontier binding: large prefill (start_index=21) honest passes", async () => {
-        // 21 = 0b010101 ⇒ digits [1,1,1,0,...]. Non-trivial frontier at
-        // the three lowest levels.
+        // 21 = 0b010101 ⇒ digits [1,1,1,0,...]; non-trivial frontier at the
+        // three lowest levels.
         const w = buildHonest(P, 21, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
@@ -138,9 +138,8 @@ describe("tree_update_batch", function () {
     });
 
     it("frontier binding: empty-tree frontier with wrong oldRoot rejected", async () => {
-        // Frontier honest (all-zeros for empty tree) but oldRoot lied about.
-        // BatchAppend rebuilds the genuine empty-tree root; equality check
-        // catches the mismatch.
+        // Honest all-zero frontier with a forged oldRoot. BatchAppend rebuilds
+        // the empty-tree root and the equality check rejects the mismatch.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.oldRoot = w.oldRoot + 1n;
         rebindFiatShamir(w);
@@ -151,7 +150,7 @@ describe("tree_update_batch", function () {
         );
     });
 
-    // ===== Multi-leaf / odd-count / capacity coverage (B) =====
+    // ===== Multi-leaf / odd-count / capacity coverage =====
     //
     // actual_count is a leaf count, so odd batches are valid. These exercise the
     // padded leaf slots and the insert windows up to MAX_L.
@@ -206,9 +205,8 @@ describe("tree_update_batch", function () {
     });
 
     it("honest odd batch at non-zero start_index passes", async () => {
-        // Exercises both roots at start_index = 13
-        // (digits [1, 3, 0, ...]); inserts land at indices 13..15, crossing
-        // a level-1 carry.
+        // Exercises both roots at start_index = 13 (digits [1, 3, 0, ...]);
+        // inserts land at indices 13..15, crossing a level-1 carry.
         const leaves = [
             simpleLeaf({ J, P, val: 3n, isDeposit: 1, pk: 0xd01n }),
             simpleLeaf({ J, P, val: 7n, isDeposit: 1, pk: 0xd02n }),
@@ -218,11 +216,11 @@ describe("tree_update_batch", function () {
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
-    // ===== Padding hole coverage (C) =====
+    // ===== Padding coverage =====
     //
     // Section 3 of tree_update_batch.circom asserts (1 - active[k]) * X === 0
-    // for every per-leaf field. Each row below writes ONE inactive-slot field
-    // and expects rejection. With actual_count = 1, slot 1 is inactive.
+    // for every per-leaf field. Each row writes one inactive-slot field and
+    // expects rejection. With actual_count = 1, slot 1 is inactive.
 
     interface PaddingCase {
         /** Names the per-leaf field, as it reads in the circom. */
@@ -266,12 +264,11 @@ describe("tree_update_batch", function () {
         });
     }
 
-    // ===== Other negative coverage (D) =====
+    // ===== Other negative coverage =====
 
     it("FAILS when actual_count == 0 (Num2Bits(COUNT_BITS) rejects -1)", async () => {
-        // Circuit decomposes (actual_count - 1) in COUNT_BITS bits ⇒
-        // actual_count=0 yields -1, a 254-bit field element that Num2Bits
-        // cannot fit.
+        // The circuit decomposes (actual_count - 1) in COUNT_BITS bits;
+        // actual_count = 0 yields -1, a 254-bit field element that does not fit.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.actualCount = 0;
         // Zero out the would-be-active slot fields so only the count check fires.
@@ -290,8 +287,7 @@ describe("tree_update_batch", function () {
     it("FAILS when actual_count > MAX_L (Num2Bits(COUNT_BITS) rejects it)", async () => {
         // COUNT_BITS bounds (actual_count - 1) ∈ [0, MAX_L - 1], so
         // actual_count ≤ MAX_L. At MAX_L + 1 the decomposition needs
-        // COUNT_BITS + 1 bits and Num2Bits(COUNT_BITS) rejects it. Derived from
-        // MAX_L rather than written as a literal so it tracks the width.
+        // COUNT_BITS + 1 bits. Derived from MAX_L so it tracks the width.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.actualCount = MAX_L + 1;
         rebindFiatShamir(w);
@@ -314,8 +310,7 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS when leaf_public_in exceeds 2^64 (RangeCheck64)", async () => {
-        // Build an honest witness then override leaf_public_in past 2^64;
-        // the deposit-side RangeCheck64 fails.
+        // leaf_public_in at 2^64 fails the deposit-side RangeCheck64.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
         w.leafPublicIn[0] = TWO_64;
         rebindFiatShamir(w);
@@ -327,8 +322,8 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS on C-1' value inflation: same asset, wrong claimed value", async () => {
-        // Honest path: cv_dep = leaf_public_in · V^asset + rcv · H.
-        // Tamper: inflate the claim while keeping cv_dep real ⇒ equality fails.
+        // cv_dep = leaf_public_in · V^asset + rcv · H. Inflating the claim while
+        // keeping cv_dep honest breaks the equality.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 150n, isDeposit: 1 })]);
         w.leafPublicIn[0] = 200n;
         rebindFiatShamir(w);
@@ -340,10 +335,10 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS on C-1'' split: value moved between two deposit leaves", async () => {
-        // A binding over an aggregate of leaves would fix only Σvalue mod the
-        // subgroup order, letting an attacker claim public_in = 1 while loading
-        // leaf 0 with 2^63 and leaving leaf 1 to absorb the remainder. Per-leaf
-        // binding rejects at leaf 0's own equality.
+        // A binding over an aggregate of leaves fixes only Σvalue mod the
+        // subgroup order, admitting public_in = 1 with leaf 0 loaded with 2^63
+        // and leaf 1 absorbing the remainder. The per-leaf binding rejects at
+        // leaf 0's own equality.
         const asset = 7n;
         const assetGen = J.hashToAssetGen(asset);
         const honest = simpleLeaf({ J, P, val: 1n, isDeposit: 1, asset });
@@ -360,9 +355,9 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS when rcv is tampered (deposit binding)", async () => {
-        // Honest: cv_dep = leaf_public_in·V + rcv·H. Tamper rcv ⇒ rhs shifts
-        // by Δ·H ≠ 0 ⇒ point equality fails. rcv is NOT in PolyEval so
-        // Fiat-Shamir is unchanged.
+        // cv_dep = leaf_public_in·V + rcv·H. Shifting rcv moves the rhs by
+        // Δ·H ≠ 0, so the point equality fails. rcv is not a PolyEval
+        // coefficient, so the Fiat-Shamir challenge is unchanged.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 150n, isDeposit: 1 })]);
         w.rcv[0] = w.rcv[0] + 1n;
         await expectWitnessFails(
@@ -387,11 +382,11 @@ describe("tree_update_batch", function () {
 
     // ===== Spend-leaf field zeroing (section 4) =====
     //
-    // Section 3 zeroes every field of an INACTIVE slot; section 4 additionally
-    // zeroes the two deposit-only fields on an ACTIVE spend leaf, so a relayer
-    // cannot push a nonzero leaf_asset or leaf_public_in into the public inputs
-    // of a batch that carries no deposit. The padding rows above never reach
-    // these: they poison inactive slots, which section 3 rejects first.
+    // Section 3 zeroes every field of an inactive slot; section 4 also zeroes
+    // the two deposit-only fields on an active spend leaf, so a relayer cannot
+    // push a nonzero leaf_asset or leaf_public_in into the public inputs of a
+    // batch that carries no deposit. The padding rows above do not reach these
+    // constraints because section 3 rejects inactive slots first.
 
     it("FAILS on a nonzero leaf_asset in an active spend leaf", async () => {
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 100n, isDeposit: 0 })]);
@@ -418,11 +413,11 @@ describe("tree_update_batch", function () {
     // ===== Remaining single-constraint negatives =====
 
     it("FAILS when an active cv_dep is off the curve (BabyCheck)", async () => {
-        // (1, 1) is off Baby-Jubjub: a + 1 = 168701 while 1 + d = 168697. Set on
-        // the leaf witness BEFORE the tree is built, so the inserted leaf hashes
-        // this same point and new_root still matches — BabyCheck is then the only
-        // constraint left to reject it. A spend leaf, so the deposit binding
-        // (which would also catch it) is skipped.
+        // (1, 1) is off Baby-Jubjub: a + 1 = 168701 while 1 + d = 168697. It is
+        // set on the leaf witness before the tree is built, so the inserted leaf
+        // hashes the same point and new_root matches, leaving BabyCheck as the
+        // only rejecting constraint. A spend leaf skips the deposit binding,
+        // which would otherwise also reject it.
         const honest = simpleLeaf({ J, P, val: 100n, isDeposit: 0 });
         const offCurve: LeafWitness = { ...honest, cvDep: [1n, 1n] };
         const w = buildHonest(P, 0, [offCurve]);
@@ -434,9 +429,9 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS when new_root does not match the batched insert", async () => {
-        // The mirror of the old_root frontier test: old_root binds the frontier
-        // in, new_root binds the result out. Without `new_root === append.new_root` a
-        // relayer names any root it likes for the advanced tree.
+        // Counterpart of the old_root frontier test: old_root binds the input
+        // frontier and `new_root === append.new_root` binds the resulting root,
+        // so a relayer cannot name an arbitrary root for the advanced tree.
         const w = buildHonest(P, 4, [simpleLeaf({ J, P, val: 100n, isDeposit: 1 })]);
         w.newRoot = w.newRoot + 1n;
         rebindFiatShamir(w);
@@ -449,10 +444,10 @@ describe("tree_update_batch", function () {
 
     // ===== Batched insert at production depth =====
     //
-    // BatchAppend sizes each level's window for the worst case, which is a run
-    // that straddles a boundary at that level. `batch_append.test.ts` sweeps
-    // every start at depth 4 with distinct leaves; these put the straddle at
-    // every level of the deployed shape, through the full circuit.
+    // BatchAppend sizes each level's window for the worst case, a run that
+    // straddles a boundary at that level. `batch_append.test.ts` sweeps every
+    // start at depth 4 with distinct leaves; these place the straddle at every
+    // level of the deployed shape, through the full circuit.
 
     let straddleLeaves: LeafWitness[];
     before(() => {
@@ -474,9 +469,9 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS on a non-zero frontier slot nothing reads", async () => {
-        // The slot at the digit is the lowest one no root reads: once at level 0,
-        // where the digit is non-zero, and once at the first level where it is 0.
-        // Neither is read, so both are pinned to zero rather than left free.
+        // The slot at the digit is the lowest unread slot. Checked at level 0,
+        // where the digit is non-zero, and at the first level where it is 0;
+        // both slots are pinned to zero.
         const start = 21;
         const honest = buildHonest(P, start, [simpleLeaf({ J, P, val: 9n, isDeposit: 1 })]);
         const emptyLevel = [...Array(BATCH_DEPTH).keys()].find(d => quatDigit(start, d) === 0)!;
@@ -493,10 +488,10 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS when rcv reaches 2^252 (MulH's Num2Bits(RCV_BITS))", async () => {
-        // rcv feeds MulH on every slot, deposit or not, so the width bound holds
-        // for a spend leaf too — and there the deposit binding is skipped, so
-        // Num2Bits(252) is the only constraint that can reject. rcv is not a
-        // PolyEval coefficient, so the challenge is unchanged.
+        // rcv feeds MulH on every slot, so the width bound holds for a spend
+        // leaf, where the deposit binding is skipped and Num2Bits(252) is the
+        // only rejecting constraint. rcv is not a PolyEval coefficient, so the
+        // challenge is unchanged.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 100n, isDeposit: 0 })]);
         w.rcv[0] = TWO_252;
         await expectWitnessFails(
@@ -510,21 +505,19 @@ describe("tree_update_batch", function () {
     // ===== Degenerate deposit binding (step 6a) =====
     //
     // The deposit binding pins `leaf_asset[k]` only while the V^leaf_asset term
-    // survives. `ValueTimesGen(0, gen)` is the curve identity for every `gen`,
-    // so at `leaf_public_in[k] == 0` the equality collapses to
-    // `cv_dep[k] == rcv[k]·H` and the asset drops out of the system — leaving a
-    // coefficient held only by a 64-bit range check, which is not a pin. Four
-    // such leaves would be 4 × 64 = 256 bits of free dial against a 254-bit
-    // modulus.
+    // is present. `ValueTimesGen(0, gen)` is the curve identity for every `gen`,
+    // so at `leaf_public_in[k] == 0` the equality reduces to
+    // `cv_dep[k] == rcv[k]·H` and the asset drops out of the system, leaving a
+    // coefficient bounded only by a 64-bit range check. Four such leaves give
+    // 4 × 64 = 256 free bits against a 254-bit modulus.
     //
     // Step 6a splits per slot: a leaf carrying value must declare a non-zero
-    // asset (the binding pins it), and a worthless leaf must declare asset 0
+    // asset (the binding pins it), and a zero-value leaf must declare asset 0
     // (nothing reads it, so it is canonicalised rather than left free).
 
     it("a zero-value fee note is accepted at asset 0", async () => {
-        // The liveness case this must not break. A flush at fbps = 0 mints a
-        // worthless fee note, which `_validateDeposit` permits explicitly ("The
-        // fee note's value may be zero").
+        // Liveness: a flush at fbps = 0 mints a zero-value fee note, which
+        // `_validateDeposit` permits ("The fee note's value may be zero").
         const leaves = [
             simpleLeaf({ J, P, val: 1000n, isDeposit: 1, asset: 7n, pk: 0xf01n }),
             simpleLeaf({ J, P, val: 0n, isDeposit: 1, asset: 0n, pk: 0xf02n }),
@@ -534,10 +527,9 @@ describe("tree_update_batch", function () {
     });
 
     it("6a: FAILS on a zero-value deposit leaf declaring a non-zero asset", async () => {
-        // The dial itself. With the value at zero the binding says nothing about
-        // the asset, so an un-canonicalised asset here would be a free 64-bit
-        // coefficient. Built honestly at asset 7 — cv_dep opens correctly — so
-        // 6a is what rejects, not the Pedersen equality.
+        // With zero value the binding does not constrain the asset, so a
+        // non-canonical asset here is a free 64-bit coefficient. cv_dep opens
+        // correctly at asset 7, so 6a rejects rather than the Pedersen equality.
         const leaves = [
             simpleLeaf({ J, P, val: 1000n, isDeposit: 1, asset: 7n, pk: 0xf03n }),
             simpleLeaf({ J, P, val: 0n, isDeposit: 1, asset: 7n, pk: 0xf04n }),
@@ -551,8 +543,8 @@ describe("tree_update_batch", function () {
     });
 
     it("6a: a valued leaf still requires a non-zero asset", async () => {
-        // The other arm, unchanged from before: SpentNote refuses id 0 on every
-        // real note, so a valued leaf minted there is committed and unspendable.
+        // SpentNote rejects asset id 0 on every real note, so a valued leaf at
+        // asset 0 would be committed but unspendable.
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 100n, isDeposit: 1, asset: 0n })]);
         await expectWitnessFails(
             circuit,
@@ -562,17 +554,16 @@ describe("tree_update_batch", function () {
     });
 
     it("a full flush of four principal/fee pairs, every fee note worthless, passes", async () => {
-        // The exact configuration that supplied the four free 64-bit dials.
-        // Still provable — the fix removes the freedom, not the shape.
+        // The configuration that yields four zero-value leaves; 6a removes their
+        // asset freedom while keeping the batch provable.
         const w = buildHonest(P, 0, depositPairs(P, J, MAX_L));
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
     });
 
     it("a deposit leaf at an odd slot needs no relation to its neighbour", async () => {
-        // The circuit is layout-agnostic: nothing ties slot k to slot k-1, so a
-        // consumer may lay deposits out however it likes. A cross-asset pair of
-        // VALUED leaves is fine here and is rejected on-chain instead, by the
-        // escrow digest in MASP._drainDeposit.
+        // The circuit is layout-agnostic: no constraint ties slot k to slot k-1.
+        // A cross-asset pair of valued leaves passes here and is rejected
+        // on-chain by the escrow digest in MASP._drainDeposit.
         const leaves = [
             simpleLeaf({ J, P, val: 100n, isDeposit: 1, asset: 7n, pk: 0xf05n }),
             simpleLeaf({ J, P, val: 25n, isDeposit: 1, asset: 99n, pk: 0xf06n }),
@@ -582,9 +573,9 @@ describe("tree_update_batch", function () {
     });
 
     it("6a is vacuous on a spend batch", async () => {
-        // Gated on active_dep, so an all-spend batch is untouched: there
-        // `leaf_asset` and `leaf_public_in` are already forced to zero by the
-        // step-3 and step-4 zeroings, which is a stronger pin than either arm.
+        // 6a is gated on active_dep. In an all-spend batch `leaf_asset` and
+        // `leaf_public_in` are forced to zero by steps 3 and 4, a stronger pin
+        // than either arm.
         const leaves = Array.from({ length: 6 }, (_, i) =>
             simpleLeaf({ J, P, val: BigInt(10 + i), isDeposit: 0, pk: BigInt(0xf20 + i) }));
         const w = buildHonest(P, 0, leaves);
@@ -593,20 +584,20 @@ describe("tree_update_batch", function () {
 
     // ===== Divergent witness (soundness) =====
     //
-    // Every other block in this file derives `(z, y)` from the same object it
-    // hands the circuit, via `rebindFiatShamir`. That answers "does constraint X
-    // fire" and nothing else: witness and calldata are the same batch by
-    // construction, so a signal the circuit never pins still reads as bound.
+    // The other blocks in this file derive `(z, y)` from the object passed to
+    // the circuit, via `rebindFiatShamir`. That checks whether a constraint
+    // fires, but witness and calldata are the same batch by construction, so a
+    // signal the circuit never pins still appears bound.
     //
-    // A deployment keeps the two apart. `MASP` hashes ITS calldata into `z` and
-    // compares ITS `y`; the prover then picks any witness satisfying the R1CS at
-    // that `z`. `z` is a circuit INPUT, read before the witness is chosen, so
+    // In deployment they are separate: `MASP` hashes its calldata into `z` and
+    // compares its `y`, and the prover picks any witness satisfying the R1CS at
+    // that `z`. `z` is a circuit input read before the witness is chosen, so
     // Schwartz-Zippel does not apply and hashing a word into the challenge binds
     // it only if a constraint already pins it (src/README.md § 2a).
     //
     // These tests build the two views separately with `calldataView` +
-    // `bindFiatShamir` and assert the circuit cannot be made to attest to a
-    // batch the contract did not validate.
+    // `bindFiatShamir` and assert the circuit cannot attest to a batch the
+    // contract did not validate.
 
     /** The base each divergence is applied to: one honest single-leaf deposit. */
     function honestDeposit(val = 1000n, isDeposit: 0 | 1 = 1): BatchWitness {
@@ -629,20 +620,19 @@ describe("tree_update_batch", function () {
         });
     }
 
-    // The two reproductions below are the audit's confirmed mints, written as
-    // the attacker would stage them rather than as a one-field sweep. Both are
-    // reachable by a single party: `MASP.flushBatch` is unpermissioned and
-    // `deposit` is external, so the depositor can also be the flusher.
+    // The two cases below stage complete mint attempts rather than one-field
+    // divergences. Both are reachable by a single party: `MASP.flushBatch` is
+    // unpermissioned and `deposit` is external, so the depositor can also be the
+    // flusher.
 
     it("divergent witness: is_deposit cleared in the witness cannot mint an unbound leaf", async () => {
-        // Contract sees a 1-unit deposit of asset 7 and escrows accordingly.
-        // The witness declares the same leaf a SPEND: `active_dep` is then 0, so
-        // the only constraint tying `cv_dep` to an asset and an amount is gated
-        // off, and the committed leaf holds 2^63 units instead of 1.
+        // The contract sees a 1-unit deposit of asset 7 and escrows accordingly.
+        // The witness declares the same leaf a spend, so `active_dep` is 0, the
+        // only constraint tying `cv_dep` to an asset and amount is gated off, and
+        // the committed leaf holds 2^63 units instead of 1.
         //
-        // `is_deposit` is the gate for that constraint and is a private witness
-        // signal, so the circuit's own header lists it as a contract obligation
-        // (item 4) rather than something it enforces.
+        // `is_deposit` gates that constraint and is a private witness signal;
+        // the circuit header lists it as a contract obligation (item 4).
         const w = buildHonest(P, 0, [simpleLeaf({ J, P, val: 1n << 63n, isDeposit: 0, asset: 7n })]);
         const calldata = calldataView(w);
         calldata.isDeposit[0] = 1;
@@ -654,11 +644,10 @@ describe("tree_update_batch", function () {
     });
 
     it("divergent witness: leaf_public_in inflated in the witness cannot mint value", async () => {
-        // The gate is left honestly at 1 and the deposit binding is genuinely
-        // satisfied — against the WITNESS's operands. `cv_dep` opens to 2^63
-        // units of asset 7 and the equality holds, while the calldata the
-        // contract escrowed against declares 1. This survives any fix that pins
-        // `is_deposit` alone.
+        // The gate is honestly 1 and the deposit binding holds against the
+        // witness operands: `cv_dep` opens to 2^63 units of asset 7, while the
+        // calldata the contract escrowed against declares 1. Pinning
+        // `is_deposit` alone does not prevent this.
         const w = honestDeposit(1n << 63n);
         const calldata = calldataView(w);
         calldata.leafPublicIn[0] = 1n;
@@ -668,14 +657,12 @@ describe("tree_update_batch", function () {
     });
 
     it("divergent witness: a fully honest witness still matches its own calldata", async () => {
-        // Guards the harness. `bindFiatShamir` against an UNMODIFIED snapshot is
-        // the case every divergence above perturbs, so if the circuit's `y`
-        // disagreed with it here, each of them would be rejected for the wrong
-        // reason and the block would pass while proving nothing.
+        // Harness guard. Every divergence above perturbs this unmodified
+        // snapshot; if the circuit's `y` disagreed here, those cases would be
+        // rejected for the wrong reason and pass vacuously.
         //
-        // The two binders cannot disagree — `rebindFiatShamir` is defined as
-        // this call — so what is checked is the circuit against the reference,
-        // not one binder against the other.
+        // `rebindFiatShamir` is defined as this call, so this checks the circuit
+        // against the reference, not one binder against the other.
         const w = honestDeposit();
         bindFiatShamir(w, calldataView(w));
         await expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
@@ -684,9 +671,9 @@ describe("tree_update_batch", function () {
     // ===== Tree capacity =====
     //
     // The last inserted index, start_index + actual_count - 1, is range-checked
-    // to 2·DEPTH bits. Bounding start_index + k for every slot instead would make
-    // the top MAX_L - 1 leaves unreachable, leaving an honest one-leaf batch at
-    // the last free index unsatisfiable.
+    // to 2·DEPTH bits. Bounding start_index + k for every slot would make the top
+    // MAX_L - 1 leaves unreachable and an honest one-leaf batch at the last free
+    // index unsatisfiable.
 
     it("accepts a single leaf at the last index in the tree", async () => {
         const w = buildHonest(P, CAPACITY - 1, [simpleLeaf({ J, P, val: 1n, isDeposit: 1 })]);
@@ -694,10 +681,9 @@ describe("tree_update_batch", function () {
     });
 
     it("FAILS when a batch runs past the end of the tree", async () => {
-        // One free slot left, two leaves offered: the last index is exactly
-        // CAPACITY = 2^(2·DEPTH), one past what Num2Bits(2·DEPTH) can hold. The
-        // reference tree does not bound-check, so it builds the witness and the
-        // circuit is what must refuse it.
+        // One free slot, two leaves: the last index is CAPACITY = 2^(2·DEPTH),
+        // one past what Num2Bits(2·DEPTH) holds. The reference tree does not
+        // bound-check, so the witness builds and the circuit must reject it.
         const leaves = [
             simpleLeaf({ J, P, val: 1n, isDeposit: 1, pk: 0xe01n }),
             simpleLeaf({ J, P, val: 2n, isDeposit: 1, pk: 0xe02n }),

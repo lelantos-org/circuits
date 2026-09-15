@@ -170,7 +170,7 @@ export async function buildBatchVectors() {
 
         const compression: Compression = {
             // Every preimage word, evaluated into y. `ref/compress.ts ::
-            // batchCoeffs` argues why none of them is demoted.
+            // batchCoeffs` documents why each word is a coefficient.
             coeffs: batchCoeffs(publicSlots).map(s),
             challenge: challenge.map(s),
             abiEncodedChallenge: hex(abiEncodeCoeffs(challenge)),
@@ -221,18 +221,17 @@ export async function buildBatchVectors() {
             challengeWords: 4 + 6 * MAX_L,
             layout,
             layoutDigest: layoutDigest(layout),
-            // Empty, and that is the claim: every word of the batch preimage is
-            // evaluated into `y`, because every one is pinned by a constraint of
-            // its own. Publishing the field rather than omitting it keeps the
-            // check in `test/reference.test.ts` honest — a future demotion has
-            // to name the field here, and that check then demands a
-            // divergent-witness test for it.
+            // Empty: every word of the batch preimage is pinned by its own
+            // constraint and is evaluated into `y`. The field is published rather
+            // than omitted so `test/reference.test.ts` covers it; any entry added
+            // here must be named, and that test then requires a divergent-witness
+            // test for it.
             //
-            // The deposit-binding fields were demoted once and it was unsound:
-            // they are signals of this circuit, and hashing a signal into `z`
-            // binds nothing, since the prover reads `z` before choosing the
-            // witness. Step 6a of `tree_update_batch.circom` is what pins them
-            // where the deposit binding degenerates.
+            // The deposit-binding fields must not be challenge-only: they are
+            // signals of this circuit, and hashing a signal into `z` binds
+            // nothing because the prover learns `z` before choosing the witness.
+            // Step 6a of `tree_update_batch.circom` pins them where the deposit
+            // binding degenerates.
             challengeOnly: [] as string[],
         },
         constants: sharedConstants(P, J),

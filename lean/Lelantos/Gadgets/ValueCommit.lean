@@ -11,28 +11,25 @@ of its equation and avoid a field wrap in `Σrcv_in − Σrcv_out`.
 `valueCommit_opens` is the result the note modules consume: `cv` opens to the note's own
 range-checked `value` under its own asset generator.
 
-Two modelling points:
+Modelling points:
 
 * `ValueCommit` takes pre-decomposed bits and imposes no range check of its own
-  (`src/lib/value_commit.circom:127-132`). `value < 2^64` holds only because the caller
-  applies `RangeCheck64`, and `SpentNote` / `OutputNote` feed the *same* bit array to both
-  `cv` and `cv_dep`, which is what forces the two commitments to open to the same value.
+  (`src/lib/value_commit.circom:127-132`). `value < 2^64` holds because the caller
+  applies `RangeCheck64`, and `SpentNote` / `OutputNote` feed the same bit array to both
+  `cv` and `cv_dep`, which forces the two commitments to open to the same value.
 
 * The circuit builds each note's `(cv, cv_dep)` with a single `ValueCommitPair`
   (`src/lib/value_commit.circom:76-117`) rather than two `ValueCommit` instances: the
-  shared `value · gen` term is computed once and each blinder added separately. This
-  model keeps two independent `ValueCommitSat` instances per slot, which is the same
-  constraint set — `ValueCommitPair` removes a *duplicated* `EscalarMulAny(64)`, not a
-  constraint. Sharing the term structurally is strictly stronger than the model's
-  assumption that the two instances receive equal `bits` and `gen`, so the model stays
-  on the safe (weaker) side.
+  shared `value · gen` term is computed once and each blinder is added separately. The
+  model uses two independent `ValueCommitSat` instances per slot, which is the same
+  constraint set; `ValueCommitPair` removes a duplicated `EscalarMulAny(64)`, not a
+  constraint. The structural sharing implies the model's assumption that both instances
+  receive equal `bits` and `gen`, so the model is the weaker statement.
 
-* `MulH` decomposes its scalar with `Num2Bits(252)`. Since `2^252 < p` that decomposition
-  is alias-free — `blindScalar_eq_val` is where that bound is discharged, and it is what
-  lets `valueCommit_opens` name the `rcv` signal rather than its bit array. The subgroup
-  order is `ell ≈ 2^251`, so `rcv` is still not uniquely recoverable from `rcv · H`; that
-  is extraction of the blinding factor from the *point*, a different claim, and no theorem
-  here makes it.
+* `MulH` decomposes its scalar with `Num2Bits(252)`, which is alias-free since `2^252 < p`.
+  `blindScalar_eq_val` discharges that bound, letting `valueCommit_opens` name the `rcv`
+  signal rather than its bit array. The subgroup order is `ell ≈ 2^251`, so `rcv` is not
+  uniquely recoverable from the point `rcv · H`; no theorem here claims that.
 -/
 
 namespace Lelantos
@@ -50,8 +47,8 @@ structure MulHSat (scalar : F) (sbits : ℕ → F) (out : Pt) : Prop where
   out_def : out = escalarMul (bitsNat sbits 252) (coords H)
 
 /-- `ValueCommit` — `src/lib/value_commit.circom:127-154`. Note slots instantiate the
-two-blinder `ValueCommitPair` (`:78-123`) instead; see the module note for why modelling
-that as two independent `ValueCommitSat` is the same constraint set. -/
+two-blinder `ValueCommitPair` (`:78-123`) instead; the module note explains why two
+independent `ValueCommitSat` instances are the same constraint set. -/
 structure ValueCommitSat (bits : ℕ → F) (gen : Pt) (rcv : F) (sbits : ℕ → F)
     (vT rH cv : Pt) : Prop where
   /-- `:134-139` — `vT = value · gen`. -/
@@ -81,32 +78,29 @@ theorem valueCommit_group {bits sbits : ℕ → F} {rcv : F} {g : G} {vT rH cv :
     rfl
 
 /-- **The bit array is the note's value.** `valScalar` reads the bits `ValueScalarMul`
-consumes; this is what connects them to the `value` *signal* the note commitment binds.
-
-Without it `valueCommit_group` talks about an opaque bit array and nothing ties `cv` to the
-note at all — the gadget could be committing to any 64-bit number. `2^64 < p` makes the
-`Num2Bits(64)` decomposition alias-free, which is exactly what makes the reading unique. -/
+consumes; this connects them to the `value` signal the note commitment binds, so that
+`cv` is tied to the note rather than to an arbitrary 64-bit number. `2^64 < p` makes the
+`Num2Bits(64)` decomposition alias-free, so the reading is unique. -/
 theorem valScalar_eq_val {v : F} {bits : ℕ → F} (h : Num2BitsSat 64 v bits) :
     valScalar bits = (v.val : ZMod ell) := by
   unfold valScalar
   rw [(num2Bits_sound (le_of_lt two_pow_64_lt_p) h).1]
 
 /-- **The bit array is the note's blinder.** The counterpart of `valScalar_eq_val` for
-`rcv`, and it earns its keep the same way: without it the blinding term of `cv` is stated
-over an opaque 252-bit array, and nothing connects it to the `rcv` *signal* that `MulHSat`
-decomposes — so `cv` would be pinned in its value component and free in its blinding one.
+`rcv`: it connects the blinding term of `cv` to the `rcv` signal that `MulHSat` decomposes,
+rather than to an opaque 252-bit array.
 
-`2^252 < p` is what makes the reading unique: it is exactly the hypothesis `num2Bits_sound`
-needs for `Num2Bits(252)` to be alias-free, and `RCV_BITS` in
-`src/lib/value_commit.circom` is chosen to keep it true. -/
+`2^252 < p` makes the reading unique: it is the hypothesis `num2Bits_sound` needs for
+`Num2Bits(252)` to be alias-free, and `RCV_BITS` in
+`src/lib/value_commit.circom` is chosen to satisfy it. -/
 theorem blindScalar_eq_val {r : F} {sbits : ℕ → F} (h : Num2BitsSat 252 r sbits) :
     blindScalar sbits = (r.val : ZMod ell) := by
   unfold blindScalar
   rw [(num2Bits_sound (le_of_lt two_pow_252_lt_p) h).1]
 
-/-- **`cv` opens to the note's own `(asset_id, value)`.** The full statement the gadget is
-there to provide: the commitment is `value · V^asset + rcv · H`, with `value` the range-
-checked signal and `V^asset` the generator for the note's asset id. -/
+/-- **`cv` opens to the note's own `(asset_id, value)`.** The commitment is
+`value · V^asset + rcv · H`, with `value` the range-checked signal and `V^asset` the
+generator for the note's asset id. -/
 theorem valueCommit_opens {v rcv a : F} {bits sbits : ℕ → F} {vT rH cv : Pt}
     (hbits : Num2BitsSat 64 v bits)
     (h : ValueCommitSat bits (coords (assetGen a)) rcv sbits vT rH cv) :

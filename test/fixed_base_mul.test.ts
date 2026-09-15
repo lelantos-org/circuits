@@ -90,11 +90,10 @@ describe("FixedBaseMul (fixed-base scalar mul on Baby-Jubjub)", function () {
         }
     });
 
-    // These two look subsumed by `fuzz/fixed_base_mul.fuzz.test.ts`, which asserts
-    // the same properties over random scalars — and they are, at the property
-    // level. They stay because the PR gate is `just test-unit`, which IGNORES
-    // `test/fuzz/**` (the fuzz suite has its own workflow). Deleting them would
-    // move homomorphism and subgroup membership off every pull request.
+    // `fuzz/fixed_base_mul.fuzz.test.ts` asserts the same two properties over
+    // random scalars, but the PR gate `just test-unit` excludes `test/fuzz/**`.
+    // These cases keep homomorphism and subgroup membership checked on every
+    // pull request.
     it("is additively homomorphic in the scalar", async () => {
         const a = 0x1234567890abcdefn;
         const b = 0xfedcba0987654321n;
@@ -111,8 +110,8 @@ describe("FixedBaseMul (fixed-base scalar mul on Baby-Jubjub)", function () {
         }
     });
 
-    // Num2Bits(252) is what bounds the blinder. Above it the decomposition has
-    // no representation and witness generation must fail rather than wrap.
+    // Num2Bits(252) bounds the blinder. Above 2^252 the decomposition has no
+    // representation, so witness generation must fail rather than wrap.
     it("FAILS when the scalar exceeds 2^252", async () => {
         await expectWitnessFails(
             ctx.circuit,

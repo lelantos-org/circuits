@@ -113,9 +113,9 @@ describe("quaternary merkle tree", function () {
         for (let i = 0; i < 5; i++) tree.insert(BigInt(0x900 + i));
         const expected = tree.root();
 
-        // Index 1 has selfPos=1 at level 0. Sibling slots at level 0 are {0,2,3}
-        // → siblings array order is [slot0, slot2, slot3]. Swapping siblings[0]
-        // and siblings[2] reorders slot0 ↔ slot3, must produce a different root.
+        // Index 1 has selfPos=1 at level 0, so the level-0 siblings are
+        // [slot0, slot2, slot3]. Swapping siblings[0] and siblings[2] exchanges
+        // slot0 and slot3 and must produce a different root.
         const { pathElements, pathIndices } = tree.proof(1);
         const swapped: Field[][] = pathElements.map((lvl: Field[]) => lvl.slice());
         [swapped[0][0], swapped[0][2]] = [swapped[0][2], swapped[0][0]];
@@ -136,11 +136,9 @@ describe("quaternary merkle tree", function () {
     });
 });
 
-// EMPTY_SUBTREE(d) in lib/common.circom is a hardcoded table rather than an
-// in-circuit Poseidon chain, since circom does not constant-fold Poseidon.
-// These tests read the constants out of the circom source and recompute the
-// chain, so a typo in the table fails CI rather than shifting every empty
-// subtree.
+// EMPTY_SUBTREE(d) in lib/common.circom is a hardcoded table because circom does
+// not constant-fold Poseidon. These tests parse the constants from the circom
+// source and recompute the chain, so a wrong table entry fails CI.
 describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
     this.timeout(TIMEOUT_FAST);
 
@@ -183,10 +181,9 @@ describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
     });
 
     it("EMPTY_SUBTREE(TABLE_DEPTH) equals CommitmentTree.EMPTY_ROOT", () => {
-        // Cross-repo pin: the circuit's empty-subtree chain and the contract's
-        // genesis root are the same value reached two ways, so a depth change
-        // touching only one side fails here rather than at a root mismatch on
-        // the first insert.
+        // Cross-repo pin: a depth change applied to only one of the circuit
+        // table or the contract's genesis root fails here rather than as a root
+        // mismatch on the first insert.
         expect(table[TABLE_DEPTH]).to.equal(CONTRACT_EMPTY_ROOT);
     });
 });

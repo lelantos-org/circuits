@@ -6,8 +6,8 @@ import { expectWitnessFails } from "./lib/expect";
 import { TIMEOUT_CIRCUIT } from "./lib/constants";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
-// Must match `PolyEval(N)` in the fixture. The gadget is arity-generic, so this
-// is a size the wrapper picked rather than one a production circuit uses.
+// Must match `PolyEval(N)` in the fixture. The gadget is arity-generic; this size
+// is specific to the test wrapper.
 const N = 26;
 
 describe("PolyEval (Horner-form binding gadget)", function () {

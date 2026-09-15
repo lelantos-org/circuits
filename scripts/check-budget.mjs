@@ -1,15 +1,15 @@
 // Constraint budget gate.
 //
-// Compiling asserts nothing about circuit size, and `groth16 setup`, where an
-// overflow would otherwise surface, does not run in CI.
+// Compilation does not check circuit size, and `groth16 setup`, which would
+// reject an oversized circuit, does not run in CI.
 //
 // Two assertions per circuit:
 //   domain  hard ceiling; crossing it requires a larger ptau and roughly
 //           doubles proving time
-//   exact   the count must match budget.json, so a change lands as a reviewable
-//           diff
+//   exact   the count must match budget.json, so any change appears as a
+//           reviewable diff
 //
-// The domain assertion is on the FFT size snarkjs derives, NOT on nConstraints:
+// The domain assertion applies to the FFT size snarkjs derives, not to nConstraints:
 //
 //   cirPower = log2(nConstraints + nPubInputs + nOutputs + 1 - 1) + 1
 //
@@ -71,9 +71,8 @@ async function measure(name, sourceMtime) {
         return { error: `${rel} is older than src/**.circom — stale; run \`${COMPILE_HINT}\`` };
     }
     const info = await snarkjs.r1cs.info(file);
-    // `sized` is the signal count snarkjs sizes the FFT domain from, not the
-    // constraint count; see the header. It is carried alongside so `ceiling`
-    // can report the bound in the units budget.json is written in.
+    // `sized` is the count snarkjs sizes the FFT domain from (see the header);
+    // `ceiling` uses it to express the bound in budget.json's units.
     return {
         constraints: info.nConstraints,
         sized: info.nConstraints + info.nPubInputs + info.nOutputs,
