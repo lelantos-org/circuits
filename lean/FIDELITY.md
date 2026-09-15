@@ -283,26 +283,26 @@ not a signal, so it is an argument of `BatchChainSat` rather than a field of `Ba
 
 | circom | Lean |
 |---|---|
-| `:125-132` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
-| `:138-148` `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, `leaves`, `frontier_in` | `BatchChainSat.append` |
-| `:149` `old_root === append.old_root` | `BatchChainSat.old_root_def` |
-| `:150` `new_root === append.new_root` | `BatchChainSat.new_root_def` |
-| `:155` `(1-append.active)*cms === 0` | `BatchChainSat.pad_cm` |
-| `:156-157` `(1-append.active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
-| `:158-161` `(1-append.active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
-| `:168` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
-| `:169-170` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
-| `:177-182` `BabyCheck(cv_dep.x, cv_dep.y + (1-append.active))` | **absent** — no curve equation in the model |
-| `:195` `active_dep <== append.active * is_deposit` | `BatchDepositSat.active_dep_def` |
-| `:197-198` `IsZero(leaf_asset)` | `BatchDepositSat.asset_isZero` |
-| `:222-223` `IsZero(leaf_public_in)` | `BatchDepositSat.public_in_isZero` |
-| `:256` step 6a `active_dep * (leaf_asset_nz.out - pub_in_nz.out) === 0` | `BatchDepositSat.asset_matches_value` |
-| `:200-201` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
-| `:204-207` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
-| `:210-211` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
-| `:213-217` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
-| `:219-220` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
-| `:258-271` `BatchCompress(MAX_L)` | `batchPiSlot` / `batchSlotValue`, dumped to `expected/layout-batch-8.txt` by `dump-layout.sh`. The Horner chain itself is `polyEval_sound`, proved generically |
+| `:128-135` `leaf = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)` | `BatchChainSat.leaf_def` |
+| `:141-151` `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, `leaves`, `frontier_in` | `BatchChainSat.append` |
+| `:152` `old_root === append.old_root` | `BatchChainSat.old_root_def` |
+| `:153` `new_root === append.new_root` | `BatchChainSat.new_root_def` |
+| `:158` `(1-append.active)*cms === 0` | `BatchChainSat.pad_cm` |
+| `:159-160` `(1-append.active)*cv_dep[0..1] === 0` | `BatchChainSat.pad_cv_x` / `pad_cv_y` |
+| `:161-164` `(1-append.active)*{leaf_asset, leaf_public_in, is_deposit, rcv} === 0` | `BatchChainSat.pad_asset` … `pad_rcv` |
+| `:171` `is_deposit*(1-is_deposit) === 0` | `BatchChainSat.deposit_bit` |
+| `:172-173` `(1-is_deposit)*{leaf_asset, leaf_public_in} === 0` | `BatchChainSat.spend_zero_asset` / `spend_zero_public_in` |
+| `:180-185` `BabyCheck(cv_dep.x, cv_dep.y + (1-append.active))` | **absent** — no curve equation in the model |
+| `:198` `active_dep <== append.active * is_deposit` | `BatchDepositSat.active_dep_def` |
+| `:200-201` `IsZero(leaf_asset)` | `BatchDepositSat.asset_isZero` |
+| `:225-226` `IsZero(leaf_public_in)` | `BatchDepositSat.public_in_isZero` |
+| `:257` step 6a `active_dep * (leaf_asset_nz.out - pub_in_nz.out) === 0` | `BatchDepositSat.asset_matches_value` |
+| `:203-204` `HashToAssetGen(leaf_asset)` | `BatchDepositSat.gen_def` |
+| `:207-210` `ValueTimesGen(leaf_public_in, gen)` | `BatchDepositSat.public_in_range` + `expected_def` (`ValueCommitSat.value_term`) |
+| `:213-214` `MulH(rcv)` | `BatchDepositSat.expected_def` (`ValueCommitSat.blind_term`) |
+| `:216-220` `expected = BabyAdd(pub_in_mul, rH)` | `BatchDepositSat.expected_def` (`ValueCommitSat.sum_def`) |
+| `:222-223` `active_dep*(cv_dep - expected) === 0` | `BatchDepositSat.deposit_x` / `deposit_y` |
+| `:261-274` `BatchCompress(MAX_L)` | `batchPiSlot` / `batchSlotValue`, dumped to `expected/layout-batch-8.txt` by `dump-layout.sh`. The Horner chain itself is `polyEval_sound`, proved generically |
 
 One row is deliberately empty: `BabyCheck` is a genuine gap, listed in the README. The old
 root used to be a second — `FrontierRoot` was not modelled — and is now `batch_old_root`.

@@ -56,7 +56,7 @@ namespace Lelantos
 /-- Every signal of one `TreeUpdateBatch(depth, maxL)` instance. Array signals are total
 functions, read only below their declared length, per the convention in `Model.Bits`. -/
 structure BatchSignals (depth maxL : ℕ) where
-  -- Logical public inputs (`:107-115`).
+  -- Logical public inputs (`:110-118`).
   oldRoot : F
   newRoot : F
   startIndex : F
@@ -66,14 +66,14 @@ structure BatchSignals (depth maxL : ℕ) where
   leafAsset : ℕ → F
   leafPublicIn : ℕ → F
   isDeposit : ℕ → F
-  -- Private inputs (`:118-119`).
+  -- Private inputs (`:121-122`).
   frontierIn : ℕ → ℕ → F
   rcv : ℕ → F
-  -- Leaf hashes (`:122-133`).
+  -- Leaf hashes (`:124-136`).
   leaves : ℕ → F
-  -- The tree (`:138-148`).
+  -- The tree (`:141-151`).
   append : BatchAppendSignals
-  -- Deposit binding (`:184-256`).
+  -- Deposit binding (`:187-258`).
   activeDep : ℕ → F
   gen : ℕ → Pt
   pubInBits : ℕ → ℕ → F
@@ -90,55 +90,55 @@ structure BatchSignals (depth maxL : ℕ) where
 `EMPTY_SUBTREE = zeros`. Line numbers refer to `src/tree_update_batch.circom`. -/
 structure BatchChainSat {depth maxL : ℕ} (countBits : ℕ) (zeros : ℕ → F)
     (w : BatchSignals depth maxL) : Prop where
-  /-- `:125-132` — `leaf_k = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)`. -/
+  /-- `:128-135` — `leaf_k = Poseidon(TAG_LEAF, cm, cv_dep.x, cv_dep.y)`. -/
   leaf_def : ∀ k, k < maxL → w.leaves k = leafHash (w.cms k) (w.cvDep k).x (w.cvDep k).y
-  /-- `:138-148` — one `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, the
+  /-- `:141-151` — one `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, the
   leaf hashes and `frontier_in`. -/
   append : BatchAppendSat depth maxL countBits zeros w.startIndex w.actualCount w.leaves
     w.frontierIn w.append
-  /-- `:149` — `old_root === append.old_root`. -/
+  /-- `:152` — `old_root === append.old_root`. -/
   old_root_def : w.oldRoot = w.append.oldRoot
-  /-- `:150` — `new_root === append.new_root`. -/
+  /-- `:153` — `new_root === append.new_root`. -/
   new_root_def : w.newRoot = w.append.newRoot
-  /-- `:155` — inactive `cms` are zero. -/
+  /-- `:158` — inactive `cms` are zero. -/
   pad_cm : ∀ k, k < maxL → (1 - w.append.active k) * w.cms k = 0
-  /-- `:156-157` — inactive `cv_dep` coordinates are zero. -/
+  /-- `:159-160` — inactive `cv_dep` coordinates are zero. -/
   pad_cv_x : ∀ k, k < maxL → (1 - w.append.active k) * (w.cvDep k).x = 0
   pad_cv_y : ∀ k, k < maxL → (1 - w.append.active k) * (w.cvDep k).y = 0
-  /-- `:158-160` — inactive deposit fields are zero. -/
+  /-- `:161-163` — inactive deposit fields are zero. -/
   pad_asset : ∀ k, k < maxL → (1 - w.append.active k) * w.leafAsset k = 0
   pad_public_in : ∀ k, k < maxL → (1 - w.append.active k) * w.leafPublicIn k = 0
   pad_is_deposit : ∀ k, k < maxL → (1 - w.append.active k) * w.isDeposit k = 0
-  /-- `:161` — inactive blinders are zero. -/
+  /-- `:164` — inactive blinders are zero. -/
   pad_rcv : ∀ k, k < maxL → (1 - w.append.active k) * w.rcv k = 0
-  /-- `:168` — `is_deposit` is boolean. -/
+  /-- `:171` — `is_deposit` is boolean. -/
   deposit_bit : ∀ k, k < maxL → IsBit (w.isDeposit k)
-  /-- `:169-170` — spend leaves carry no deposit fields. -/
+  /-- `:172-173` — spend leaves carry no deposit fields. -/
   spend_zero_asset : ∀ k, k < maxL → (1 - w.isDeposit k) * w.leafAsset k = 0
   spend_zero_public_in : ∀ k, k < maxL → (1 - w.isDeposit k) * w.leafPublicIn k = 0
 
-/-- The deposit-binding half of the constraint system (`:184-256`). Separate from
+/-- The deposit-binding half of the constraint system (`:187-258`). Separate from
 `BatchChainSat` because it is the only part mentioning the curve, so the chain results
 below reach no curve axiom. `expected/axioms.txt` records the split. -/
 structure BatchDepositSat {depth maxL : ℕ} (w : BatchSignals depth maxL) : Prop where
-  /-- `:195` — `active_dep = active · is_deposit`. -/
+  /-- `:198` — `active_dep = active · is_deposit`. -/
   active_dep_def : ∀ k, k < maxL → w.activeDep k = w.append.active k * w.isDeposit k
-  /-- `:200-201` — `HashToAssetGen(leaf_asset)`. -/
+  /-- `:203-204` — `HashToAssetGen(leaf_asset)`. -/
   gen_def : ∀ k, k < maxL → w.gen k = coords (assetGen (w.leafAsset k))
-  /-- `:204-205` — `ValueTimesGen` range-checks `leaf_public_in` to 64 bits. -/
+  /-- `:207-208` — `ValueTimesGen` range-checks `leaf_public_in` to 64 bits. -/
   public_in_range : ∀ k, k < maxL → RangeCheck64Sat (w.leafPublicIn k) (w.pubInBits k)
-  /-- `:204-217` — `expected = leaf_public_in · V^asset + rcv · H`, which is a
+  /-- `:207-220` — `expected = leaf_public_in · V^asset + rcv · H`, which is a
   `ValueCommit` over the public-input bits. -/
   expected_def : ∀ k, k < maxL →
     ValueCommitSat (w.pubInBits k) (w.gen k) (w.rcv k) (w.rcvBits k) (w.vT k) (w.rH k)
       (w.expected k)
-  /-- `:197-198` — `IsZero(leaf_asset)`. -/
+  /-- `:200-201` — `IsZero(leaf_asset)`. -/
   asset_isZero : ∀ k, k < maxL →
     IsZeroSat (w.leafAsset k) (w.assetInv k) (w.assetIsZero k)
-  /-- `:222-223` — `IsZero(leaf_public_in)`. -/
+  /-- `:225-226` — `IsZero(leaf_public_in)`. -/
   public_in_isZero : ∀ k, k < maxL →
     IsZeroSat (w.leafPublicIn k) (w.pubInInv k) (w.pubInIsZero k)
-  /-- `:256` — step 6a. On an active deposit leaf, `leaf_asset = 0` exactly when
+  /-- `:257` — step 6a. On an active deposit leaf, `leaf_asset = 0` exactly when
   `leaf_public_in = 0`.
 
   One constraint covers both directions. A leaf carrying value must declare a non-zero
@@ -150,7 +150,7 @@ structure BatchDepositSat {depth maxL : ℕ} (w : BatchSignals depth maxL) : Pro
   by a range check. Fixing it to a constant pins it. -/
   asset_matches_value : ∀ k, k < maxL →
     w.activeDep k * (w.assetIsZero k - w.pubInIsZero k) = 0
-  /-- `:219-220` — the binding, gated on `active · is_deposit`. -/
+  /-- `:222-223` — the binding, gated on `active · is_deposit`. -/
   deposit_x : ∀ k, k < maxL → w.activeDep k * ((w.cvDep k).x - (w.expected k).x) = 0
   deposit_y : ∀ k, k < maxL → w.activeDep k * ((w.cvDep k).y - (w.expected k).y) = 0
 
@@ -401,7 +401,7 @@ def batchSlotValue {depth maxL : ℕ} (w : BatchSignals depth maxL) : BatchPISlo
 
 /-- The `PolyEval` coefficient vector of the batch circuit. The challenge and the
 result are wired at `src/lib/poly_eval.circom:192-193`, and `y` reaches the circuit's
-own output at `src/tree_update_batch.circom:272`. -/
+own output at `src/tree_update_batch.circom:275`. -/
 def batchCoeffs {depth maxL : ℕ} (w : BatchSignals depth maxL) (i : ℕ) : F :=
   batchSlotValue w (batchPiSlot maxL i)
 
