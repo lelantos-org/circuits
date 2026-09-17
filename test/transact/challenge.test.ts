@@ -47,13 +47,11 @@ import { useTransactCircuit } from "./setup";
  * has two different values to swap.
  */
 function buildBase(tx: TxBuilder): TransactWitnessBundle {
-    const { root, inputs } = tx.twoRealInputs([100n, 50n], ALICE_NSK);
-    const input = tx.build({
-        inputs,
-        outputs: [tx.note(75n, ALICE_NSK, 9n), tx.note(75n, ALICE_NSK, 11n)],
-        merkleRoot: root,
-        z: 0n,
-    });
+    const input = tx.spend(
+        tx.twoRealInputs([100n, 50n], ALICE_NSK),
+        [tx.note(75n, ALICE_NSK, 9n), tx.note(75n, ALICE_NSK, 11n)],
+        { z: 0n },
+    );
     input.recipient_address = "12345";
     input.chain_id = "67890";
     return input;

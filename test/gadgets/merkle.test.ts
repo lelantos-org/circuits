@@ -1,17 +1,12 @@
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
-
 import { expect } from "chai";
 
-import { Poseidon, MerkleTree, TAG_MERKLE, Field } from "./helpers";
-import { fixturePath } from "./lib/circuit";
-import { merkleInputJson } from "./lib/inputs";
-import { expectWitnessFails, witnessMatchesRoot } from "./lib/expect";
-import { ARITY, TIMEOUT_CIRCUIT, TIMEOUT_FAST } from "./lib/constants";
-import { useCircuit } from "./lib/harness";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { MerkleTree, TAG_MERKLE, type Field } from "../helpers";
+import { fixturePath } from "../lib/circuit";
+import { readText } from "../lib/files";
+import { merkleInputJson } from "../lib/inputs";
+import { expectWitnessFails, witnessMatchesRoot } from "../lib/expect";
+import { ARITY, TIMEOUT_CIRCUIT, TIMEOUT_FAST } from "../lib/constants";
+import { useCircuit, useGadgets } from "../lib/harness";
 
 const DEPTH = 2; // 16 leaves
 const WRAPPER = fixturePath("test_merkle_d2.circom");
@@ -148,16 +143,11 @@ describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
         0x1cf92e62b512433b35f0064d537576b0184cad5fa7ab64201cd8084ee2dc171fn;
     const TABLE_DEPTH = 11;
 
+    const ctx = useGadgets();
     let table: Field[];
-    let P2: Poseidon;
 
-    before(async () => {
-        P2 = await Poseidon.build();
-
-        const src = fs.readFileSync(
-            path.join(__dirname, "..", "src", "lib", "common.circom"),
-            "utf8",
-        );
+    before(() => {
+        const src = readText("src/lib/common.circom");
         const body = src.slice(src.indexOf("function EMPTY_SUBTREE"));
         table = [];
         for (const m of body.matchAll(/^\s*z\[(\d+)\]\s*=\s*(\d+);/gm)) {
@@ -176,7 +166,7 @@ describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
         let z: Field = 0n;
         for (let d = 0; d <= TABLE_DEPTH; d++) {
             expect(table[d], `EMPTY_SUBTREE(${d})`).to.equal(z);
-            z = P2.hash([TAG_MERKLE, z, z, z, z]);
+            z = ctx.P.hash([TAG_MERKLE, z, z, z, z]);
         }
     });
 

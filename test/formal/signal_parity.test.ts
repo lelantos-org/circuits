@@ -1,8 +1,8 @@
 import { expect } from "chai";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 
+import { TIMEOUT_CIRCUIT } from "../lib/constants";
+import { readJson, repoPath } from "../lib/files";
 import { loadSymbols, type SymbolTable } from "../lib/r1cs";
 
 // Model-to-circuit signal parity.
@@ -35,9 +35,6 @@ import { loadSymbols, type SymbolTable } from "../lib/r1cs";
 // `TxWellFormed.someRealInput` depends on. Asserting that it stays absent
 // detects removal of that constraint.
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "../..");
-const MAP_FILE = resolve(ROOT, "lean/expected/signal-map.json");
 
 interface CircuitMap {
     sym: string;
@@ -47,7 +44,7 @@ interface CircuitMap {
     aliases?: Record<string, string>;
 }
 
-const raw = JSON.parse(readFileSync(MAP_FILE, "utf8")) as Record<string, unknown>;
+const raw = readJson<Record<string, unknown>>("lean/expected/signal-map.json");
 const circuits = Object.entries(raw).filter(([key]) => !key.startsWith("_")) as [
     string,
     CircuitMap,
@@ -99,10 +96,10 @@ function expand(template: string, shape: Record<string, number>): Expansion {
 }
 
 for (const [circuit, map] of circuits) {
-    const symPath = resolve(ROOT, map.sym);
+    const symPath = repoPath(map.sym);
 
     describe(`formal model / signal parity (${circuit})`, function () {
-        this.timeout(120_000);
+        this.timeout(TIMEOUT_CIRCUIT);
 
         let symbols: SymbolTable;
 

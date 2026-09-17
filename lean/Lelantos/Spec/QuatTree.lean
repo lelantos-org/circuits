@@ -31,7 +31,7 @@ theorem mul_four_pow_succ (x d : ℕ) : x * 4 ^ (d + 1) = 4 ^ d * (4 * x) := by 
 /-! ## The empty-subtree chain
 
 `EMPTY_SUBTREE(d)` (`src/lib/common.circom:29-58`) is a table of constants, pinned by
-`test/merkle.test.ts` to the chain `zeros[0] = 0`, `zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] ×
+`test/gadgets/merkle.test.ts` to the chain `zeros[0] = 0`, `zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] ×
 4)`. Lean treats Poseidon as opaque and cannot evaluate the constants, so the model keeps
 `zeros` a free parameter and states the chain as a hypothesis wherever a result needs it.
 `ZerosCoherent.eq_emptyChain` shows the hypothesis pins the table completely.

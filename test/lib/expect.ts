@@ -160,6 +160,23 @@ export async function expectAccepts(
     return witness;
 }
 
+/**
+ * Assert that `fn` throws or rejects, for any reason.
+ *
+ * Weaker than `expectWitnessFails`, which requires a constraint to fire. Use it
+ * only where either layer is an acceptable rejector: an out-of-range value that
+ * the reference builder or the witness calculator may refuse first, or a
+ * tester method that reports a mismatch by throwing.
+ */
+export async function expectThrows(fn: () => unknown, message: string): Promise<void> {
+    try {
+        await fn();
+    } catch {
+        return;
+    }
+    throw new Error(message);
+}
+
 // Boolean variant, for the merkle-permutation property tests.
 export async function witnessMatchesRoot(
     circuit: CircuitTester,

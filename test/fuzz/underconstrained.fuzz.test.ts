@@ -32,81 +32,42 @@
 import * as fc from "fast-check";
 import { expect } from "chai";
 
-import { srcPath, type CircuitInput } from "../lib/circuit";
-import {
-    assertNoSecondWitness,
-    loadSearchContext,
-    registerStructuralTests,
-    type SearchContext,
-} from "../lib/underconstrained_suite";
+import { type CircuitInput } from "../lib/circuit";
+import { logBitGroupCensus, useSearchSuite } from "../lib/underconstrained_suite";
 import { formatReport, sweepSingleSignal } from "../lib/underconstrained";
 import { explain, partitionExplained } from "../lib/explain";
-import { widthHistogram } from "../lib/bit_groups";
 import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { circuitSignals, type TransactWitnessBundle } from "../ref/witness";
 import { ALICE_NSK, BOB_NSK, DEPTH, TIMEOUT_HEAVY, TWO_252 } from "../lib/constants";
-import type { Field, Note, SpentNote } from "../helpers";
-import { ASSET_B } from "../transact/setup";
+import { ASSET_B, CIRCUIT } from "../transact/setup";
 import { arbBalancedSplit, arbNsk, MAX_VALUE, fcParamsFor } from "./arbitraries";
 
-const CIRCUIT = srcPath("4x6.circom");
 const fcParams = fcParamsFor("UNDERCONSTRAINED");
 
 describe("underconstrained_4x6 [fuzz]", function () {
     this.timeout(TIMEOUT_HEAVY);
 
-    let ctx: SearchContext;
-    let tx: TxBuilder;
-
-    before(async () => {
-        const [context, builder] = await Promise.all([
-            loadSearchContext(CIRCUIT),
-            buildTxBuilder(DEPTH),
-        ]);
-        ctx = context;
-        tx = builder;
-    });
-
-    /**
-     * Insert notes into a fresh tree, freeze the root, then take the proofs.
-     *
-     * Order matters: `finalize` reads an authentication path, and a path taken
-     * before the last insert authenticates against a stale root.
-     * `TxBuilder.nRealInputs` does this for notes it builds itself; the
-     * scenarios below pass pre-shaped notes (a second asset, a blinder at its
-     * ceiling).
-     */
-    function spend(notes: Note[], nsk: Field): { root: Field; inputs: SpentNote[] } {
-        const tree = tx.newTree();
-        const inserted = notes.map(n => tx.insert(tree, n, nsk));
-        const root = tree.root();
-        return { root, inputs: inserted.map(i => tx.finalize(tree, i)) };
-    }
-
-    /** Honest witness vector for a bundle, with the challenge-only fields dropped. */
-    async function witnessFor(bundle: TransactWitnessBundle): Promise<bigint[]> {
-        return ctx.tester.calculateWitness(
-            circuitSignals(bundle) as unknown as CircuitInput,
-            true,
-        );
-    }
-
-    /** Both searches over one honest bundle, in this suite's witness shape. */
-    async function assertNoSecond(label: string, bundle: TransactWitnessBundle) {
-        return assertNoSecondWitness(ctx, label, await witnessFor(bundle));
-    }
-
     // ===== structural: bit decompositions =====
     //
     // Witness-independent, so a single run covers every instance in the circuit.
-    // Runs against the `--O0` build (see `before`).
+    // Runs against the `--O0` build (see `loadSearchContext`).
+    //
+    // The challenge-only fields are dropped before the witness calculator sees
+    // a bundle; see `projectingTester`.
+    const suite = useSearchSuite<TransactWitnessBundle>(
+        CIRCUIT,
+        bundle => circuitSignals(bundle) as unknown as CircuitInput,
+        1000,
+    );
+    const assertNoSecond = suite.assertNoSecond;
 
-    registerStructuralTests(() => ctx, 1000);
+    let tx: TxBuilder;
+    before(async () => {
+        tx = await buildTxBuilder(DEPTH);
+    });
 
     it("the detector sees the decompositions the circuit is known to contain", () => {
-        const hist = widthHistogram(ctx.bitGroups);
-        const lines = [...hist].map(([w, n]) => `    ${String(n).padStart(5)}x  width ${w}`);
-        console.log(`    bit-decomposition groups: ${ctx.bitGroups.length}\n${lines.join("\n")}`);
+        const hist = logBitGroupCensus(suite.ctx);
 
         expect(hist.get(252), "expected 20 Num2Bits(252): one per blinder, " +
             "rcv and rcv_dep over N_IN + N_OUT slots").to.equal(20);
@@ -120,16 +81,17 @@ describe("underconstrained_4x6 [fuzz]", function () {
     // below pass vacuously. This takes findings the explainer accepts, falsifies
     // only the precondition each rests on, and requires the explainer to refuse.
     it("an explanation is refused once its precondition stops holding", async () => {
-        const w = await witnessFor(tx.fullShape());
-        const findings = sweepSingleSignal(ctx.view, w, ctx.symbols);
-        const { explained } = partitionExplained(findings, w, ctx.symbols);
+        const { view, symbols } = suite.ctx;
+        const w = await suite.witnessFor(tx.fullShape());
+        const findings = sweepSingleSignal(view, w, symbols);
+        const { explained } = partitionExplained(findings, w, symbols);
         expect(explained.length, "nothing was explained, so this proves nothing")
             .to.be.greaterThan(0);
 
         for (const f of explained.slice(0, 8)) {
             const base = f.support[0].name.slice(0, -".inv".length);
-            const inIndex = ctx.symbols.indexOf(`${base}.in`);
-            const outIndex = ctx.symbols.indexOf(`${base}.out`);
+            const inIndex = symbols.indexOf(`${base}.in`);
+            const outIndex = symbols.indexOf(`${base}.out`);
 
             // A non-zero IsZero input (equivalently out = 0) means the hint is
             // not free by design, so the explanation must not apply.
@@ -138,7 +100,7 @@ describe("underconstrained_4x6 [fuzz]", function () {
             else if (outIndex !== undefined) doctored[outIndex] = 0n;
             else throw new Error(`${base}: neither sibling survived; explain should not have accepted`);
 
-            expect(explain(f, doctored, ctx.symbols), `${base}: the explanation survived ` +
+            expect(explain(f, doctored, symbols), `${base}: the explanation survived ` +
                 "its own precondition being false, so it is not checking it").to.equal(null);
         }
     });
@@ -164,55 +126,40 @@ describe("underconstrained_4x6 [fuzz]", function () {
     // (src/lib/transact.circom), so an all-dummy bundle has no honest witness.
     // One real input alongside `public_in` is the shape of a shielding spend.
     it("the deposit shape has no second witness", async () => {
-        const { root, inputs } = tx.oneRealOneDummy(1000n, ALICE_NSK);
-        await assertNoSecond("deposit", tx.build({
-            publicIn: 500n,
-            inputs,
-            outputs: [tx.note(1500n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-        }));
+        await assertNoSecond("deposit", tx.spend(
+            tx.oneRealOneDummy(1000n, ALICE_NSK),
+            [tx.note(1500n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
+            { publicIn: 500n },
+        ));
     });
 
     it("the withdraw shape has no second witness", async () => {
-        const { root, inputs } = tx.oneRealOneDummy(1000n, ALICE_NSK);
-        await assertNoSecond("withdraw", tx.build({
-            publicOut: 400n,
-            inputs,
-            outputs: [tx.note(600n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-        }));
+        await assertNoSecond("withdraw", tx.spend(
+            tx.oneRealOneDummy(1000n, ALICE_NSK),
+            [tx.note(600n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
+            { publicOut: 400n },
+        ));
     });
 
     // Both public buckets non-zero: `pub_eq` compares the public asset against
     // every slot's, so this witness leaves the fewest of those comparisons
     // trivially zero.
     it("a shape with both public buckets non-zero has no second witness", async () => {
-        const { root, inputs } = tx.oneRealOneDummy(1000n, ALICE_NSK);
-        await assertNoSecond("publicInAndOut", tx.build({
-            publicIn: 700n,
-            publicOut: 300n,
-            inputs,
-            outputs: [tx.note(1400n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-        }));
+        await assertNoSecond("publicInAndOut", tx.spend(
+            tx.oneRealOneDummy(1000n, ALICE_NSK),
+            [tx.note(1400n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
+            { publicIn: 700n, publicOut: 300n },
+        ));
     });
 
     // Two assets. `PerAssetValueBalance` runs its comparisons per (slot, asset)
     // pair, so a second asset changes which of them hold and which `IsZero`
     // hints are free, exercising a different subset of the circuit.
     it("a two-asset shape has no second witness", async () => {
-        const { root, inputs } = spend(
-            [tx.note(100n, ALICE_NSK, 1n, ASSET), tx.note(50n, ALICE_NSK, 2n, ASSET_B)],
-            ALICE_NSK,
-        );
-        await assertNoSecond("twoAssets", tx.build({
-            inputs,
-            outputs: [
-                tx.note(100n, BOB_NSK, 100n, ASSET),
-                tx.note(50n, ALICE_NSK, 200n, ASSET_B),
-            ],
-            merkleRoot: root,
-        }));
+        await assertNoSecond("twoAssets", tx.spend(
+            tx.plant([tx.note(100n, ALICE_NSK, 1n, ASSET), tx.note(50n, ALICE_NSK, 2n, ASSET_B)], ALICE_NSK),
+            [tx.note(100n, BOB_NSK, 100n, ASSET), tx.note(50n, ALICE_NSK, 200n, ASSET_B)],
+        ));
     });
 
     // Range ceilings, where a Num2Bits sits one bit from rejecting: values at
@@ -221,26 +168,18 @@ describe("underconstrained_4x6 [fuzz]", function () {
     it("a shape at the value and blinder ceilings has no second witness", async () => {
         const maxRcv = TWO_252 - 1n;
         const wide = { ...tx.note(MAX_VALUE, ALICE_NSK, 1n), rcv: maxRcv, rcvDep: maxRcv - 1n };
-        const { root, inputs } = spend([wide], ALICE_NSK);
-
         const outA = { ...tx.note(MAX_VALUE, ALICE_NSK, 9n), rcv: maxRcv - 2n, rcvDep: maxRcv - 3n };
-        await assertNoSecond("ceilings", tx.build({
-            inputs,
-            outputs: [outA],
-            merkleRoot: root,
-        }));
+        await assertNoSecond("ceilings", tx.spend(tx.plant([wide], ALICE_NSK), [outA]));
     });
 
     // All values zero: a real input of value 0 spending to outputs of value 0.
     // Zero makes products vanish, and a vanishing product can leave a
     // constraint not restricting the signal it pins.
     it("an all-zero-value shape has no second witness", async () => {
-        const { root, inputs } = spend([tx.note(0n, ALICE_NSK, 1n)], ALICE_NSK);
-        await assertNoSecond("zeroValues", tx.build({
-            inputs,
-            outputs: [tx.note(0n, ALICE_NSK, 9n), tx.note(0n, BOB_NSK, 11n)],
-            merkleRoot: root,
-        }));
+        await assertNoSecond("zeroValues", tx.spend(
+            tx.plant([tx.note(0n, ALICE_NSK, 1n)], ALICE_NSK),
+            [tx.note(0n, ALICE_NSK, 9n), tx.note(0n, BOB_NSK, 11n)],
+        ));
     });
 
     it("random balanced spends have no second witness", async () => {
@@ -250,18 +189,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
                 arbNsk(),
                 arbNsk(),
                 async ({ v1, v2, o1, o2 }, aliceNsk, bobNsk) => {
-                    const { root, inputs } = spend(
-                        [tx.note(v1, aliceNsk, 1n, ASSET), tx.note(v2, aliceNsk, 2n, ASSET)],
-                        aliceNsk,
-                    );
                     await assertNoSecond(
                         `balanced(${v1}, ${v2} -> ${o1}, ${o2})`,
-                        tx.build({
-                            publicAssetId: ASSET,
-                            inputs,
-                            outputs: [tx.note(o1, bobNsk, 9n), tx.note(o2, aliceNsk, 11n)],
-                            merkleRoot: root,
-                        }),
+                        tx.transfer({ v1, v2, o1, o2 }, aliceNsk, bobNsk, [1n, 2n, 9n, 11n]),
                     );
                 },
             ),

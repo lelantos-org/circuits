@@ -1,6 +1,6 @@
 // Property-based coverage for `lib/poly_eval.circom`.
 //
-// The unit test [test/poly_eval.test.ts](../poly_eval.test.ts) pins a set
+// The unit test [test/gadgets/poly_eval.test.ts](../gadgets/poly_eval.test.ts) pins a set
 // of deterministic seeds. This file adds random coefficients and `z` values
 // across BN254 Fr, plus the algebraic identities (linearity, z=1) that tie the
 // gadget to its Horner-form specification, and the z = 0 rejection.
@@ -12,19 +12,17 @@
 import { expect } from "chai";
 import * as fc from "fast-check";
 
-import { fixturePath, loadCircuit } from "../lib/circuit";
+import { fixturePath } from "../lib/circuit";
 import { expectWitnessFails } from "../lib/expect";
+import { polyEvalInput as toInput } from "../lib/inputs";
 import { hornerEval, mod } from "../helpers";
 import { fcParamsFor, arbField, R, arbDistinctBigInt } from "./arbitraries";
 import { TIMEOUT_HEAVY } from "../lib/constants";
+import { useCircuit } from "../lib/harness";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
 const N = 26;
 const fcParams = fcParamsFor("POLYEVAL");
-
-function toInput(coeffs: bigint[], z: bigint) {
-    return { coeffs: coeffs.map(c => c.toString()), z: z.toString() };
-}
 
 // Coefficient array arbitrary — N entries clamped to [0, R).
 const arbCoeffs = fc.array(arbField(R - 1n), { minLength: N, maxLength: N });
@@ -50,14 +48,17 @@ const COEFFS_ONLY_EXAMPLES: [bigint[]][] = [[ALL_ZERO_COEFFS], [ALL_MAX_COEFFS]]
 describe("PolyEval [fuzz, N=26]", function () {
     this.timeout(TIMEOUT_HEAVY);
 
-    let circuit: any;
-    before(async () => { circuit = await loadCircuit(WRAPPER); });
+    const ctx = useCircuit(WRAPPER);
+
+    /** Witness for `(coeffs, z)`, checked against the circuit's `y` output. */
+    async function expectY(coeffs: bigint[], z: bigint, y: bigint): Promise<void> {
+        const w = await ctx.circuit.calculateWitness(toInput(coeffs, z), true);
+        await ctx.circuit.assertOut(w, { y: y.toString() });
+    }
 
     it("matches hornerEval reference on random (coeffs, z)", async () => {
         await fc.assert(fc.asyncProperty(arbCoeffs, arbZ, async (coeffs, z) => {
-            const expected = hornerEval(coeffs, z);
-            const w = await circuit.calculateWitness(toInput(coeffs, z), true);
-            await circuit.assertOut(w, { y: expected.toString() });
+            await expectY(coeffs, z, hornerEval(coeffs, z));
         }), fcParamsFor("POLYEVAL", { examples: COEFFS_Z_EXAMPLES }));
     });
 
@@ -69,8 +70,7 @@ describe("PolyEval [fuzz, N=26]", function () {
             const ys = hornerEval(sum, z);
             expect(ys).to.equal(mod(ya + yb, R));
             // Cross-check vs circuit for the summed polynomial.
-            const w = await circuit.calculateWitness(toInput(sum, z), true);
-            await circuit.assertOut(w, { y: ys.toString() });
+            await expectY(sum, z, ys);
         }), fcParams);
     });
 
@@ -80,15 +80,14 @@ describe("PolyEval [fuzz, N=26]", function () {
             const ya = hornerEval(a, z);
             const ys = hornerEval(scaled, z);
             expect(ys).to.equal(mod(k * ya, R));
-            const w = await circuit.calculateWitness(toInput(scaled, z), true);
-            await circuit.assertOut(w, { y: ys.toString() });
+            await expectY(scaled, z, ys);
         }), fcParams);
     });
 
     it("FAILS at z = 0 for any coefficient vector", async () => {
         await fc.assert(fc.asyncProperty(arbCoeffs, async coeffs => {
             await expectWitnessFails(
-                circuit,
+                ctx.circuit,
                 toInput(coeffs, 0n),
                 "z = 0 must be rejected",
             );
@@ -98,8 +97,7 @@ describe("PolyEval [fuzz, N=26]", function () {
     it("z = 1 ⇒ y = Σ coeffs mod R", async () => {
         await fc.assert(fc.asyncProperty(arbCoeffs, async coeffs => {
             const sum = mod(coeffs.reduce((s, c) => s + c, 0n), R);
-            const w = await circuit.calculateWitness(toInput(coeffs, 1n), true);
-            await circuit.assertOut(w, { y: sum.toString() });
+            await expectY(coeffs, 1n, sum);
         }), fcParamsFor("POLYEVAL", { examples: COEFFS_ONLY_EXAMPLES }));
     });
 
@@ -117,8 +115,7 @@ describe("PolyEval [fuzz, N=26]", function () {
             const yA = hornerEval(coeffs, z);
             const yB = hornerEval(swapped, z);
             expect(yA).to.not.equal(yB);
-            const w = await circuit.calculateWitness(toInput(swapped, z), true);
-            await circuit.assertOut(w, { y: yB.toString() });
+            await expectY(swapped, z, yB);
         }), fcParams);
     });
 });

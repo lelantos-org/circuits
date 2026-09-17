@@ -4,18 +4,19 @@
 // `Jubjub.build()`. Centralising the hook gives a change to circuit loading
 // (the projection wrapper, a new artifact) a single site.
 //
-// Four suites build directly, each for a reason `useCircuit` does not cover:
-// `fuzz/fixed_base_mul.fuzz.test.ts` loads three circuits in one `Promise.all`;
+// Per-circuit suites layer on top: `test/transact/setup.ts :: useTransactCircuit`
+// adds the `TxBuilder`, `test/batch/setup.ts :: useBatchCircuit` the
+// `BatchBuilder` and the batch assertions, and
+// `lib/underconstrained_suite.ts :: useSearchSuite` the R1CS search context.
+// Each returns a stable context object and lets `before` populate it, so callers
+// destructure at test time rather than capturing an undefined binding at
+// declaration time.
+//
+// Three suites build directly, each for a reason these do not cover:
 // `formal/pubsignal_order.test.ts` loads a per-shape path inside a nested hook
 // and keeps the witness, not the tester; `transact/binding.test.ts` loads the
 // unwrapped circuit to prove the challenge-only fields are not signals;
-// `underconstrained_selftest.test.ts` needs `compileConstraintsOnly`, a
-// different artifact.
-//
-// The pattern matches `test/transact/setup.ts :: useTransactCircuit`, which
-// builds on this module: return a stable context object and let `before`
-// populate it, so callers destructure at test time rather than capturing an
-// undefined binding at declaration time.
+// `tooling/underconstrained_selftest.test.ts` loads a different fixture per case.
 //
 // `before` rather than top-level await: `before` defers the load (`loadCircuit`
 // already caches). Mocha loads every spec file before running any test, so a
@@ -114,6 +115,31 @@ export function useCircuit(
             buildJubjub(),
         ]);
         ctx.circuit = wrap(circuit);
+        ctx.P = P;
+        ctx.J = J;
+    });
+    return ctx;
+}
+
+/**
+ * Load several circuits, keyed by name, and the reference gadgets in `before`.
+ *
+ * For suites that compare circuits against each other; the compiles run
+ * concurrently.
+ */
+export function useCircuits<K extends string>(
+    paths: Record<K, string>,
+): Gadgets & { circuits: Record<K, CircuitTester> } {
+    type Ctx = Gadgets & { circuits: Record<K, CircuitTester> };
+    const ctx = pendingCtx<Ctx>(["circuits", "P", "J"], `useCircuits(${Object.keys(paths).join(", ")})`);
+    before(async () => {
+        const names = Object.keys(paths) as K[];
+        const [testers, P, J] = await Promise.all([
+            Promise.all(names.map(name => loadCircuit(paths[name]))),
+            Poseidon.build(),
+            buildJubjub(),
+        ]);
+        ctx.circuits = Object.fromEntries(names.map((name, i) => [name, testers[i]])) as Record<K, CircuitTester>;
         ctx.P = P;
         ctx.J = J;
     });

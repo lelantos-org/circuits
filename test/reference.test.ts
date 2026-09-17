@@ -14,17 +14,12 @@
 
 import { expect } from "chai";
 
-import { TIMEOUT_FAST } from "./lib/constants";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { keccak_256 } from "@noble/hashes/sha3";
 
-import { buildJubjub } from "./lib/harness";
+import { TIMEOUT_FAST } from "./lib/constants";
+import { readJson } from "./lib/files";
+import { useGadgets } from "./lib/harness";
 import {
-    Poseidon,
-    Jubjub,
     MerkleTree,
     rootFromPath,
     cacheKeyStride,
@@ -43,21 +38,16 @@ import {
 } from "./helpers";
 import { prefillLeaf } from "./lib/batch";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
 describe("reference / merkle path recomputation", function () {
     this.timeout(TIMEOUT_FAST);
 
-    let P: Poseidon;
-    before(async () => {
-        P = await Poseidon.build();
-    });
+    const ctx = useGadgets();
 
     // `rootFromPath` is an independent implementation of the same quaternary
     // node hashing as `MerkleTree`; this pins the two to the same result.
     for (const depth of [2, 10]) {
         it(`rootFromPath reproduces MerkleTree.root() at every leaf (depth ${depth})`, () => {
-            const tree = new MerkleTree(P, depth);
+            const tree = new MerkleTree(ctx.P, depth);
             const n = depth === 2 ? 16 : 21;
             for (let i = 0; i < n; i++) tree.insert(BigInt(1000 + i));
 
@@ -65,7 +55,7 @@ describe("reference / merkle path recomputation", function () {
             for (let i = 0; i < n; i++) {
                 const { pathElements, pathIndices } = tree.proof(i);
                 expect(
-                    rootFromPath(P, tree.leaves[i], pathElements, pathIndices),
+                    rootFromPath(ctx.P, tree.leaves[i], pathElements, pathIndices),
                     `leaf ${i} of ${n} at depth ${depth}`,
                 ).to.equal(root);
             }
@@ -73,11 +63,11 @@ describe("reference / merkle path recomputation", function () {
     }
 
     it("rootFromPath rejects a perturbed sibling", () => {
-        const tree = new MerkleTree(P, 10);
+        const tree = new MerkleTree(ctx.P, 10);
         for (let i = 0; i < 5; i++) tree.insert(BigInt(500 + i));
         const { pathElements, pathIndices } = tree.proof(0);
         pathElements[0][0] += 1n;
-        expect(rootFromPath(P, tree.leaves[0], pathElements, pathIndices)).to.not.equal(tree.root());
+        expect(rootFromPath(ctx.P, tree.leaves[0], pathElements, pathIndices)).to.not.equal(tree.root());
     });
 
     // The node cache is keyed by `level * stride + index`. If the stride does not
@@ -115,9 +105,9 @@ describe("reference / merkle path recomputation", function () {
             for (const depth of [1, 2, 3]) {
                 const capacity = 4 ** depth;
                 for (let n = 0; n <= capacity; n++) {
-                    const fast = new MerkleTree(P, depth);
+                    const fast = new MerkleTree(ctx.P, depth);
                     fast.fillBlocks(n, valueOf);
-                    const naive = new MerkleTree(P, depth);
+                    const naive = new MerkleTree(ctx.P, depth);
                     for (const leaf of fast.leaves) naive.insert(leaf);
 
                     const where = `depth ${depth}, n ${n}`;
@@ -142,9 +132,9 @@ describe("reference / merkle path recomputation", function () {
         // counts rather than every n.
         it(`fillBlocks (${name}) agrees with a naive fill at depth 10 boundary counts`, () => {
             for (const n of [0, 1, 3, 4, 5, 15, 16, 17, 63, 64, 21, 1023, 1024, 4097]) {
-                const fast = new MerkleTree(P, 10);
+                const fast = new MerkleTree(ctx.P, 10);
                 fast.fillBlocks(n, valueOf);
-                const naive = new MerkleTree(P, 10);
+                const naive = new MerkleTree(ctx.P, 10);
                 for (const leaf of fast.leaves) naive.insert(leaf);
                 expect(fast.root(), `root at n ${n}`).to.equal(naive.root());
                 expect(fast.frontier(), `frontier at n ${n}`).to.deep.equal(naive.frontier());
@@ -154,7 +144,7 @@ describe("reference / merkle path recomputation", function () {
 
     it("prefillLeaf gives every filled frontier slot a distinct value", () => {
         for (const n of [21, 4 ** 5 - 3, 4 ** 10 - 1]) {
-            const tree = new MerkleTree(P, 10);
+            const tree = new MerkleTree(ctx.P, 10);
             tree.fillBlocks(n, prefillLeaf);
             const filled = tree.frontier().flat().filter(v => v !== 0n);
             expect(new Set(filled).size, `distinct slots at n ${n}`).to.equal(filled.length);
@@ -162,7 +152,7 @@ describe("reference / merkle path recomputation", function () {
     });
 
     it("fillBlocks rejects a count outside 0..4^depth", () => {
-        const tree = new MerkleTree(P, 3);
+        const tree = new MerkleTree(ctx.P, 3);
         for (const n of [-1, 65, 1.5]) {
             expect(() => tree.fillBlocks(n, () => 1n)).to.throw(RangeError);
         }
@@ -198,39 +188,35 @@ describe("reference / quadratic residues", () => {
 describe("reference / fuzzy message detection", function () {
     this.timeout(TIMEOUT_FAST);
 
-    let P: Poseidon;
-    let J: Jubjub;
-    before(async () => {
-        [P, J] = await Promise.all([Poseidon.build(), buildJubjub()]);
-    });
+    const ctx = useGadgets();
 
     // The clue signals carry no in-circuit constraints, so these cases are the
     // only coverage of the scheme's correctness.
     it("a detection key detects every clue flagged for its flag key", () => {
-        const gen = deterministicClueGen(P, J);
+        const gen = deterministicClueGen(ctx.P, ctx.J);
         for (let i = 0; i < 32; i++) {
-            expect(fmdTest(J, P, gen.dk, gen.next().clue), `clue ${i}`).to.equal(true);
+            expect(fmdTest(ctx.J, ctx.P, gen.dk, gen.next().clue), `clue ${i}`).to.equal(true);
         }
     });
 
     it("flipping any clue bit breaks detection", () => {
-        const gen = deterministicClueGen(P, J);
+        const gen = deterministicClueGen(ctx.P, ctx.J);
         const clue = gen.next().clue;
         for (let i = 0; i < FMD_DEFAULT_GAMMA; i++) {
             const bits = Uint8Array.from(clue.bits);
             bits[i >> 3] ^= 1 << (i & 7);
-            expect(fmdTest(J, P, gen.dk, { ...clue, bits }), `bit ${i} flipped`).to.equal(false);
+            expect(fmdTest(ctx.J, ctx.P, gen.dk, { ...clue, bits }), `bit ${i} flipped`).to.equal(false);
         }
     });
 
     it("an unrelated detection key matches at the false-positive rate, not universally", () => {
-        const gen = deterministicClueGen(P, J);
+        const gen = deterministicClueGen(ctx.P, ctx.J);
         const other = fmdGenDetectionKey(() => 99991n, FMD_DEFAULT_GAMMA);
 
         const N = 128;
         let matched = 0;
         for (let i = 0; i < N; i++) {
-            if (fmdTest(J, P, other, gen.next().clue)) matched++;
+            if (fmdTest(ctx.J, ctx.P, other, gen.next().clue)) matched++;
         }
         // Expected N / 2^gamma = 4. The bound is loose: the security property is
         // that detection is rate-limited, not that it never fires.
@@ -238,13 +224,13 @@ describe("reference / fuzzy message detection", function () {
     });
 
     it("a detection key of the wrong gamma is rejected", () => {
-        const gen = deterministicClueGen(P, J);
+        const gen = deterministicClueGen(ctx.P, ctx.J);
         const short = fmdGenDetectionKey(() => 7n, FMD_DEFAULT_GAMMA - 1);
-        expect(fmdTest(J, P, short, gen.next().clue)).to.equal(false);
+        expect(fmdTest(ctx.J, ctx.P, short, gen.next().clue)).to.equal(false);
     });
 
     it("encodeClue and decodeClue round-trip", () => {
-        const gen = deterministicClueGen(P, J);
+        const gen = deterministicClueGen(ctx.P, ctx.J);
         for (let i = 0; i < 4; i++) {
             const clue = gen.next().clue;
             const back = decodeClue(encodeClue(clue));
@@ -318,7 +304,7 @@ describe("reference / snark compression", () => {
     //
     // Driven from index.json, so a shape change (a new circuit, or a different
     // MAX_L) is covered without editing this file.
-    const INDEX = JSON.parse(readFileSync(resolve(ROOT, "vectors/index.json"), "utf8"));
+    const INDEX = readJson("vectors/index.json");
     const VECTOR_FILES: string[] = Object.keys(INDEX.files);
 
     it("index.json lists every published vector file", () => {
@@ -345,7 +331,7 @@ describe("reference / snark compression", () => {
     const MAY_DEMOTE = new Set(["transact"]);
 
     for (const file of VECTOR_FILES) {
-        const v = JSON.parse(readFileSync(resolve(ROOT, "vectors", file), "utf8"));
+        const v = readJson(`vectors/${file}`);
         const challengeOnly: string[] = v.circuit.challengeOnly ?? [];
         if (challengeOnly.length === 0) continue;
 
@@ -360,7 +346,7 @@ describe("reference / snark compression", () => {
 
     for (const file of VECTOR_FILES) {
         it(`vectors/${file} is internally consistent`, () => {
-            const v = JSON.parse(readFileSync(resolve(ROOT, "vectors", file), "utf8"));
+            const v = readJson(`vectors/${file}`);
             for (const vec of v.vectors) {
                 const coeffs = vec.compression.coeffs.map(BigInt);
                 const challenge = vec.compression.challenge.map(BigInt);

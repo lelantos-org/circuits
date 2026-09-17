@@ -19,54 +19,42 @@ describe("transact_4x6 / multi-asset", function () {
     /** Two inputs of different assets, inserted and finalized against one root. */
     function mixedInputs(valueA: bigint, valueB: bigint) {
         const { tx } = ctx;
-        const tree = tx.newTree();
-        let inA = tx.insert(tree, tx.note(valueA, ALICE_NSK, 1n, ASSET), ALICE_NSK);
-        let inB = tx.insert(tree, tx.note(valueB, ALICE_NSK, 2n, ASSET_B), ALICE_NSK);
-        const root = tree.root();
-        return { root, inputs: [tx.finalize(tree, inA), tx.finalize(tree, inB)] };
+        return tx.plant([tx.note(valueA, ALICE_NSK, 1n, ASSET), tx.note(valueB, ALICE_NSK, 2n, ASSET_B)], ALICE_NSK);
     }
 
     it("balanced: in=[A,B], out=[A,B] per-asset balance holds", async () => {
         const { tx, circuit } = ctx;
-        const { root, inputs } = mixedInputs(100n, 50n);
-        await expectAccepts(circuit, tx.build({
-            inputs,
-            outputs: [tx.note(100n, BOB_NSK, 100n, ASSET), tx.note(50n, ALICE_NSK, 200n, ASSET_B)],
-            merkleRoot: root,
-        }));
+        await expectAccepts(circuit, tx.spend(
+            mixedInputs(100n, 50n),
+            [tx.note(100n, BOB_NSK, 100n, ASSET), tx.note(50n, ALICE_NSK, 200n, ASSET_B)],
+        ));
     });
 
     it("two assets conserved independently", async () => {
         const { tx, circuit } = ctx;
-        const { root, inputs } = mixedInputs(100n, 50n);
-        await expectAccepts(circuit, tx.build({
-            inputs,
-            outputs: [tx.note(100n, ALICE_NSK, 9n, ASSET), tx.note(50n, ALICE_NSK, 11n, ASSET_B)],
-            merkleRoot: root,
-        }));
+        await expectAccepts(circuit, tx.spend(
+            mixedInputs(100n, 50n),
+            [tx.note(100n, ALICE_NSK, 9n, ASSET), tx.note(50n, ALICE_NSK, 11n, ASSET_B)],
+        ));
     });
 
     it("FAILS on per-asset imbalance even when scalar totals match", async () => {
         // in: A=80, B=120. out: A=120, B=80. Both total 200; neither asset
         // conserves.
         const { tx, circuit } = ctx;
-        const { root, inputs } = mixedInputs(80n, 120n);
-        await expectWitnessFails(circuit, tx.build({
-            inputs,
-            outputs: [tx.note(120n, ALICE_NSK, 9n, ASSET), tx.note(80n, ALICE_NSK, 11n, ASSET_B)],
-            merkleRoot: root,
-        }), "scalar totals matching must not satisfy the per-asset point balance");
+        await expectWitnessFails(circuit, tx.spend(
+            mixedInputs(80n, 120n),
+            [tx.note(120n, ALICE_NSK, 9n, ASSET), tx.note(80n, ALICE_NSK, 11n, ASSET_B)],
+        ), "scalar totals matching must not satisfy the per-asset point balance");
     });
 
     it("FAILS when an output asset is swapped for one of equal total value", async () => {
         // Same values, different asset ids.
         const { tx, circuit } = ctx;
-        const { root, inputs } = ctx.tx.twoRealInputs([100n, 50n], ALICE_NSK);
-        await expectWitnessFails(circuit, tx.build({
-            inputs,
-            outputs: [tx.note(150n, ALICE_NSK, 9n, ASSET_B), tx.note(0n, ALICE_NSK, 11n, ASSET)],
-            merkleRoot: root,
-        }), "an output asset swap must not balance");
+        await expectWitnessFails(circuit, tx.spend(
+            tx.twoRealInputs([100n, 50n], ALICE_NSK),
+            [tx.note(150n, ALICE_NSK, 9n, ASSET_B), tx.note(0n, ALICE_NSK, 11n, ASSET)],
+        ), "an output asset swap must not balance");
     });
 
     // ===== cross-asset cancellation via the asset-generator DL =====
@@ -80,12 +68,7 @@ describe("transact_4x6 / multi-asset", function () {
     it("FAILS on cross-asset cancellation V^1 + V^3 == 2·V^2", async () => {
         const { tx, circuit } = ctx;
         const X = 1000n;
-        const tree = tx.newTree();
-        let inA = tx.insert(tree, tx.note(X, ALICE_NSK, 1n, 1n), ALICE_NSK);
-        let inB = tx.insert(tree, tx.note(X, ALICE_NSK, 2n, 3n), ALICE_NSK);
-        const root = tree.root();
-        inA = tx.finalize(tree, inA);
-        inB = tx.finalize(tree, inB);
+        const spent = tx.plant([tx.note(X, ALICE_NSK, 1n, 1n), tx.note(X, ALICE_NSK, 2n, 3n)], ALICE_NSK);
 
         // Confirms the point balance is satisfied by the forgery, so the
         // rejection below is attributable to the per-asset check rather than to
@@ -96,13 +79,11 @@ describe("transact_4x6 / multi-asset", function () {
             J.mulPointEscalar(J.hashToAssetGen(3n), X),
         );
         const rhs = J.mulPointEscalar(J.hashToAssetGen(2n), 2n * X);
-        expect(lhs[0]).to.equal(rhs[0]);
-        expect(lhs[1]).to.equal(rhs[1]);
+        expect(lhs).to.deep.equal(rhs);
 
-        await expectWitnessFails(circuit, tx.build({
-            inputs: [inA, inB],
-            outputs: [tx.note(2n * X, ALICE_NSK, 9n, 2n), tx.note(0n, ALICE_NSK, 11n, 2n)],
-            merkleRoot: root,
-        }), "PerAssetValueBalance must reject a point-balanced cross-asset forgery");
+        await expectWitnessFails(circuit, tx.spend(
+            spent,
+            [tx.note(2n * X, ALICE_NSK, 9n, 2n), tx.note(0n, ALICE_NSK, 11n, 2n)],
+        ), "PerAssetValueBalance must reject a point-balanced cross-asset forgery");
     });
 });

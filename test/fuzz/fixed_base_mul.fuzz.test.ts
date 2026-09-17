@@ -1,6 +1,6 @@
 // Property-based coverage for `lib/fixed_base_mul.circom`.
 //
-// The unit suite [test/fixed_base_mul.test.ts](../fixed_base_mul.test.ts)
+// The unit suite [test/gadgets/fixed_base_mul.test.ts](../gadgets/fixed_base_mul.test.ts)
 // enumerates the small widths exhaustively and sweeps the window boundaries at
 // full width. This file covers the 252-bit scalar space, where 63 windows
 // interact and a carry bug appears only for particular nibble patterns.
@@ -12,11 +12,12 @@
 import { expect } from "chai";
 import * as fc from "fast-check";
 
-import { Jubjub, H_BASE, BABYJUB_SUBGROUP_ORDER, type Field } from "../helpers";
-import { fixturePath, loadCircuit } from "../lib/circuit";
+import { H_BASE, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "../helpers";
+import { fixturePath, readPoint } from "../lib/circuit";
+import { scalarBits } from "../lib/inputs";
 import { fcParamsFor, arbBlinder, MAX_BLINDER } from "./arbitraries";
 import { RCV_BITS as WIDTH, TIMEOUT_HEAVY } from "../lib/constants";
-import { buildJubjub } from "../lib/harness";
+import { useCircuits } from "../lib/harness";
 
 const WRAPPER = fixturePath("test_fixed_base_mul.circom");
 const REFERENCE = fixturePath("test_fixed_base_mul_reference.circom");
@@ -26,29 +27,16 @@ const fcParams = fcParamsFor("FIXEDBASE");
 describe("fuzz: FixedBaseMul", function () {
     this.timeout(TIMEOUT_HEAVY);
 
-    let current: any;
-    let reference: any;
-    let raw: any;
-    let J: Jubjub;
+    const ctx = useCircuits({ current: WRAPPER, reference: REFERENCE, raw: RAW_BITS });
 
-    before(async () => {
-        [current, reference, raw, J] = await Promise.all([
-            loadCircuit(WRAPPER),
-            loadCircuit(REFERENCE),
-            loadCircuit(RAW_BITS),
-            buildJubjub(),
-        ]);
-    });
-
-    async function mul(scalar: Field): Promise<[bigint, bigint]> {
-        const w = await current.calculateWitness({ scalar: scalar.toString() }, true);
-        return [w[1], w[2]];
+    async function mul(scalar: Field): Promise<Point> {
+        return readPoint(await ctx.circuits.current.calculateWitness({ scalar: scalar.toString() }, true));
     }
 
     it("matches the reference scalar multiplication", async () => {
         await fc.assert(
             fc.asyncProperty(arbBlinder(), async (s) => {
-                expect(await mul(s)).to.deep.equal(J.mulPointEscalar(H_BASE, s));
+                expect(await mul(s)).to.deep.equal(ctx.J.mulPointEscalar(H_BASE, s));
             }),
             fcParams,
         );
@@ -57,9 +45,9 @@ describe("fuzz: FixedBaseMul", function () {
     it("matches circomlib EscalarMulFix", async () => {
         await fc.assert(
             fc.asyncProperty(arbBlinder(), async (s) => {
-                const w = await reference.calculateWitness({ scalar: s.toString() }, true);
+                const w = await ctx.circuits.reference.calculateWitness({ scalar: s.toString() }, true);
                 // circomlib[2] then windowed[2], in declaration order
-                expect([w[1], w[2]], `divergence at ${s}`).to.deep.equal([w[3], w[4]]);
+                expect(readPoint(w, 0), `divergence at ${s}`).to.deep.equal(readPoint(w, 2));
             }),
             fcParams,
         );
@@ -73,7 +61,7 @@ describe("fuzz: FixedBaseMul", function () {
         await fc.assert(
             fc.asyncProperty(half, half, async (a, b) => {
                 const [pa, pb, pab] = [await mul(a), await mul(b), await mul(a + b)];
-                expect(J.addPoint(pa, pb), `a=${a} b=${b}`).to.deep.equal(pab);
+                expect(ctx.J.addPoint(pa, pb), `a=${a} b=${b}`).to.deep.equal(pab);
             }),
             fcParams,
         );
@@ -96,7 +84,7 @@ describe("fuzz: FixedBaseMul", function () {
     it("always lands in the prime-order subgroup", async () => {
         await fc.assert(
             fc.asyncProperty(arbBlinder(), async (s) => {
-                expect(J.inSubgroup(await mul(s)), `s=${s}`).to.equal(true);
+                expect(ctx.J.inSubgroup(await mul(s)), `s=${s}`).to.equal(true);
             }),
             fcParams,
         );
@@ -107,11 +95,8 @@ describe("fuzz: FixedBaseMul", function () {
     it("agrees with the raw bit interface", async () => {
         await fc.assert(
             fc.asyncProperty(arbBlinder(), async (s) => {
-                const bits = Array.from({ length: Number(WIDTH) }, (_, i) =>
-                    ((s >> BigInt(i)) & 1n).toString(),
-                );
-                const w = await raw.calculateWitness({ e: bits }, true);
-                expect([w[1], w[2]], `s=${s}`).to.deep.equal(await mul(s));
+                const w = await ctx.circuits.raw.calculateWitness({ e: scalarBits(s, WIDTH) }, true);
+                expect(readPoint(w), `s=${s}`).to.deep.equal(await mul(s));
             }),
             fcParams,
         );

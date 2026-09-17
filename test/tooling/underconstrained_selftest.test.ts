@@ -17,31 +17,41 @@ import {
     fixturePath,
     loadCircuitArtifacts,
     type CircuitInput,
-} from "./lib/circuit";
-import { loadR1cs, loadSymbols } from "./lib/r1cs";
+} from "../lib/circuit";
+import { loadR1cs, loadSymbols } from "../lib/r1cs";
 import {
     allGroups,
     confirm,
     formatReport,
     sweepGroups,
     sweepSingleSignal,
-} from "./lib/underconstrained";
-import { explain } from "./lib/explain";
-import { aliasableGroups, findBitGroups, groupsWithFreeBits } from "./lib/bit_groups";
-import { TIMEOUT_CIRCUIT } from "./lib/constants";
+} from "../lib/underconstrained";
+import { explain } from "../lib/explain";
+import { aliasableGroups, findBitGroups, groupsWithFreeBits } from "../lib/bit_groups";
+import { TIMEOUT_CIRCUIT } from "../lib/constants";
+
+/** A fixture's `--O2` system, its symbols, and the honest witness for `input`. */
+async function sweepable(fixture: string, input: CircuitInput) {
+    const { tester, r1csPath, symPath } = await loadCircuitArtifacts(fixturePath(fixture));
+    const [view, symbols] = await Promise.all([loadR1cs(r1csPath), loadSymbols(symPath)]);
+    const w = await tester.calculateWitness(input, true);
+    expect(view.firstViolation(w)).to.equal(-1, "the honest witness must satisfy");
+    return { view, symbols, w };
+}
+
+/** Bit groups in a fixture's `--O0` system, where decompositions survive. */
+async function bitGroupsOf(fixture: string) {
+    const { r1csPath } = await compileConstraintsOnly(fixturePath(fixture));
+    return findBitGroups(await loadR1cs(r1csPath));
+}
 
 describe("underconstrained generator self-test", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
     it("finds an output the circuit assigns but never constrains", async () => {
-        const path = fixturePath("test_leak_missing_output_constraint.circom");
-        const { tester, r1csPath, symPath } = await loadCircuitArtifacts(path);
-        const [view, symbols] = await Promise.all([loadR1cs(r1csPath), loadSymbols(symPath)]);
-
         // The witness calculator runs `out <-- in * in` and returns a consistent
         // witness, so the defect is not observable at the input level.
-        const w = await tester.calculateWitness({ in: "7" } as CircuitInput, true);
-        expect(view.firstViolation(w)).to.equal(-1, "the honest witness must satisfy");
+        const { view, symbols, w } = await sweepable("test_leak_missing_output_constraint.circom", { in: "7" });
         expect(w[1]).to.equal(49n, "the generator still computes in * in");
 
         const findings = sweepSingleSignal(view, w, symbols);
@@ -67,12 +77,7 @@ describe("underconstrained generator self-test", function () {
     // sweep must find nothing and the freedom exists only along the direction
     // where both move. This isolates what the group search adds.
     it("finds a pair of signals that only move together", async () => {
-        const path = fixturePath("test_leak_paired_signals.circom");
-        const { tester, r1csPath, symPath } = await loadCircuitArtifacts(path);
-        const [view, symbols] = await Promise.all([loadR1cs(r1csPath), loadSymbols(symPath)]);
-
-        const w = await tester.calculateWitness({ in: "7", x: "5" } as CircuitInput, true);
-        expect(view.firstViolation(w)).to.equal(-1, "the honest witness must satisfy");
+        const { view, symbols, w } = await sweepable("test_leak_paired_signals.circom", { in: "7", x: "5" });
 
         const single = sweepSingleSignal(view, w, symbols);
         expect(single, "the unit sweep must be blind to this bug, or the fixture " +
@@ -97,22 +102,14 @@ describe("underconstrained generator self-test", function () {
     });
 
     it("finds a decomposition wide enough to alias mod p", async () => {
-        const path = fixturePath("test_leak_alias_num2bits.circom");
-        const { r1csPath } = await compileConstraintsOnly(path);
-        const groups = findBitGroups(await loadR1cs(r1csPath));
-
-        const wide = aliasableGroups(groups);
+        const wide = aliasableGroups(await bitGroupsOf("test_leak_alias_num2bits.circom"));
         expect(wide.length, "Num2Bits(254) must be reported as aliasable")
             .to.be.greaterThan(0);
         expect(Math.max(...wide.map(g => g.width))).to.equal(254);
     });
 
     it("finds a decomposition digit that carries no booleanity constraint", async () => {
-        const path = fixturePath("test_leak_missing_booleanity.circom");
-        const { r1csPath } = await compileConstraintsOnly(path);
-        const groups = findBitGroups(await loadR1cs(r1csPath));
-
-        const leaky = groupsWithFreeBits(groups);
+        const leaky = groupsWithFreeBits(await bitGroupsOf("test_leak_missing_booleanity.circom"));
         expect(leaky.length, "the digit with no booleanity constraint must be reported")
             .to.be.greaterThan(0);
         // The fixture frees index 5 of a 16-bit decomposition.
@@ -124,9 +121,7 @@ describe("underconstrained generator self-test", function () {
     // Negative control for the four cases above: the checks report nothing on a
     // sound circuit.
     it("stays quiet on a sound circuit", async () => {
-        const path = fixturePath("test_merkle_d2.circom");
-        const { r1csPath } = await compileConstraintsOnly(path);
-        const bits = findBitGroups(await loadR1cs(r1csPath));
+        const bits = await bitGroupsOf("test_merkle_d2.circom");
 
         expect(aliasableGroups(bits)).to.have.lengthOf(0);
         expect(groupsWithFreeBits(bits)).to.have.lengthOf(0);

@@ -142,30 +142,87 @@ export class TxBuilder {
         return new MerkleTree(this.P, this.depth);
     }
 
+    /**
+     * Spend `scenario`'s inputs against its root into `outputs`.
+     *
+     * `build` with the scenario unpacked; `extra` carries the public buckets,
+     * clues or a chosen challenge.
+     */
+    spend(
+        scenario: Pick<Scenario, "root" | "inputs">,
+        outputs: Note[],
+        extra: Omit<TxBuildArgs, "inputs" | "outputs" | "merkleRoot"> = {},
+    ): TransactWitnessBundle {
+        return this.build({ ...extra, inputs: scenario.inputs, outputs, merkleRoot: scenario.root });
+    }
+
     // ===== scenario factories =====
     //
     // Each builds a tree, freezes its root, then finalizes the proofs; the root
     // must be frozen before proofs are taken.
 
+    /**
+     * Insert `notes` into a fresh tree, freeze the root, then take the proofs.
+     *
+     * Order matters: `finalize` reads an authentication path, and a path taken
+     * before the last insert authenticates against a stale root. `nsk` is one
+     * owner for every note, or one per note.
+     *
+     * The base of every factory below; call it directly for pre-shaped notes (a
+     * second asset, a blinder at its ceiling, mixed owners).
+     */
+    plant(notes: Note[], nsk: Field | readonly Field[]): Scenario {
+        const owners = typeof nsk === "bigint" ? notes.map(() => nsk) : nsk;
+        if (owners.length !== notes.length) {
+            throw new Error(`plant: ${notes.length} notes but ${owners.length} owners`);
+        }
+        const tree = this.newTree();
+        const inserted = notes.map((n, i) => this.insert(tree, n, owners[i]));
+        const root = tree.root();
+        return { tree, root, inputs: inserted.map(s => this.finalize(tree, s)) };
+    }
+
     /** Two real inputs from one owner. */
     twoRealInputs(values: [bigint, bigint], nsk: Field, asset: Field = DEFAULT_ASSET): Scenario {
-        const tree = this.newTree();
-        let inA = this.insert(tree, this.note(values[0], nsk, 1n, asset), nsk);
-        let inB = this.insert(tree, this.note(values[1], nsk, 2n, asset), nsk);
-        const root = tree.root();
-        inA = this.finalize(tree, inA);
-        inB = this.finalize(tree, inB);
-        return { tree, root, inputs: [inA, inB] };
+        return this.nRealInputs(values, nsk, asset, [1n, 2n]);
     }
 
     /** One real input plus a dummy: the withdraw / single-spend shape. */
     oneRealOneDummy(value: bigint, nsk: Field, asset: Field = DEFAULT_ASSET): Scenario {
-        const tree = this.newTree();
-        let inA = this.insert(tree, this.note(value, nsk, 1n, asset), nsk);
-        const dB = dummyInputAt(this.P, this.depth, 99n);
-        const root = tree.root();
-        inA = this.finalize(tree, inA);
-        return { tree, root, inputs: [inA, dB] };
+        const scenario = this.plant([this.note(value, nsk, 1n, asset)], nsk);
+        scenario.inputs.push(dummyInputAt(this.P, this.depth, 99n));
+        return scenario;
+    }
+
+    /**
+     * The two-in-two-out transfer the fuzz suites draw: both inputs owned by
+     * `payer`, `o1` to `payee` and `o2` back to `payer`, nothing public.
+     *
+     * Returns the parts rather than the bundle, so a negative case can tamper a
+     * note before `spend`; `transfer` builds it directly.
+     */
+    transferParts(
+        split: Split,
+        payer: Field,
+        payee: Field,
+        rhos: readonly [Field, Field, Field, Field] = [1n, 2n, 100n, 200n],
+    ): { scenario: Scenario; outputs: Note[] } {
+        const [rhoA, rhoB, rhoOA, rhoOB] = rhos;
+        return {
+            scenario: this.plant([this.note(split.v1, payer, rhoA), this.note(split.v2, payer, rhoB)], payer),
+            outputs: [this.note(split.o1, payee, rhoOA), this.note(split.o2, payer, rhoOB)],
+        };
+    }
+
+    /** `transferParts`, built. */
+    transfer(
+        split: Split,
+        payer: Field,
+        payee: Field,
+        rhos?: readonly [Field, Field, Field, Field],
+    ): TransactWitnessBundle {
+        const { scenario, outputs } = this.transferParts(split, payer, payee, rhos);
+        return this.spend(scenario, outputs);
     }
 
     /** Two dummy inputs against an empty tree: the deposit / all-dummy shape. */
@@ -186,12 +243,10 @@ export class TxBuilder {
      * rejection, so it is honest in every respect but the field under test.
      */
     balanced(nsk: Field = ALICE_NSK): TransactWitnessBundle {
-        const { root, inputs } = this.twoRealInputs([100n, 50n], nsk);
-        return this.build({
-            inputs,
-            outputs: [this.note(75n, nsk, 9n), this.note(75n, nsk, 11n)],
-            merkleRoot: root,
-        });
+        return this.spend(
+            this.twoRealInputs([100n, 50n], nsk),
+            [this.note(75n, nsk, 9n), this.note(75n, nsk, 11n)],
+        );
     }
 
     /**
@@ -216,28 +271,34 @@ export class TxBuilder {
      */
     fullShape(nsk: Field = ALICE_NSK): TransactWitnessBundle {
         assertFullShapeValues();
-        const { root, inputs } = this.nRealInputs(FULL_SHAPE_IN_VALUES, nsk);
         const outputs = FULL_SHAPE_OUT_VALUES.map((v, j) =>
             this.note(v, nsk, 1_000_000n + BigInt(j) * 1_000n),
         );
-        return this.build({ inputs, outputs, merkleRoot: root });
+        return this.spend(this.nRealInputs(FULL_SHAPE_IN_VALUES, nsk), outputs);
     }
 
     /**
      * `values.length` real inputs from one owner against a single frozen root.
      *
-     * Generalises `twoRealInputs`; rho seeds are spaced by 1000 so that no
-     * `+1` tamper on one input's field collides with another's.
+     * Generalises `twoRealInputs`; rho seeds default to multiples of 1000 so
+     * that no `+1` tamper on one input's field collides with another's.
      */
-    nRealInputs(values: bigint[], nsk: Field, asset: Field = DEFAULT_ASSET): Scenario {
-        const tree = this.newTree();
-        let spent = values.map((v, i) =>
-            this.insert(tree, this.note(v, nsk, BigInt(i + 1) * 1_000n, asset), nsk),
-        );
-        const root = tree.root();
-        spent = spent.map(s => this.finalize(tree, s));
-        return { tree, root, inputs: spent };
+    nRealInputs(
+        values: bigint[],
+        nsk: Field,
+        asset: Field = DEFAULT_ASSET,
+        rhos: readonly Field[] = values.map((_, i) => BigInt(i + 1) * 1_000n),
+    ): Scenario {
+        return this.plant(values.map((v, i) => this.note(v, nsk, rhos[i], asset)), nsk);
     }
+}
+
+/** A balanced two-in-two-out value split: `v1 + v2 == o1 + o2`. */
+export interface Split {
+    v1: bigint;
+    v2: bigint;
+    o1: bigint;
+    o2: bigint;
 }
 
 /**

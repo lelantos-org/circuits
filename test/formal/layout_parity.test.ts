@@ -1,10 +1,8 @@
 import { expect } from "chai";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { coeffs as refCoeffs, flatten } from "../helpers";
 import { N_IN, N_OUT } from "../lib/constants";
+import { readJson, readLines } from "../lib/files";
 import { sentinels } from "../lib/sentinels";
 import { layoutDigest } from "../../scripts/vectors/common";
 
@@ -34,9 +32,7 @@ import { layoutDigest } from "../../scripts/vectors/common";
 // test/transact/binding.test.ts, and by gen-vectors.ts refusing to write when
 // the compiled circuit's `y` disagrees with the reference Horner evaluation.
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "../..");
-const LAYOUT_FILE = resolve(ROOT, "lean/expected/layout-4x6.txt");
+const LAYOUT_FILE = "lean/expected/layout-4x6.txt";
 
 // Every shape that ships both a Lean layout dump and a published vector.
 const SHIPPED_SHAPES = ["4x6"] as const;
@@ -56,7 +52,7 @@ const CHALLENGE_WORDS = 10 + 3 * N_IN + 8 * N_OUT;
 // Generated from the Lean layout's slot names. The transcription under test is
 // `SENTINEL_INPUT` below, which assigns each sentinel to a field by name;
 // `flatten` must reproduce Lean's order from it.
-const S = sentinels(readLayout(LAYOUT_FILE), 1000, "layout_parity");
+const S = sentinels(readLines(LAYOUT_FILE), 1000, "layout_parity");
 
 /**
  * Sentinels for the fields that are hashed but not evaluated.
@@ -107,15 +103,8 @@ const SENTINEL_INPUT = {
     out_aux_digest: CHALLENGE_ONLY.at("auxDigest"),
 };
 
-function readLayout(file: string): string[] {
-    return readFileSync(file, "utf8")
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
-}
-
 function leanLayout(): string[] {
-    return readLayout(LAYOUT_FILE);
+    return readLines(LAYOUT_FILE);
 }
 
 describe("formal model / public-input layout parity", () => {
@@ -176,10 +165,8 @@ describe("formal model / public-input layout parity", () => {
     // vector could drift from the Lean model and the SDK would follow the drift.
     for (const shape of SHIPPED_SHAPES) {
         it(`the published ${shape} vector carries the Lean layout verbatim`, () => {
-            const layout = readLayout(resolve(ROOT, `lean/expected/layout-${shape}.txt`));
-            const vector = JSON.parse(
-                readFileSync(resolve(ROOT, `vectors/transact-${shape}.json`), "utf8"),
-            );
+            const layout = readLines(`lean/expected/layout-${shape}.txt`);
+            const vector = readJson(`vectors/transact-${shape}.json`);
 
             expect(vector.circuit.layout).to.deep.equal(
                 layout,

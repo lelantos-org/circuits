@@ -76,14 +76,12 @@ describe("transact_4x6 / value-commitment blinders", function () {
         z: Field,
         override: Partial<Pick<Note, "rcv" | "rcvDep">>,
     ): TransactWitnessBundle {
-        const { root, inputs } = tx.twoRealInputs([100n, 50n], ALICE_NSK);
         const out0 = { ...tx.note(75n, ALICE_NSK, 9n), ...override };
-        return tx.build({
-            inputs,
-            outputs: [out0, tx.note(75n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-            z,
-        });
+        return tx.spend(
+            tx.twoRealInputs([100n, 50n], ALICE_NSK),
+            [out0, tx.note(75n, ALICE_NSK, 11n)],
+            { z },
+        );
     }
 
     /** The circuit's own `y` for a witness, not the reference evaluation. */

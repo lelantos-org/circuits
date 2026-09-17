@@ -1,9 +1,7 @@
 import { expect } from "chai";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { loadCircuit, srcPath, type CircuitInput } from "../lib/circuit";
+import { readJson } from "../lib/files";
 import { circuitSignals, type TransactWitnessBundle } from "../ref/witness";
 import { readOutput } from "../lib/expect";
 import { TIMEOUT_HEAVY } from "../lib/constants";
@@ -34,10 +32,7 @@ import { TIMEOUT_HEAVY } from "../lib/constants";
 // returns the pair in the same order for both overloads. It needs no signal
 // projection because, unlike transact, all of its logical public inputs are
 // declared signals; the same property makes challenge-only words forgeable for
-// it, which `tree_update_batch.test.ts :: divergent witness` checks.
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "../..");
+// it, which `batch/divergent.test.ts` checks.
 
 // Every shape whose public-signal order is pinned here.
 //
@@ -76,9 +71,8 @@ interface PublishedVector {
 }
 
 function loadVector(file: string): PublishedVector {
-    const p = resolve(ROOT, file);
-    const parsed = JSON.parse(readFileSync(p, "utf8"));
-    expect(parsed.vectors, `${p} has no vectors`).to.be.an("array").that.is.not.empty;
+    const parsed = readJson(file);
+    expect(parsed.vectors, `${file} has no vectors`).to.be.an("array").that.is.not.empty;
     return parsed.vectors[0];
 }
 
@@ -98,7 +92,7 @@ describe("groth16 public-signal order", function () {
             });
 
             it("witness[0] is the constant 1", () => {
-                expect(BigInt(witness[0].toString())).to.equal(1n);
+                expect(witness[0]).to.equal(1n);
             });
 
             // The order assertions: the first public signal is y, the second z.
@@ -120,7 +114,7 @@ describe("groth16 public-signal order", function () {
             it("the exported verifier consumes exactly these two, in this order", () => {
                 // _pubSignals = [y, z], written out as the reference for other
                 // consumers.
-                const pubSignals = [BigInt(witness[1].toString()), BigInt(witness[2].toString())];
+                const pubSignals = [readOutput(witness, 0), readOutput(witness, 1)];
                 expect(pubSignals.map(String)).to.deep.equal([
                     vector.compression.y,
                     vector.compression.z,

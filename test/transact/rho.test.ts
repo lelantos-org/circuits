@@ -37,27 +37,23 @@ describe("transact_4x6 / rho and nullifier binding", function () {
 
     it("FAILS when the nullifier omits cm from the preimage", async () => {
         const { tx, circuit } = ctx;
-        const { root, inputs } = tx.twoRealInputs([100n, 50n], ALICE_NSK);
+        const scenario = tx.twoRealInputs([100n, 50n], ALICE_NSK);
+        const [inA] = scenario.inputs;
         // Derivation without cm: Poseidon(TAG_NF, nk, rho).
-        inputs[0].nf = tx.P.hash([TAG_NF, deriveNk(tx.P, ALICE_NSK), inputs[0].rho]);
+        inA.nf = tx.P.hash([TAG_NF, deriveNk(tx.P, ALICE_NSK), inA.rho]);
 
-        await expectWitnessFails(circuit, tx.build({
-            inputs,
-            outputs: [tx.note(75n, ALICE_NSK, 9n), tx.note(75n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-        }), "the nullifier must not verify without cm in the preimage");
+        await expectWitnessFails(circuit, tx.spend(
+            scenario,
+            [tx.note(75n, ALICE_NSK, 9n), tx.note(75n, ALICE_NSK, 11n)],
+        ), "the nullifier must not verify without cm in the preimage");
     });
 
     it("output rho is bound to Poseidon(TAG_RHO, nullifier[0], out_index)", async () => {
         const { tx, circuit } = ctx;
-        const { root, inputs } = tx.twoRealInputs([100n, 50n], ALICE_NSK);
-        const input = tx.build({
-            inputs,
-            outputs: [tx.note(75n, ALICE_NSK, 9n), tx.note(75n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-        });
+        const scenario = tx.twoRealInputs([100n, 50n], ALICE_NSK);
+        const input = tx.spend(scenario, [tx.note(75n, ALICE_NSK, 9n), tx.note(75n, ALICE_NSK, 11n)]);
         // build() overrides whatever rho the caller's notes carried.
-        const nf0 = inputs[0].nf;
+        const nf0 = scenario.inputs[0].nf;
         expect(input.out_rho[0]).to.equal(buildRho(tx.P, nf0, 0).toString());
         expect(input.out_rho[1]).to.equal(buildRho(tx.P, nf0, 1).toString());
         await expectAccepts(circuit, input);
@@ -68,13 +64,8 @@ describe("transact_4x6 / rho and nullifier binding", function () {
         // binding satisfied, leaving DeriveRho as the only constraint that can
         // reject. cv and cv_dep are rho-independent.
         const { tx, circuit } = ctx;
-        const { root, inputs } = tx.twoRealInputs([100n, 50n], ALICE_NSK);
         const outB = tx.note(75n, ALICE_NSK, 11n);
-        const input = tx.build({
-            inputs,
-            outputs: [tx.note(75n, ALICE_NSK, 9n), outB],
-            merkleRoot: root,
-        });
+        const input = tx.spend(tx.twoRealInputs([100n, 50n], ALICE_NSK), [tx.note(75n, ALICE_NSK, 9n), outB]);
 
         const sharedRho = input.out_rho[0];
         input.out_rho[1] = sharedRho;

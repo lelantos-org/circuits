@@ -6,16 +6,16 @@
 // every width class the DEPTH = 11 shape uses — and is small enough to sweep
 // every start_index against every count. Depth 2 adds the case where the tree,
 // not MAX_L, caps the top window. The straddle cases in
-// `tree_update_batch.test.ts` check the full circuit at production depth.
+// `batch/shapes.test.ts` check the full circuit at production depth.
 
 import { expect } from "chai";
 
-import { MerkleTree, quatDigit, type Field, type Poseidon } from "./helpers";
-import { representativeStarts } from "./lib/batch";
-import { generatedFixture } from "./lib/circuit";
-import { expectWitnessFails, readOutput } from "./lib/expect";
-import { ARITY, MAX_L, TIMEOUT_HEAVY } from "./lib/constants";
-import { useCircuit } from "./lib/harness";
+import { MerkleTree, quatDigit, type Field, type Poseidon } from "../helpers";
+import { representativeStarts } from "../lib/batch";
+import { generatedFixture } from "../lib/circuit";
+import { expectWitnessFails, readOutput } from "../lib/expect";
+import { ARITY, MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
+import { useCircuit } from "../lib/harness";
 
 /** Honest roots and frontiers after every prefix of one distinct-leaf sequence. */
 interface Timeline {

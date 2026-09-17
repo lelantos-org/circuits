@@ -1,16 +1,14 @@
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { fileURLToPath } from "url";
 
 import { expect } from "chai";
 
-import { TIMEOUT_CIRCUIT } from "./lib/constants";
+import { TIMEOUT_CIRCUIT } from "../lib/constants";
+import { ROOT as CIRCUITS } from "../lib/files";
 // @ts-ignore - snarkjs ships without types
 import * as snarkjs from "snarkjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CIRCUITS = path.join(__dirname, "..");
 const SCRIPT = path.join(CIRCUITS, "scripts", "check-budget.mjs");
 
 // Coverage for the constraint-budget gate, which keeps a per-slot gadget change

@@ -1,9 +1,7 @@
 import { expect } from "chai";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { layoutDigest } from "../../scripts/vectors/common";
+import { readJson, readLines } from "../lib/files";
 import { sentinels } from "../lib/sentinels";
 
 import { batchCoeffs, flattenBatch } from "../helpers";
@@ -26,23 +24,16 @@ import { MAX_L } from "../lib/constants";
 // knows `z` before choosing the witness. The equality is therefore asserted word
 // by word rather than by length.
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "../..");
-const VECTOR_FILE = resolve(ROOT, "vectors/tree-update-batch-8.json");
-const LEAN_LAYOUT_FILE = resolve(ROOT, `lean/expected/layout-batch-${MAX_L}.txt`);
 
 // Coefficients and preimage are the same 52 words. The published vector's two
 // count fields are each asserted against this constant below.
 const WORDS = 4 + 6 * MAX_L;
 
-const vector = JSON.parse(readFileSync(VECTOR_FILE, "utf8"));
+const vector = readJson("vectors/tree-update-batch-8.json");
 const layout: string[] = vector.circuit.layout;
 
 /** The layout as Lean defines it, dumped by `lean/scripts/dump-layout.sh`. */
-const leanLayout: string[] = readFileSync(LEAN_LAYOUT_FILE, "utf8")
-    .split("\n")
-    .map(l => l.trim())
-    .filter(l => l.length > 0);
+const leanLayout: string[] = readLines(`lean/expected/layout-batch-${MAX_L}.txt`);
 
 // Distinct sentinel per logical field, so a transposition shows up as a
 // mismatch. Derived from the published slot names; the transcription under test

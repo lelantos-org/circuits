@@ -24,9 +24,11 @@ import {
     aliasableGroups,
     findBitGroups,
     groupsWithFreeBits,
+    widthHistogram,
     MAX_SAFE_BITS,
     type BitGroup,
 } from "./bit_groups";
+import { pendingCtx } from "./harness";
 
 /** Everything the searches need for one circuit, loaded once per suite. */
 export interface SearchContext {
@@ -111,6 +113,58 @@ export function assertNoSecondWitness(
         "checked against the witness — do not widen a name list)").to.have.lengthOf(0);
 
     return findings;
+}
+
+/**
+ * One circuit's search suite: the context, loaded in `before`, and the
+ * assertion over a subject in the suite's own witness shape.
+ */
+export interface SearchSuite<T> {
+    /** Populated by `before`; reading it earlier throws, see `pendingCtx`. */
+    readonly ctx: SearchContext;
+    /** The honest witness vector for `subject`. */
+    witnessFor(subject: T): Promise<bigint[]>;
+    /** `assertNoSecondWitness` over `subject`'s honest witness. */
+    assertNoSecond(label: string, subject: T): Promise<Finding[]>;
+}
+
+/**
+ * Register the `before` hook that loads `circuitPath` for the search, and the
+ * structural tests, for one suite.
+ *
+ * `toInput` projects a subject (a transact bundle, a batch witness) to the circom
+ * input, so each suite keeps its own witness shape. `minMultiGroups` is passed to
+ * `registerStructuralTests`.
+ */
+export function useSearchSuite<T>(
+    circuitPath: string,
+    toInput: (subject: T) => CircuitInput,
+    minMultiGroups: number,
+): SearchSuite<T> {
+    const holder = pendingCtx<{ ctx: SearchContext }>(["ctx"], `useSearchSuite(${circuitPath})`);
+    before(async () => {
+        holder.ctx = await loadSearchContext(circuitPath);
+    });
+
+    const suite: SearchSuite<T> = {
+        get ctx() {
+            return holder.ctx;
+        },
+        witnessFor: subject => holder.ctx.tester.calculateWitness(toInput(subject), true),
+        assertNoSecond: async (label, subject) =>
+            assertNoSecondWitness(holder.ctx, label, await suite.witnessFor(subject)),
+    };
+
+    registerStructuralTests(() => holder.ctx, minMultiGroups);
+    return suite;
+}
+
+/** Print the bit-decomposition census and return it, `width -> count`. */
+export function logBitGroupCensus(ctx: SearchContext): Map<number, number> {
+    const hist = widthHistogram(ctx.bitGroups);
+    const lines = [...hist].map(([w, n]) => `    ${String(n).padStart(5)}x  width ${w}`);
+    console.log(`    bit-decomposition groups: ${ctx.bitGroups.length}\n${lines.join("\n")}`);
+    return hist;
 }
 
 /**

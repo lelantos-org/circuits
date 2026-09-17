@@ -117,7 +117,7 @@ paired with a satisfying assignment, so none is vacuous.
 Not covered: the `BabyCheck` on `cv_dep`, uniqueness of a
 deposit leaf's opening (see *Asset id registration*), the `EMPTY_SUBTREE`
 constants (the batch result assumes they form the empty-subtree chain, which
-`test/merkle.test.ts` checks numerically), and the model-to-source
+`test/gadgets/merkle.test.ts` checks numerically), and the model-to-source
 correspondence, which is a hand-maintained table. See
 [lean/README.md](lean/README.md) § *What is not proved*.
 
@@ -186,7 +186,7 @@ Remaining gap: the group search holds everything outside a group fixed, and null
 directions are straight lines, so freedom spanning unrelated components or lying
 along a curved variety is out of reach. `just picus` decides the general case.
 
-`test/underconstrained_selftest.test.ts` points each check at a circuit broken in
+`test/tooling/underconstrained_selftest.test.ts` points each check at a circuit broken in
 exactly the way that check exists to find, so a detector that silently matches
 nothing fails rather than reporting a clean bill of health. One fixture is built
 so the single-signal sweep MUST miss it — each signal of a pair is pinned while

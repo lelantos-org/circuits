@@ -1,11 +1,12 @@
 import { expect } from "chai";
 
-import { H_BASE, BABYJUB_SUBGROUP_ORDER, type Field } from "./helpers";
-import { fixturePath } from "./lib/circuit";
-import { expectWitnessFails } from "./lib/expect";
-import { lcg } from "./lib/rand";
-import { RCV_BITS as WIDTH, TIMEOUT_CIRCUIT } from "./lib/constants";
-import { useCircuit } from "./lib/harness";
+import { H_BASE, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "../helpers";
+import { fixturePath, readPoint } from "../lib/circuit";
+import { scalarBits } from "../lib/inputs";
+import { expectWitnessFails } from "../lib/expect";
+import { lcg } from "../lib/rand";
+import { RCV_BITS as WIDTH, TIMEOUT_CIRCUIT } from "../lib/constants";
+import { useCircuit } from "../lib/harness";
 
 const WRAPPER = fixturePath("test_fixed_base_mul.circom");
 const WIDTHS = fixturePath("test_fixed_base_mul_widths.circom");
@@ -20,16 +21,12 @@ describe("FixedBaseMul (fixed-base scalar mul on Baby-Jubjub)", function () {
 
     const ctx = useCircuit(WRAPPER);
 
-    async function scalarMul(scalar: Field): Promise<[bigint, bigint]> {
-        const w = await ctx.circuit.calculateWitness({ scalar: scalar.toString() }, true);
-        return [w[1], w[2]];
+    async function scalarMul(scalar: Field): Promise<Point> {
+        return readPoint(await ctx.circuit.calculateWitness({ scalar: scalar.toString() }, true));
     }
 
     async function expectMatches(scalar: Field, label: string): Promise<void> {
-        const got = await scalarMul(scalar);
-        const want = ctx.J.mulPointEscalar(H_BASE, scalar);
-        expect(got[0], `${label} x`).to.equal(want[0]);
-        expect(got[1], `${label} y`).to.equal(want[1]);
+        expect(await scalarMul(scalar), label).to.deep.equal(ctx.J.mulPointEscalar(H_BASE, scalar));
     }
 
     it("agrees with the reference on the identity and small scalars", async () => {
@@ -143,8 +140,7 @@ describe("FixedBaseMul vs circomlib EscalarMulFix", function () {
     async function bothAgree(scalar: Field): Promise<void> {
         const w = await ctx.circuit.calculateWitness({ scalar: scalar.toString() }, true);
         // outputs in declaration order: circomlib[2] then windowed[2]
-        expect(w[1], `x mismatch at ${scalar}`).to.equal(w[3]);
-        expect(w[2], `y mismatch at ${scalar}`).to.equal(w[4]);
+        expect(readPoint(w, 0), `mismatch at ${scalar}`).to.deep.equal(readPoint(w, 2));
     }
 
     it("agrees on edge scalars", async () => {
@@ -186,17 +182,16 @@ describe("FixedBaseMul edge widths", function () {
         );
     }
 
-    function expectPoint(w: bigint[], offset: number, scalar: Field, label: string): void {
-        const want = ctx.J.mulPointEscalar(H_BASE, scalar);
-        expect(w[offset], `${label} x`).to.equal(want[0]);
-        expect(w[offset + 1], `${label} y`).to.equal(want[1]);
+    /** Output point `output` (0, 2 or 4: s4, s6, s8) must equal `scalar · H`. */
+    function expectPoint(w: bigint[], output: number, scalar: Field, label: string): void {
+        expect(readPoint(w, output), label).to.deep.equal(ctx.J.mulPointEscalar(H_BASE, scalar));
     }
 
     // nWindows == 1: the accumulator is skipped and the output is the bare mux.
     it("is exhaustively correct at 4 bits (single-window path)", async () => {
         for (let k = 0n; k < 16n; k++) {
             const w = await run(k, 0n, 0n);
-            expectPoint(w, 1, k, `s4=${k}`);
+            expectPoint(w, 0, k, `s4=${k}`);
         }
     });
 
@@ -204,7 +199,7 @@ describe("FixedBaseMul edge widths", function () {
     it("is exhaustively correct at 6 bits (zero-padded top window)", async () => {
         for (let k = 0n; k < 64n; k++) {
             const w = await run(0n, k, 0n);
-            expectPoint(w, 3, k, `s6=${k}`);
+            expectPoint(w, 2, k, `s6=${k}`);
         }
     });
 
@@ -212,7 +207,7 @@ describe("FixedBaseMul edge widths", function () {
     it("is exhaustively correct at 8 bits (all 16 entries x 2 windows)", async () => {
         for (let k = 0n; k < 256n; k++) {
             const w = await run(0n, 0n, k);
-            expectPoint(w, 5, k, `s8=${k}`);
+            expectPoint(w, 4, k, `s8=${k}`);
         }
     });
 
@@ -231,23 +226,18 @@ describe("FixedBaseMulBits (raw, caller-constrained bits)", function () {
 
     const ctx = useCircuit(RAW_BITS);
 
-    function bitsOf(scalar: Field): string[] {
-        return Array.from({ length: Number(WIDTH) }, (_, i) => ((scalar >> BigInt(i)) & 1n).toString());
-    }
-
     it("agrees with the reference on boolean bit arrays", async () => {
         for (const s of [0n, 1n, 255n, (1n << 200n) + 12345n, BABYJUB_SUBGROUP_ORDER - 1n]) {
-            const w = await ctx.circuit.calculateWitness({ e: bitsOf(s) }, true);
-            const want = ctx.J.mulPointEscalar(H_BASE, s);
-            expect([w[1], w[2]], `scalar=${s}`).to.deep.equal(want);
+            const w = await ctx.circuit.calculateWitness({ e: scalarBits(s, WIDTH) }, true);
+            expect(readPoint(w), `scalar=${s}`).to.deep.equal(ctx.J.mulPointEscalar(H_BASE, s));
         }
     });
 
     it("leaves the curve when a selector bit is not boolean", async () => {
-        const zeros = bitsOf(0n);
+        const zeros = scalarBits(0n, WIDTH);
 
         const clean = await ctx.circuit.calculateWitness({ e: zeros }, true);
-        expect([clean[1], clean[2]], "boolean input must give the identity").to.deep.equal([0n, 1n]);
+        expect(readPoint(clean), "boolean input must give the identity").to.deep.equal([0n, 1n]);
 
         const nonBoolean = [...zeros];
         nonBoolean[0] = "2";
@@ -256,6 +246,6 @@ describe("FixedBaseMulBits (raw, caller-constrained bits)", function () {
         // The result is not a curve point at all. An off-curve mux output can
         // make BabyAdd's `(1 + d*tau) * xout === ...` degenerate, turning a lost
         // booleanity constraint into an under-constrained one.
-        expect(ctx.J.inSubgroup([dirty[1], dirty[2]]), "non-boolean input escapes the subgroup").to.equal(false);
+        expect(ctx.J.inSubgroup(readPoint(dirty)), "non-boolean input escapes the subgroup").to.equal(false);
     });
 });

@@ -6,15 +6,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { promisify } from "util";
 import { exec as execCb } from "child_process";
-import { fileURLToPath } from "url";
 // circom_tester ships without TS types
 // @ts-ignore
 import { wasm as wasmTester } from "circom_tester";
 
-import type { Field } from "../helpers";
+import type { Field, Point } from "../helpers";
+import { ROOT } from "./files";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, "..", "..");
 const SRC_DIR = path.join(ROOT, "src");
 const NODE_MODULES = path.join(ROOT, "node_modules");
 
@@ -51,6 +49,11 @@ export interface CircuitTester {
  */
 export function readOutput(witness: bigint[], index = 0): Field {
     return witness[index + 1];
+}
+
+/** Read the point whose coordinates are outputs `index` and `index + 1`. */
+export function readPoint(witness: bigint[], index = 0): Point {
+    return [readOutput(witness, index), readOutput(witness, index + 1)];
 }
 
 export function srcPath(...parts: string[]): string {

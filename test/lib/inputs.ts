@@ -13,6 +13,16 @@ export function padToSlots<T>(real: T[], total: number, zero: T): T[] {
     return out;
 }
 
+/** Input for the `PolyEval(N)` fixture. */
+export function polyEvalInput(coeffs: Field[], z: Field) {
+    return { coeffs: coeffs.map(c => c.toString()), z: z.toString() };
+}
+
+/** Little-endian bits of `scalar`, `width` of them: the `FixedBaseMulBits` input. */
+export function scalarBits(scalar: Field, width: number | bigint): string[] {
+    return Array.from({ length: Number(width) }, (_, i) => ((scalar >> BigInt(i)) & 1n).toString());
+}
+
 export function merkleInputJson(leaf: Field, pathElements: Field[][], pathIndices: number[]) {
     return {
         leaf: leaf.toString(),

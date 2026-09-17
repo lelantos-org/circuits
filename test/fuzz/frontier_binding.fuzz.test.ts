@@ -2,7 +2,7 @@
 //
 // `BatchAppend` (`lib/batch_append.circom`) rebuilds `old_root` from
 // `frontier_in`, so a relayer cannot pair a real `oldRoot` with a forged
-// frontier. `batch_append.test.ts` covers the gadget at depths 2 and 4 over
+// frontier. `gadgets/batch_append.test.ts` covers the gadget at depths 2 and 4 over
 // every start; this file drives the full `tree_update_batch` circuit at the
 // production DEPTH over random:
 //   - edge-digit `start_index` patterns (digits ∈ {0, 3}: minimal or maximal
@@ -24,16 +24,12 @@
 
 import * as fc from "fast-check";
 
-import { srcPath } from "../lib/circuit";
 import { treeUpdateBatchInputJson } from "../lib/inputs";
-import { expectAccepts, expectWitnessFails } from "../lib/expect";
-import { buildHonest, seededLeaf, type BatchWitness, type LeafWitness } from "../lib/batch";
+import { expectAccepts } from "../lib/expect";
+import type { BatchWitness } from "../lib/batch";
 import { DEPTH, MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
 import { fcParamsFor } from "./arbitraries";
-import { useCircuit } from "../lib/harness";
-
-const CAPACITY = 4 ** DEPTH;
-const WRAPPER = srcPath("tree_update_batch.circom");
+import { CAPACITY, expectBatchRejects, useBatchCircuit } from "../batch/setup";
 
 // Run count comes from `fcParamsFor("FRONTIER")` at the call site below.
 // `FRONTIER` scales to 0.25x NUM_RUNS in arbitraries.ts; override with
@@ -59,7 +55,7 @@ function tamperableLevels(digits: number[]): number[] {
 describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () {
     this.timeout(TIMEOUT_HEAVY);
 
-    const ctx = useCircuit(WRAPPER);
+    const ctx = useBatchCircuit();
 
     it(`any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..${MAX_L} leaves)`, async () => {
         // Compose digits and k together so k always fits the remaining capacity,
@@ -101,11 +97,8 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
             async ({ digits, k, level }, slotIdx, depositFlags) => {
                 const startIndex = startIndexFromEdgeDigits(digits);
 
-                const leaves: LeafWitness[] = [];
-                for (let i = 0; i < k; i++) {
-                    leaves.push(seededLeaf(ctx.P, ctx.J, i, depositFlags[i]));
-                }
-                const honest = buildHonest(ctx.P, startIndex, leaves);
+                const leaves = ctx.batch.seededMany(k, i => depositFlags[i]);
+                const honest = ctx.batch.honest(startIndex, leaves);
 
                 // The honest witness must verify, or the tamper-rejection
                 // assertion below is vacuous.
@@ -126,9 +119,9 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
                 // `treeUpdateBatchChallenge` and `treeUpdateBatchCoeffs`), and the
                 // only possible failure is `old_root === append.old_root` rather
                 // than a (z, y) mismatch.
-                await expectWitnessFails(
+                await expectBatchRejects(
                     ctx.circuit,
-                    treeUpdateBatchInputJson(tampered),
+                    tampered,
                     `frontier perturbation at (level=${level}, slot=${slotIdx}) must reject`,
                 );
             },

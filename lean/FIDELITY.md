@@ -109,7 +109,7 @@ collapsed rather than transcribed:
    however, assume `ZerosCoherent` (`Gadgets/Common.lean`) — that the fills are the
    empty-subtree chain — for the reason the header of `src/lib/batch_append.circom` gives.
    Lean cannot evaluate Poseidon, so the chain is a hypothesis, not a transcription;
-   `test/merkle.test.ts` pins the constants to it numerically, and
+   `test/gadgets/merkle.test.ts` pins the constants to it numerically, and
    `ZerosCoherent.eq_emptyChain` shows the hypothesis determines the table.
 
 See "What is not proved" in [README.md](README.md). `src/4x6.circom` is the only transact

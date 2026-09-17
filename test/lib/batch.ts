@@ -247,6 +247,49 @@ export function depositPairs(P: Poseidon, J: Jubjub, count: number): LeafWitness
             : seededLeaf(P, J, i, 1, 0n, 0n));
 }
 
+/**
+ * The builders above with the gadgets bound, for suites that hold a `P` and `J`
+ * for their whole run. Mirrors `lib/transact.ts :: TxBuilder`.
+ */
+export class BatchBuilder {
+    constructor(public readonly P: Poseidon, public readonly J: Jubjub) {}
+
+    /** `simpleLeaf`: only the discriminating fields, the rest fixed. */
+    leaf(opts: { val: Field; isDeposit: 0 | 1; asset?: Field; pk?: Field }): LeafWitness {
+        return simpleLeaf({ P: this.P, J: this.J, ...opts });
+    }
+
+    /** `buildLeafWitness`: every field chosen. */
+    leafWith(opts: Omit<Parameters<typeof buildLeafWitness>[0], "P" | "J">): LeafWitness {
+        return buildLeafWitness({ P: this.P, J: this.J, ...opts });
+    }
+
+    /** `seededLeaf`: k distinct leaves from k seeds. */
+    seeded(seed: number, isDeposit: 0 | 1, val?: Field, asset?: Field): LeafWitness {
+        return seededLeaf(this.P, this.J, seed, isDeposit, val, asset);
+    }
+
+    /** `count` seeded leaves, seeds `0..count-1`, deposit flag per slot. */
+    seededMany(count: number, isDeposit: (i: number) => 0 | 1): LeafWitness[] {
+        return Array.from({ length: count }, (_, i) => this.seeded(i, isDeposit(i)));
+    }
+
+    /** `buildHonest`: `leaves` inserted after `prefilled` filler leaves. */
+    honest(prefilled: number, leaves: LeafWitness[]): BatchWitness {
+        return buildHonest(this.P, prefilled, leaves);
+    }
+
+    /** One `leaf(opts)` batch at `prefilled` (default 0): the base most single-constraint cases mutate. */
+    single(opts: Parameters<BatchBuilder["leaf"]>[0], prefilled = 0): BatchWitness {
+        return this.honest(prefilled, [this.leaf(opts)]);
+    }
+
+    /** `depositPairs`: principal/fee pairs as a flush emits them. */
+    depositPairs(count: number): LeafWitness[] {
+        return depositPairs(this.P, this.J, count);
+    }
+}
+
 // ===== divergent-witness coverage =====
 
 /**

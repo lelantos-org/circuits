@@ -10,36 +10,8 @@ import {
 } from "../helpers";
 import { expectAccepts, expectWitnessFails } from "../lib/expect";
 import { ALICE_NSK, N_IN, N_OUT, TIMEOUT_CIRCUIT, TWO_64, TWO_252 } from "../lib/constants";
+import { readSignal, writeSignal } from "../lib/signal_path";
 import { useTransactCircuit } from "./setup";
-
-/** Read/write a witness field addressed as `out_cv_dep[1][0]`. */
-function parsePath(path: string): { key: string; idx: number[] } {
-    const [key, ...rest] = path.split("[");
-    return { key, idx: rest.map(part => Number(part.replace("]", ""))) };
-}
-
-function readField(input: CircomTransactInput, path: string): string {
-    const { key, idx } = parsePath(path);
-    let cur: unknown = (input as Record<string, unknown>)[key];
-    for (const i of idx) cur = (cur as unknown[])[i];
-    return cur as string;
-}
-
-function writeField(input: CircomTransactInput, path: string, value: bigint): void {
-    const { key, idx } = parsePath(path);
-    if (idx.length === 0) {
-        (input as Record<string, unknown>)[key] = value.toString();
-        return;
-    }
-    let cur = (input as Record<string, unknown>)[key] as unknown[];
-    for (const i of idx.slice(0, -1)) cur = cur[i] as unknown[];
-    cur[idx[idx.length - 1]] = value.toString();
-}
-
-/** The default mutation: nudge the field by one. Enough to break any binding. */
-function bumped(input: CircomTransactInput, path: string): bigint {
-    return BigInt(readField(input, path)) + 1n;
-}
 
 interface TamperCase {
     /** Field to change, addressed the way the circom names it. */
@@ -188,12 +160,10 @@ describe("transact_4x6 / single-field tamper", function () {
      */
     function oneRealRestDummy(): CircomTransactInput {
         const { tx } = ctx;
-        const { root, inputs } = tx.oneRealOneDummy(1000n, ALICE_NSK);
-        return tx.build({
-            inputs,
-            outputs: [tx.note(1000n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-        });
+        return tx.spend(
+            tx.oneRealOneDummy(1000n, ALICE_NSK),
+            [tx.note(1000n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
+        );
     }
 
     // Vacuity guard for the per-slot base: if the untouched witness were
@@ -208,10 +178,11 @@ describe("transact_4x6 / single-field tamper", function () {
     });
 
     for (const { path, reason, value, base } of TAMPER_CASES) {
-        const mutate = value ?? ((input: CircomTransactInput) => bumped(input, path));
+        // The default mutation nudges the field by one: enough to break any binding.
+        const mutate = value ?? ((input: CircomTransactInput) => readSignal(input, path) + 1n);
         it(`FAILS when ${path} is tampered — ${reason}`, async () => {
             const input = honest(base);
-            writeField(input, path, mutate(input));
+            writeSignal(input, path, mutate(input));
             await expectWitnessFails(ctx.circuit, input, `${path}: ${reason} — did not reject`);
         });
     }
@@ -223,49 +194,36 @@ describe("transact_4x6 / single-field tamper", function () {
     it("accepts blinders at the top of the 252-bit range", async () => {
         const { tx, circuit } = ctx;
         const maxRcv = TWO_252 - 1n;
-        const tree = tx.newTree();
 
         const wide = { ...tx.note(100n, ALICE_NSK, 1n), rcv: maxRcv, rcvDep: maxRcv - 1n };
-        let inA = tx.insert(tree, wide, ALICE_NSK);
-        let inB = tx.insert(tree, tx.note(50n, ALICE_NSK, 2n), ALICE_NSK);
-        const root = tree.root();
-        inA = tx.finalize(tree, inA);
-        inB = tx.finalize(tree, inB);
-
         const outA = { ...tx.note(75n, ALICE_NSK, 9n), rcv: maxRcv - 2n, rcvDep: maxRcv - 3n };
-        const input = tx.build({
-            inputs: [inA, inB],
-            outputs: [outA, tx.note(75n, ALICE_NSK, 11n)],
-            merkleRoot: root,
-        });
-
-        const w = await circuit.calculateWitness(input, true);
-        await circuit.checkConstraints(w);
+        await expectAccepts(circuit, tx.spend(
+            tx.plant([wide, tx.note(50n, ALICE_NSK, 2n)], ALICE_NSK),
+            [outA, tx.note(75n, ALICE_NSK, 11n)],
+        ));
     });
 
     // The two out_cm cases need their own bases: one slot holds a real note, the
     // other a padding output, and a different constraint rejects each.
+    /** One real output in slot 0, a padding output in slot 1. */
+    function realAndPaddingOutput(): CircomTransactInput {
+        const { tx } = ctx;
+        return tx.spend(
+            tx.oneRealOneDummy(100n, ALICE_NSK),
+            [tx.note(100n, ALICE_NSK, 9n), dummyOutput(tx.P, 1)],
+        );
+    }
+
     it("FAILS when a real output's out_cm is replaced", async () => {
-        const { tx, circuit } = ctx;
-        const { root, inputs } = tx.oneRealOneDummy(100n, ALICE_NSK);
-        const input = tx.build({
-            inputs,
-            outputs: [tx.note(100n, ALICE_NSK, 9n), dummyOutput(tx.P, 1)],
-            merkleRoot: root,
-        });
-        writeField(input, "out_cm[0]", 12345n);
-        await expectWitnessFails(circuit, input, "out_cm[0] must equal the recomputed commitment");
+        const input = realAndPaddingOutput();
+        writeSignal(input, "out_cm[0]", 12345n);
+        await expectWitnessFails(ctx.circuit, input, "out_cm[0] must equal the recomputed commitment");
     });
 
     it("FAILS when a padding output's out_cm is replaced", async () => {
-        const { tx, circuit } = ctx;
-        const { root, inputs } = tx.oneRealOneDummy(100n, ALICE_NSK);
-        const input = tx.build({
-            inputs,
-            outputs: [tx.note(100n, ALICE_NSK, 9n), dummyOutput(tx.P, 1)],
-            merkleRoot: root,
-        });
-        writeField(input, "out_cm[1]", 777n);
+        const { circuit } = ctx;
+        const input = realAndPaddingOutput();
+        writeSignal(input, "out_cm[1]", 777n);
         await expectWitnessFails(circuit, input, "the padding slot's out_cm is constrained too");
     });
 
@@ -273,7 +231,7 @@ describe("transact_4x6 / single-field tamper", function () {
         const input = oneRealRestDummy();
         // Slot 1 is a dummy; slot 0 holds the real note that keeps the bundle
         // past `all_dummy.out === 0`.
-        writeField(input, "nullifier[1]", 42n);
+        writeSignal(input, "nullifier[1]", 42n);
         await expectWitnessFails(ctx.circuit, input, "nf is constrained in dummy slots as well");
     });
 });

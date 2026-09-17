@@ -323,7 +323,7 @@ development may derive conservation from the point equation.
   old root was a separate, unmodelled `FrontierRoot` template.
 * **The `EMPTY_SUBTREE` constants.** The batch advance results assume `ZerosCoherent`, that
   the fills form the empty-subtree chain. Lean treats Poseidon as opaque and cannot check the
-  eleven numeric constants against it; `test/merkle.test.ts` recomputes the chain with
+  eleven numeric constants against it; `test/gadgets/merkle.test.ts` recomputes the chain with
   circomlibjs and asserts every entry.
 * **Uniqueness of a deposit leaf's opening.** `batch_deposit_opens` gives existence, not
   uniqueness, and uniqueness is false in general: the Pedersen asset generators are known
@@ -331,7 +331,7 @@ development may derive conservation from the point equation.
   deposit be spent as a different asset. Nothing in the circuit closes this — `cms[k]` is
   depositor-chosen and carries no proof — so it rests on which ids are registered.
   `scripts/check-asset-ids.ts` computes the bound over an id set and
-  `test/check_asset_ids.test.ts` pins the gate; both live outside Lean because the argument
+  `test/tooling/check_asset_ids.test.ts` pins the gate; both live outside Lean because the argument
   is about `m(·)`, which the model deliberately keeps opaque.
 * **`BabyCheck` on `cv_dep` (`tree_update_batch.circom` step 5).** The development has no
   curve equation, only the opaque `coords` / `babyAdd` interface, so "the point is on the

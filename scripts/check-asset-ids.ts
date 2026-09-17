@@ -229,7 +229,7 @@ async function main(argv: string[]): Promise<number> {
     return bad.length ? 1 : 0;
 }
 
-// Run the CLI only when executed directly; `test/check_asset_ids.test.ts` imports
+// Run the CLI only when executed directly; `test/tooling/check_asset_ids.test.ts` imports
 // `assetMultiplier` and `classifyPair`, and must not trigger `process.exit`.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     process.exit(await main(process.argv.slice(2)));

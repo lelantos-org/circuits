@@ -353,7 +353,7 @@ caller escrows one unit and commits a leaf bound by nothing but `BabyCheck`, and
 with `leaf_public_in` free the binding certifies a prover-chosen amount. Both
 produce a verifying proof against the production key. Promoting them back
 *without* step 6a is the other failure, the 256-bit dial above.
-`test/tree_update_batch.test.ts :: divergent witness` holds both directions.
+`test/batch/divergent.test.ts` holds both directions.
 
 **Verifier signature.** `snarkjs zkey export solidityverifier` emits
 `verifyProof(uint[2] _pA, uint[2][2] _pB, uint[2] _pC, uint[2] _pubSignals)`
@@ -465,7 +465,7 @@ message fits one Pedersen segment over `BASE[0]`; the blinding base `H` is
 > `max(|m(a)|, |m(a')|) / gcd(|m(a)|, |m(a')|) < 2^64`. Concrete pairs of valid
 > `uint64` ids meeting that bound exist. `scripts/check-asset-ids.ts`
 > (`just asset-ids`) computes it over an id set, verifying its model of `m(·)`
-> against the compiled gadget first; `test/check_asset_ids.test.ts` pins both.
+> against the compiled gadget first; `test/tooling/check_asset_ids.test.ts` pins both.
 > See §1.
 
 Two mirrors reproduce the gadget off-circuit byte for byte: the test reference
@@ -847,9 +847,11 @@ single-leaf inserts spends. Both folds read the frontier as plain linear terms. 
 | Test tree | Role |
 |---|---|
 | [`../test/ref/`](../test/ref/) | TypeScript reference implementation, with no SDK dependency; the circom is the source of truth |
-| [`../test/lib/`](../test/lib/) | Harness: circuit loader, dimensions, input shapers, witness assertions, witness builders |
+| [`../test/lib/`](../test/lib/) | Harness: circuit loader, suite hooks, dimensions, input shapers, signal paths, witness assertions, witness builders |
 | [`../test/transact/`](../test/transact/) | Transact suites by concern: balance, multi-asset, tamper, PolyEval binding, `rho` |
-| [`../test/tree_update_batch.test.ts`](../test/tree_update_batch.test.ts) | Deposit binding, odd counts, frontier binding, padding, capacity |
+| [`../test/batch/`](../test/batch/) | Tree-update batch suites by concern: shapes and capacity, deposit binding, frontier, padding, divergent witness |
+| [`../test/gadgets/`](../test/gadgets/) | Library templates in isolation: Merkle, `PolyEval`, `FixedBaseMul`, `BatchAppend` |
+| [`../test/tooling/`](../test/tooling/) | The `just budget` and asset-id gates, and the underconstraint detectors' self-test |
 | [`../test/formal/`](../test/formal/) | Pins the slot order against the Lean dump and `_pubSignals = [y, z]` |
 | [`../test/fuzz/`](../test/fuzz/) | Property-based suites over Transact, Merkle, frontier binding, PolyEval, FixedBaseMul |
 | [`../test/fixtures/`](../test/fixtures/) | Small-parameter wrappers instantiating library templates |

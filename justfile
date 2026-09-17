@@ -207,7 +207,7 @@ test-fuzz:
 underconstrained:
     FUZZ=${FUZZ:-medium} NODE_OPTIONS="--import tsx/esm" \
         ./node_modules/.bin/mocha --reporter spec --timeout 1800000 --exit \
-        test/underconstrained_selftest.test.ts test/fuzz/underconstrained.fuzz.test.ts \
+        test/tooling/underconstrained_selftest.test.ts test/fuzz/underconstrained.fuzz.test.ts \
         test/fuzz/underconstrained_batch.fuzz.test.ts
 
 # === constraint budget ===

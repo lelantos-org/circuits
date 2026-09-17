@@ -1,7 +1,7 @@
 // Checks that a transact prover cannot attest to a transaction the contract did
 // not validate.
 //
-// `test/tree_update_batch.test.ts :: divergent witness` covers the batch
+// `test/batch/divergent.test.ts` covers the batch
 // circuit. The other transact suites derive `z` from the same bundle they pass
 // to the circuit (`rebindFiatShamir`), so witness and calldata are the same
 // transaction by construction and a word the circuit never pins still appears
@@ -21,6 +21,7 @@
 
 import { flatten, type TransactWitnessBundle } from "../helpers";
 import { assertViewsDiverge, expectNotForgeable, expectWitnessY } from "../lib/expect";
+import { incremented as bump } from "../lib/signal_path";
 import { ALICE_NSK, TIMEOUT_CIRCUIT } from "../lib/constants";
 import { bindFiatShamir, calldataView, calldataY } from "../lib/transact";
 import { useTransactCircuit } from "./setup";
@@ -64,10 +65,6 @@ describe("transact_4x6 / divergent witness", function () {
         { field: "out_cv", diverge: c => { c.out_cv[0][0] = bump(c.out_cv[0][0]); } },
         { field: "out_cv_dep", diverge: c => { c.out_cv_dep[0][0] = bump(c.out_cv_dep[0][0]); } },
     ];
-
-    function bump(v: string): string {
-        return (BigInt(v) + 1n).toString();
-    }
 
     for (const { field, diverge } of CASES) {
         it(`${field} declared differently in calldata cannot be forged`, async () => {
