@@ -237,4 +237,20 @@ theorem polyEval_binding {n : ℕ} {c c' : ℕ → F} (hn : 0 < n)
   rw [hset]
   exact le_trans (le_trans (Multiset.toFinset_card_le _) (Polynomial.card_roots' P)) hnat
 
+/-! ## The challenge
+
+`PolyEval` evaluates at a challenge the circuit receives as an input, so the binding
+argument above holds only with the coefficient vector fixed first. Who fixes it is the
+verifier's business, and both circuits have a verifier that derives `z` the same way. -/
+
+/-- The verifier's Fiat-Shamir derivation, as an abstract relation: `chal c z` holds when
+`z` is the challenge derived from coefficient vector `c`.
+`contracts/src/libs/PubInputs.sol :: _finalizeRaw` instantiates it as
+`z = keccak256(abi.encode(c)) % r`, so it is a function of the vector alone.
+
+It lives here rather than beside either circuit's obligations because both use it:
+`ContractObligations` for `4x6.circom` and `BatchContractObligations` for
+`tree_update_batch.circom`. -/
+abbrev Challenge : Type := (ℕ → F) → F → Prop
+
 end Lelantos

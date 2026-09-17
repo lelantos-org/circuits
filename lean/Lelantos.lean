@@ -22,15 +22,22 @@ import Lelantos.Gadgets.BatchAppend
 import Lelantos.Gadgets.ValueCommit
 import Lelantos.Gadgets.PointBalance
 
--- The transact circuit: the two slot templates, its signals and public-input layout, and
--- the top-level constraint system with `transact_sound`.
+-- The transact circuit, one module per job: the two slot templates, the signal set, the
+-- public-input layout, and the constraint system with `transact_sound`.
 import Lelantos.Circuit.Spent
 import Lelantos.Circuit.Output
 import Lelantos.Circuit.Witness
+import Lelantos.Circuit.Layout
 import Lelantos.Circuit.Transact
 
--- The relayer batch tree-advance circuit: `src/tree_update_batch.circom`.
+-- The relayer batch tree-advance circuit (`src/tree_update_batch.circom`), split the same
+-- way: signals, layout, constraint system.
+import Lelantos.Circuit.BatchWitness
+import Lelantos.Circuit.BatchLayout
 import Lelantos.Circuit.TreeUpdateBatch
+
+-- What neither circuit can enforce and its verifier must, for both of them.
+import Lelantos.Circuit.Obligations
 
 -- Results about the finished system: which assignments exist, and which cannot.
 import Lelantos.Proofs.Completeness

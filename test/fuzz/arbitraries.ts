@@ -6,7 +6,7 @@
 // Env vars:
 //   FUZZ=light|medium|heavy            global run count (5 / 20 / 100)
 //   FUZZ_RUNS_<SUITE>=N                per-suite override, takes precedence
-//     SUITE keys: FIXEDBASE, FRONTIER, MERKLE, POLYEVAL, TRANSACT,
+//     SUITE keys: BALANCE, FIXEDBASE, FRONTIER, MERKLE, POLYEVAL, TRANSACT,
 //                 TRANSACT_OVERFLOW, TRANSACT_VARIANTS, UNDERCONSTRAINED
 //   FUZZ_SEED=N                        pin the fast-check seed (see below)
 //   FUZZ_PATH=a:b:c                    replay one shrunk counterexample
@@ -181,3 +181,108 @@ export function fcParamsFor<E = unknown>(
     if (extra?.examples && extra.examples.length > 0) out.examples = extra.examples;
     return out;
 }
+
+// ===== per-asset balance shapes =====
+//
+// `PerAssetValueBalance(N_IN, N_OUT)` sweeps N_IN + N_OUT + 1 candidate assets,
+// so its behaviour depends on how assets are spread across slots rather than on
+// the values alone. The transact-level arbitraries above are single-asset (a
+// witness there costs a tree, four authentication paths and a 100k-constraint
+// circuit); these draw the gadget's inputs directly, which is cheap enough to
+// vary the asset layout itself.
+
+/** A 64-bit asset id. Never 0: the circuits reject `asset_id == 0` on real slots. */
+export const arbAssetId = (): fc.Arbitrary<bigint> =>
+    fc.oneof(
+        // Small ids, as a registry would assign them, so collisions between
+        // slots are common and duplicate candidate rows get exercised.
+        { arbitrary: fc.bigInt(1n, 8n), weight: 3 },
+        { arbitrary: fc.bigInt(1n, MAX_VALUE), weight: 1 },
+    );
+
+/** Values are capped so that a whole side sums well below the modulus. */
+const MAX_SLOT_VALUE = 1n << 60n;
+
+export interface AssetBalanceShape {
+    inAsset: bigint[];
+    inValue: bigint[];
+    outAsset: bigint[];
+    outValue: bigint[];
+    publicAssetId: bigint;
+    publicIn: bigint;
+    publicOut: bigint;
+}
+
+/**
+ * A per-asset balanced shape: every asset's inputs plus its transparent bucket
+ * equal its outputs plus the other bucket, exactly as the gadget requires.
+ *
+ * Output slots `j < N_IN` take input slot `j`'s asset, so no input asset can be
+ * left without an output slot to be spent into; the remaining output slots
+ * repeat one of those assets. `publicMode` picks between no transparent bucket,
+ * a deposit, a withdrawal and an orphan asset whose two buckets cancel — the
+ * last being the only case where `public_asset_id` names an asset no note
+ * carries.
+ */
+export const arbBalancedAssetShape = (
+    nIn: number,
+    nOut: number,
+): fc.Arbitrary<AssetBalanceShape> => {
+    if (nOut < nIn) throw new Error("arbBalancedAssetShape: nOut must be at least nIn");
+    return fc.tuple(
+        fc.array(arbAssetId(), { minLength: nIn, maxLength: nIn }),
+        fc.array(fc.bigInt(0n, MAX_SLOT_VALUE), { minLength: nIn, maxLength: nIn }),
+        fc.array(fc.nat({ max: nIn - 1 }), { minLength: nOut - nIn, maxLength: nOut - nIn }),
+        fc.array(fc.bigInt(0n, 1n << 62n), { minLength: nOut, maxLength: nOut }),
+        fc.nat({ max: 3 }),
+        fc.bigInt(0n, MAX_SLOT_VALUE),
+        arbAssetId(),
+    ).map(([inAsset, inValue, extraPicks, splitSeeds, publicMode, publicAmount, orphan]) => {
+        const outAsset = [
+            ...inAsset,
+            ...extraPicks.map(i => inAsset[i]),
+        ];
+
+        // Per-asset totals the outputs must reproduce.
+        const totals = new Map<bigint, bigint>();
+        for (let i = 0; i < nIn; i++) {
+            totals.set(inAsset[i], (totals.get(inAsset[i]) ?? 0n) + inValue[i]);
+        }
+
+        let publicAssetId = orphan;
+        let publicIn = 0n;
+        let publicOut = 0n;
+        if (publicMode === 1) {
+            // Deposit: the bucket adds to an asset the notes already carry.
+            publicAssetId = inAsset[0];
+            publicIn = publicAmount;
+            totals.set(publicAssetId, (totals.get(publicAssetId) ?? 0n) + publicIn);
+        } else if (publicMode === 2) {
+            // Withdrawal, capped at what that asset actually holds.
+            publicAssetId = inAsset[0];
+            const held = totals.get(publicAssetId) ?? 0n;
+            publicOut = held === 0n ? 0n : publicAmount % (held + 1n);
+            totals.set(publicAssetId, held - publicOut);
+        } else if (publicMode === 3) {
+            // Both buckets equal, so the row reads `x + p == x + p` whether or
+            // not the drawn id collides with an asset the notes carry.
+            publicIn = publicAmount;
+            publicOut = publicAmount;
+        }
+
+        // Split each asset's total across the output slots carrying it.
+        const outValue = Array<bigint>(nOut).fill(0n);
+        for (const [asset, total] of totals) {
+            const slots = outAsset.flatMap((a, j) => (a === asset ? [j] : []));
+            let left = total;
+            for (let k = 0; k < slots.length - 1; k++) {
+                const share = left === 0n ? 0n : splitSeeds[slots[k]] % (left + 1n);
+                outValue[slots[k]] = share;
+                left -= share;
+            }
+            outValue[slots[slots.length - 1]] = left;
+        }
+
+        return { inAsset, inValue, outAsset, outValue, publicAssetId, publicIn, publicOut };
+    });
+};

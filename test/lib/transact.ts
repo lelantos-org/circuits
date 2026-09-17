@@ -83,8 +83,7 @@ export class TxBuilder {
     // pinning (asset, value) to the leaf.
     insert(tree: MerkleTree, n: Note, nsk: Field): SpentNote {
         const cm = commit(this.P, n);
-        const assetGen = this.J.hashToAssetGen(n.asset);
-        const cvDep = this.J.valueCommit(n.value, assetGen, n.rcvDep);
+        const cvDep = this.J.commit(n.asset, n.value, n.rcvDep);
         const idx = tree.insert(buildLeaf(this.P, cm, cvDep));
         return {
             ...n, nsk, cm,
@@ -278,6 +277,40 @@ export class TxBuilder {
     }
 
     /**
+     * `fullShape`, but every slot declares one of four distinct assets.
+     *
+     * `PerAssetValueBalance` sweeps N_CAND = N_IN + N_OUT + 1 = 11 candidate
+     * assets, and every other factory here is single-asset, so the whole sweep
+     * collapses onto one row: a candidate that is never evaluated, or one
+     * evaluated against the wrong slot, balances anyway. This shape gives four
+     * assets across the input slots and splits two of them across outputs, so
+     * each candidate carries a different sum.
+     *
+     * No slot is zero-valued, so relabelling any one of them — the tamper rows
+     * on `in_asset` / `out_asset` — moves value between two candidate rows and
+     * must be rejected. `test/gadgets/balance.test.ts` sweeps the gadget itself,
+     * which is where the exhaustive cases live; this is the end-to-end shape.
+     *
+     * `publicAssetId` is left at its default, which no note declares: the
+     * public candidate row is then `0 == 0`, the orphan case.
+     *
+     *   asset 101: in 100          -> out 60 + 40
+     *   asset 102: in  50          -> out 50
+     *   asset 103: in  30          -> out 30
+     *   asset 104: in  20          -> out 15 + 5
+     */
+    fullShapeMultiAsset(nsk: Field = ALICE_NSK): TransactWitnessBundle {
+        assertMultiAssetConserves();
+        const inputs = MULTI_ASSET_IN.map(([asset, value], i) =>
+            this.note(value, nsk, BigInt(i + 1) * 1_000n, asset),
+        );
+        const outputs = MULTI_ASSET_OUT.map(([asset, value], j) =>
+            this.note(value, nsk, 1_000_000n + BigInt(j) * 1_000n, asset),
+        );
+        return this.spend(this.plant(inputs, nsk), outputs);
+    }
+
+    /**
      * `values.length` real inputs from one owner against a single frozen root.
      *
      * Generalises `twoRealInputs`; rho seeds default to multiples of 1000 so
@@ -310,6 +343,61 @@ export interface Split {
  */
 const FULL_SHAPE_IN_VALUES = [100n, 50n, 30n, 20n];
 const FULL_SHAPE_OUT_VALUES = [60n, 50n, 40n, 30n, 15n, 5n];
+
+/**
+ * `(asset, value)` per slot for `fullShapeMultiAsset`, four assets across the
+ * input slots.
+ *
+ * Every value is non-zero: a zero-valued slot contributes nothing to its
+ * candidate row, so relabelling its asset would balance and the tamper rows
+ * built on this shape would pass vacuously.
+ */
+export const MULTI_ASSET_IN: readonly (readonly [Field, bigint])[] = [
+    [101n, 100n],
+    [102n, 50n],
+    [103n, 30n],
+    [104n, 20n],
+];
+
+/** The outputs conserving the table above, splitting assets 101 and 104. */
+export const MULTI_ASSET_OUT: readonly (readonly [Field, bigint])[] = [
+    [101n, 60n],
+    [101n, 40n],
+    [102n, 50n],
+    [103n, 30n],
+    [104n, 15n],
+    [104n, 5n],
+];
+
+/**
+ * Per-asset conservation for the two tables above, checked before the shape is
+ * built: an unbalanced base would be rejected by the circuit and every
+ * rejection test built on it would pass without testing anything. Also pins the
+ * table lengths to the shape, as `assertFullShapeValues` does.
+ */
+function assertMultiAssetConserves(): void {
+    if (MULTI_ASSET_IN.length !== N_IN || MULTI_ASSET_OUT.length !== N_OUT) {
+        throw new Error(
+            `fullShapeMultiAsset: tables are ${MULTI_ASSET_IN.length}x${MULTI_ASSET_OUT.length} ` +
+                `but the shape is ${N_IN}x${N_OUT}. Extend MULTI_ASSET_IN / MULTI_ASSET_OUT, ` +
+                "keeping every asset conserved and every value non-zero.",
+        );
+    }
+    const totals = new Map<bigint, bigint>();
+    for (const [asset, value] of MULTI_ASSET_IN) {
+        if (value === 0n) throw new Error(`fullShapeMultiAsset: input asset ${asset} has value 0`);
+        totals.set(asset, (totals.get(asset) ?? 0n) + value);
+    }
+    for (const [asset, value] of MULTI_ASSET_OUT) {
+        if (value === 0n) throw new Error(`fullShapeMultiAsset: output asset ${asset} has value 0`);
+        totals.set(asset, (totals.get(asset) ?? 0n) - value);
+    }
+    for (const [asset, net] of totals) {
+        if (net !== 0n) {
+            throw new Error(`fullShapeMultiAsset: asset ${asset} is not conserved (net ${net})`);
+        }
+    }
+}
 
 /**
  * The two tables above are listed explicitly rather than generated, so a change

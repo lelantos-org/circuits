@@ -14,7 +14,7 @@
 // Num2Bits calls enforce are asserted instead.
 
 import { buildBabyjub, buildPedersenHash } from "circomlibjs";
-import { BABYJUB_SUBGROUP_ORDER, POW_2_64, type Field, type Point } from "./field.js";
+import { BABYJUB_SUBGROUP_ORDER, BN254_FR, POW_2_64, mod, type Field, type Point } from "./field.js";
 import { toLeBytes } from "./bytes.js";
 import { TAG_ASSET } from "./tags.js";
 
@@ -30,6 +30,16 @@ export const H_BASE: Point = [
 
 /** Width of the `rcv` scalar, mirroring `RCV_BITS()` in src/lib/value_commit.circom. */
 const MAX_BLINDER_BITS = 252n;
+
+/**
+ * `−(x, y) = (−x, y)`, the twisted Edwards negation.
+ *
+ * Coordinates live in the BN254 scalar field, the same modulus the circuit's
+ * signals reduce by, so this is the negation `PointSum` cancels against.
+ */
+export function negatePoint(p: Point): Point {
+    return [mod(-p[0], BN254_FR), p[1]];
+}
 
 function assertBigint(x: unknown, what: string): asserts x is bigint {
     if (typeof x !== "bigint") {
@@ -146,5 +156,33 @@ export class Jubjub {
             this.mulPointEscalar(assetGen, value),
             this.mulPointEscalar(H_BASE, rcv),
         );
+    }
+
+    /** `valueCommit` against the note's own generator: cv = value·V^asset + rcv·H. */
+    commit(asset: Field, value: Field, rcv: Field): Point {
+        return this.valueCommit(value, this.hashToAssetGen(asset), rcv);
+    }
+
+    /**
+     * The four points `ValueCommitPair` emits for one note: the spend
+     * commitment, the deposit anchor, and each one's blinding multiple.
+     *
+     * Mirrors ValueCommitPair in src/lib/value_commit.circom, where both
+     * commitments share a single value·V^asset scalar mul and differ only in
+     * their blinder.
+     */
+    commitPair(n: { asset: Field; value: Field; rcv: Field; rcvDep: Field }): {
+        cv: Point;
+        rH: Point;
+        cvDep: Point;
+        rHDep: Point;
+    } {
+        const gen = this.hashToAssetGen(n.asset);
+        return {
+            cv: this.valueCommit(n.value, gen, n.rcv),
+            rH: this.mulPointEscalar(H_BASE, n.rcv),
+            cvDep: this.valueCommit(n.value, gen, n.rcvDep),
+            rHDep: this.mulPointEscalar(H_BASE, n.rcvDep),
+        };
     }
 }

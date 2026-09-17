@@ -2,7 +2,7 @@
 //
 // Transcribed from src/lib/poly_eval.circom. The same orders appear in
 // contracts/src/lib/PubInputs.sol :: compress and in Lelantos.piSlot
-// (lean/Lelantos/Circuit/Witness.lean). lean/expected/layout-*.txt pins the Lean
+// (lean/Lelantos/Circuit/Layout.lean). lean/expected/layout-*.txt pins the Lean
 // side; test/formal/layout_parity.test.ts ties it to this module.
 
 import { keccak_256 } from "@noble/hashes/sha3";

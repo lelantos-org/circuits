@@ -63,16 +63,22 @@ not proved.
 
 ## Obligations, not assumptions
 
-`Lelantos.ContractObligations` records what the circuit cannot enforce and the contract
-must: nullifier freshness, `z` being the challenge of this witness's coefficient vector,
-the `chain_id` / `recipient_address` checks, and the aux-digest recomputation. No theorem
-here assumes any of them; they are listed to separate the circuit's guarantees from the
-system's.
+`Lelantos.ContractObligations` records what the transact circuit cannot enforce and the
+contract must: nullifier freshness, distinctness of the nullifiers *within* one
+transaction, `z` being the challenge of this witness's coefficient vector, the `chain_id` /
+`recipient_address` checks, and the aux-digest recomputation. `Lelantos.BatchContractObligations`
+is the same ledger for `tree_update_batch.circom`: the challenge, plus the live root, the
+committed leaf count, the payload's leaf count and the escrow record behind each leaf. No
+theorem here assumes any field of either; they are listed to separate the circuit's
+guarantees from the system's.
 
-Three of the four are stubs (`True`, naming a check without stating it) because what they
-range over has no counterpart in this development. `challenge_binds_witness` is stated in
-full: without it the compressed public input carries no information. A stub is a claim
-made outside Lean.
+Most fields are stubs (`True`, naming a check without stating it) because what they range
+over — a nullifier set, an EVM `block.chainid`, a keccak preimage, the live accumulator, an
+escrow digest — has no counterpart in this development. Three are stated in full:
+`challenge_binds_witness` on both structures, without which the compressed public input
+carries no information, and `nullifiers_distinct`, which relates two fields of the same
+witness. A stub is a claim made outside Lean; a stated field is an assumption, not a
+result.
 
 ## Notable non-dependencies
 

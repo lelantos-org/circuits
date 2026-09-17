@@ -4,7 +4,7 @@
 // so the key set is part of the interface: an extra key is as significant as a
 // missing one.
 
-import type { Field, Point } from "./field.js";
+import { pointsJson, type Field, type Point } from "./field.js";
 import type { Jubjub } from "./jubjub.js";
 import type { Poseidon } from "./poseidon.js";
 import { buildNoteCommitment, buildNullifierFromNsk, type Note, type SpentNote } from "./note.js";
@@ -189,17 +189,11 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
     const intentHash = opts.intentHash ?? 0n;
 
     const outCm = outputs.map((o) => buildNoteCommitment(P, o));
-    const inCv: Point[] = inputs.map((i) =>
-        J.valueCommit(i.value, J.hashToAssetGen(i.asset), i.rcv),
-    );
-    const outCv: Point[] = outputs.map((o) =>
-        J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcv),
-    );
+    const inCv: Point[] = inputs.map((i) => J.commit(i.asset, i.value, i.rcv));
+    const outCv: Point[] = outputs.map((o) => J.commit(o.asset, o.value, o.rcv));
     // cv_dep anchors (asset, value, rcv_dep) into the Merkle leaf:
     //   leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
-    const outCvDep: Point[] = outputs.map((o) =>
-        J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcvDep),
-    );
+    const outCvDep: Point[] = outputs.map((o) => J.commit(o.asset, o.value, o.rcvDep));
 
     const z = opts.z ?? 1n;
 
@@ -211,14 +205,14 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
         public_asset_id: publicAssetId.toString(),
         public_in: publicIn.toString(),
         public_out: publicOut.toString(),
-        in_cv: inCv.map((p) => [p[0].toString(), p[1].toString()]),
-        out_cv: outCv.map((p) => [p[0].toString(), p[1].toString()]),
+        in_cv: pointsJson(inCv),
+        out_cv: pointsJson(outCv),
         recipient_address: recipientAddress.toString(),
         chain_id: chainId.toString(),
         payer_address: payerAddress.toString(),
         relayer_address: relayerAddress.toString(),
         intent_hash: intentHash.toString(),
-        out_cv_dep: outCvDep.map((p) => [p[0].toString(), p[1].toString()]),
+        out_cv_dep: pointsJson(outCvDep),
 
         in_asset: inputs.map((i) => i.asset.toString()),
         in_value: inputs.map((i) => i.value.toString()),

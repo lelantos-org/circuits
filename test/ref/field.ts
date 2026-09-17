@@ -10,6 +10,22 @@ export type Field = bigint;
 export type Point = [Field, Field];
 
 /**
+ * A point as the pair of decimal strings a circom input object carries.
+ *
+ * circom reads `signal input p[2]` as a two-element array, so every
+ * point-valued input, and every point compared against a witness, goes through
+ * this.
+ */
+export function pointJson(p: Point): string[] {
+    return [p[0].toString(), p[1].toString()];
+}
+
+/** `pointJson` over an array, for `signal input pts[N][2]`. */
+export function pointsJson(pts: readonly Point[]): string[][] {
+    return pts.map(pointJson);
+}
+
+/**
  * BN254 scalar field modulus — the Poseidon output range, and the modulus
  * every circuit signal is reduced by.
  */
@@ -19,6 +35,15 @@ export const BN254_FR =
 /** Baby-Jubjub prime-order subgroup order. */
 export const BABYJUB_SUBGROUP_ORDER =
     2736030358979909402780800718157159386076813972158567259200215660948447373041n;
+
+/**
+ * The Baby-Jubjub identity, `(0, 1)`.
+ *
+ * Twisted Edwards addition is complete, so the identity is an ordinary point:
+ * `ValueScalarMul` returns it at `value = 0` and `MulH` at `rcv = 0`, and
+ * `PointSum` treats it as the neutral term that makes padding slots free.
+ */
+export const EDWARDS_IDENTITY: Point = [0n, 1n];
 
 /** `2^64` — the `asset_id` / `value` bound the circuit range-checks. */
 export const POW_2_64 = 1n << 64n;

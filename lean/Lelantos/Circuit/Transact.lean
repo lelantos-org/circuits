@@ -1,4 +1,4 @@
-import Lelantos.Circuit.Witness
+import Lelantos.Circuit.Layout
 import Lelantos.Gadgets.PointBalance
 import Lelantos.Gadgets.PolyEval
 
@@ -8,6 +8,10 @@ import Lelantos.Gadgets.PolyEval
 `Transact(DEPTH, N_IN, N_OUT)` is wiring: the per-slot logic lives in `SpentNote` and
 `OutputNote`, and this file composes it with the public bucket, the two balance checks and
 the public-input compression.
+
+This module is the constraint system and what it proves. Its signals are
+`Lelantos.Circuit.Witness`, its coefficient order `Lelantos.Circuit.Layout`, and what the
+contract must check `Lelantos.Circuit.Obligations`.
 
 `transact_sound` is the top-level result. Given any assignment satisfying the modelled
 constraint system it produces `TxWellFormed`, whose fields are the security properties:
@@ -36,6 +40,10 @@ consequences. See `Lelantos.Model.Poseidon`.
   `PerAssetValueBalance`.
 * `rho` uniqueness across transactions reduces to the contract enforcing nullifier
   uniqueness, so it appears in `ContractObligations`, not as a theorem.
+* Nothing stops one note from filling two input slots: each slot is opened against the
+  shared root independently, and the balance sums count the duplicate once per slot. The
+  circuit leaves it to the consumer (`src/4x6.circom:56-58`), and
+  `ContractObligations.nullifiers_distinct` is that obligation stated.
 * The FMD clue fields are bound only by `PolyEval`, matching the circuit
   (`src/README.md § 1 "FMD clue binding"`).
 * `outAuxDigest` is likewise only `PolyEval`-bound. The circuit carries the digest so that
@@ -44,8 +52,8 @@ consequences. See `Lelantos.Model.Poseidon`.
 * `y` is not claimed to determine the transaction. By `polyEval_forge`, a coefficient the
   rest of the system leaves free is one linear equation in one unknown, and `y` can be set
   to any target. The layout rules that out, since every slot it carries is pinned by a
-  constraint outside `TransactCompressN`; that is the table below, checked by review, not a
-  theorem. Compression is binding only under
+  constraint outside `TransactCompressN`; that is the pinning table below, checked by
+  review, not a theorem. Compression is binding only under
   `ContractObligations.challenge_binds_witness` and only while that table holds.
 * Everything is modulo the axioms in `Lelantos.Meta.Assumptions`.
 -/
@@ -107,50 +115,6 @@ structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
   /-- `src/lib/transact.circom:214-232`, wired into `PolyEval` at
   `src/lib/poly_eval.circom:109-110` — public-input compression. -/
   compress : PolyEvalSat (piCount nIn nOut) (txCoeffs w) w.z w.peAcc w.y
-
-/-- The verifier's Fiat-Shamir derivation, as an abstract relation: `chal c z` holds when
-`z` is the challenge derived from coefficient vector `c`.
-`contracts/src/libs/PubInputs.sol :: _finalizeRaw` instantiates it as
-`z = keccak256(abi.encode(c)) % r`, so it is a function of the vector alone. -/
-abbrev Challenge : Type := (ℕ → F) → F → Prop
-
-/-- Obligations the circuit cannot discharge and the contract must, listed so that no
-theorem below assumes them implicitly.
-
-`challenge_binds_witness` is the only field with content. The other three are stubs that
-name a check without stating it, because what they range over (a nullifier set, an EVM
-`block.chainid`, a keccak preimage) has no counterpart in this development. A stub is a
-claim made outside Lean, not a discharged obligation. -/
-structure ContractObligations (chal : Challenge) (w : TxWitness depth nIn nOut) : Prop where
-  /-- `nullifier[i]` is unspent. This also makes `rho` derivation collision-free across
-  transactions, since `DeriveRho` anchors on `nullifier[0]`. -/
-  nullifiers_fresh : True
-  /-- **The challenge covers this witness's coefficient vector.**
-
-  The vector fed to the hash must agree with `txCoeffs w`, the one the accepted proof
-  evaluated. The contract hashes the vector it reconstructs from calldata and never sees
-  `txCoeffs w`, so nothing on-chain establishes this directly. It follows from the pinning
-  argument below: every coefficient is fixed by a constraint the prover cannot solve
-  around, so the only vector it can evaluate is the one describing its transaction.
-
-  The property is a relation between the challenge and the witness, not a check performed,
-  so it is stated rather than stubbed. `chal` ranges over more than `txCoeffs w`: the
-  contract's preimage is 70 words at the deployed shape against 46 coefficients, since the
-  addresses, the FMD clues and the payload digest are hashed but not evaluated, which binds
-  them without a constraint. This field states only the part that must agree. -/
-  challenge_binds_witness : chal (txCoeffs w) w.z
-  /-- `chain_id = block.chainid` and `recipient_address < 2^160`.
-
-  Checked against the calldata copy of those fields, which is a different quantity from
-  `w.chainId` / `w.recipient` unless `challenge_binds_witness` holds. -/
-  address_and_chain_checked : True
-  /-- `out_aux_digest` is recomputed from the `aux` calldata, not taken from it. The
-  coefficient binds whatever value the prover supplied; only this check ties that value to
-  the encrypted-note payload the recipient receives. Without it a relayer could keep the
-  `PolyEval`-bound clue intact (so the recipient still flags the note) while corrupting
-  `ephPub` and the ciphertext, leaving a note that cannot be opened after its inputs are
-  spent. -/
-  aux_digest_recomputed : True
 
 /-- What a satisfying assignment proves. -/
 structure TxWellFormed (w : TxWitness depth nIn nOut) : Prop where

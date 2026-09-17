@@ -11,7 +11,7 @@ import { layoutDigest } from "../../scripts/vectors/common";
 // The slot ordering exists in four places: `TransactCompressN`
 // (src/lib/poly_eval.circom), `PubInputs.sol :: compress(Transact, aux)`,
 // `test/ref/compress.ts :: flatten`, and `Lelantos.piSlot`
-// (lean/Lelantos/Circuit/Witness.lean). A transposition between any two makes
+// (lean/Lelantos/Circuit/Layout.lean). A transposition between any two makes
 // proof verification fail with no diagnostic. PolyEval binding is stated over
 // this layout, so a wrong Lean layout makes `transact_sound`'s compression
 // clause vacuous.

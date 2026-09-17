@@ -4,7 +4,7 @@
 // signal names circom reads. The key set is part of the contract with the
 // circuit.
 
-import { batchCoeffs, flattenBatch, type Field, type Point } from "../helpers";
+import { batchCoeffs, flattenBatch, pointJson, pointsJson, type Field, type Point } from "../helpers";
 
 /** Pad a real-slot array out to the circuit's fixed width. */
 export function padToSlots<T>(real: T[], total: number, zero: T): T[] {
@@ -66,7 +66,7 @@ function publicJson(a: TreeUpdateBatchPublicArgs) {
         start_index: a.startIndex.toString(),
         actual_count: a.actualCount.toString(),
         cms: a.cms.map(c => c.toString()),
-        cv_dep: a.cvDep.map(p => [p[0].toString(), p[1].toString()]),
+        cv_dep: pointsJson(a.cvDep),
         leaf_asset: a.leafAsset.map(v => v.toString()),
         leaf_public_in: a.leafPublicIn.map(v => v.toString()),
         is_deposit: a.isDeposit.map(d => d.toString()),
@@ -106,4 +106,54 @@ export function treeUpdateBatchChallenge(a: TreeUpdateBatchPublicArgs): Field[] 
  */
 export function treeUpdateBatchCoeffs(a: TreeUpdateBatchPublicArgs): Field[] {
     return batchCoeffs(publicJson(a));
+}
+
+/**
+ * Input for the `PerAssetValueBalance(N_IN, N_OUT)` fixture.
+ *
+ * The gadget takes plain field elements: no note, no tree, no point
+ * arithmetic. Shaped here rather than in the spec file because
+ * `fuzz/balance.fuzz.test.ts` draws the same object.
+ */
+export interface PerAssetBalanceArgs {
+    inAsset: Field[];
+    inValue: Field[];
+    outAsset: Field[];
+    outValue: Field[];
+    publicAssetId: Field;
+    publicIn: Field;
+    publicOut: Field;
+}
+
+export function perAssetValueBalanceInput(a: PerAssetBalanceArgs) {
+    return {
+        in_asset: a.inAsset.map(String),
+        in_value: a.inValue.map(String),
+        out_asset: a.outAsset.map(String),
+        out_value: a.outValue.map(String),
+        public_asset_id: a.publicAssetId.toString(),
+        public_in: a.publicIn.toString(),
+        public_out: a.publicOut.toString(),
+    };
+}
+
+/** Input for the `PerAssetPointBalance(N_IN, N_OUT)` fixture. */
+export interface PerAssetPointArgs {
+    inCv: Point[];
+    outCv: Point[];
+    inRH: Point[];
+    outRH: Point[];
+    pubInPt: Point;
+    pubOutPt: Point;
+}
+
+export function perAssetPointBalanceInput(a: PerAssetPointArgs) {
+    return {
+        in_cv: pointsJson(a.inCv),
+        out_cv: pointsJson(a.outCv),
+        in_rH: pointsJson(a.inRH),
+        out_rH: pointsJson(a.outRH),
+        pub_in_pt: pointJson(a.pubInPt),
+        pub_out_pt: pointJson(a.pubOutPt),
+    };
 }

@@ -1,4 +1,4 @@
-import Lelantos.Gadgets.BatchAppend
+import Lelantos.Circuit.BatchWitness
 import Lelantos.Gadgets.Comparators
 import Lelantos.Gadgets.ValueCommit
 import Lelantos.Gadgets.Balance
@@ -9,6 +9,10 @@ import Lelantos.Gadgets.Balance
 The batch circuit hashes its leaves, hands them to `BatchAppend` (`Gadgets/BatchAppend.lean`,
 whose circom header explains the tree), equates the two roots it returns with the public
 `old_root` and `new_root`, and binds each deposit leaf to its declared value.
+
+This module is the constraint system and what it proves. Its signals are
+`Lelantos.Circuit.BatchWitness`, its coefficient order `Lelantos.Circuit.BatchLayout`, and
+what the contract must check `Lelantos.Circuit.Obligations`.
 
 The constraint system is split in two — `BatchChainSat` (leaves, the tree and the padding) and
 `BatchDepositSat` (the per-leaf deposit binding). Only the deposit half mentions the curve,
@@ -46,45 +50,15 @@ and on the deposit side:
   opaque `coords`/`babyAdd` interface. `batch_deposit_opens` gets its point structure from the
   value-commitment gadget instead.
 * **`BatchCompress`** (step 7) is not re-proved here; `polyEval_sound` and `polyEval_binding`
-  cover the Horner chain, and the slot order is pinned by `batchPiSlot` below.
-* Nothing here is a statement about `start_index` being the true tree size; that is the
-  contract's obligation (`MASP._validateBatchHeader`).
+  cover the Horner chain, and the slot order is pinned by `batchPiSlot`
+  (`Circuit/BatchLayout.lean`).
+* Nothing here is a statement about `start_index` being the true tree size, about
+  `old_root` being the live root, or about the leaves being the ones somebody escrowed.
+  Those are the contract's, recorded in `BatchContractObligations`
+  (`Circuit/Obligations.lean`) and assumed by no theorem here.
 -/
 
 namespace Lelantos
-
-/-- Every signal of one `TreeUpdateBatch(depth, maxL)` instance. Array signals are total
-functions, read only below their declared length, per the convention in `Model.Bits`. -/
-structure BatchSignals (depth maxL : ℕ) where
-  -- Logical public inputs (`:110-118`).
-  oldRoot : F
-  newRoot : F
-  startIndex : F
-  actualCount : F
-  cms : ℕ → F
-  cvDep : ℕ → Pt
-  leafAsset : ℕ → F
-  leafPublicIn : ℕ → F
-  isDeposit : ℕ → F
-  -- Private inputs (`:121-122`).
-  frontierIn : ℕ → ℕ → F
-  rcv : ℕ → F
-  -- Leaf hashes (`:124-136`).
-  leaves : ℕ → F
-  -- The tree (`:141-151`).
-  append : BatchAppendSignals
-  -- Deposit binding (`:187-258`).
-  activeDep : ℕ → F
-  gen : ℕ → Pt
-  pubInBits : ℕ → ℕ → F
-  rcvBits : ℕ → ℕ → F
-  vT : ℕ → Pt
-  rH : ℕ → Pt
-  expected : ℕ → Pt
-  assetInv : ℕ → F
-  assetIsZero : ℕ → F
-  pubInInv : ℕ → F
-  pubInIsZero : ℕ → F
 
 /-- The constraint system of `TreeUpdateBatch(depth, maxL)` with `COUNT_BITS = countBits` and
 `EMPTY_SUBTREE = zeros`. Line numbers refer to `src/tree_update_batch.circom`. -/
@@ -333,114 +307,5 @@ theorem batch_deposit_opens {depth maxL : ℕ} {w : BatchSignals depth maxL}
   have hcommit := h.expected_def k hk
   rw [hgen] at hcommit
   exact valueCommit_opens (h.public_in_range k hk) hcommit
-
-/-! ## The public-input layout
-
-`BatchCompress(MAX_L)` (`src/lib/poly_eval.circom:149-191`) folds the batch's public inputs
-into `(z, y)` with the same Horner chain `TransactCompressN` uses, so `polyEval_sound` and
-`polyEval_binding` cover the evaluation. This section pins the order, and its dump is the
-Lean anchor for `test/formal/batch_layout_parity.test.ts`.
-
-All `4 + 6·MAX_L` batch words are coefficients. Transact evaluates only 46 of its 69 words
-because the rest are not signals of `4x6.circom` and are bound through the challenge; the
-batch has no such words, so every word must be evaluated, since hashing a signal into `z`
-binds nothing against a prover that reads `z` first (`polyEval_forge`).
--/
-
-/-- One coefficient position of `BatchCompress`. -/
-inductive BatchPISlot where
-  | oldRoot
-  | newRoot
-  | startIndex
-  | actualCount
-  | cms (k : ℕ)
-  | cvDepX (k : ℕ)
-  | cvDepY (k : ℕ)
-  | leafAsset (k : ℕ)
-  | leafPublicIn (k : ℕ)
-  | isDeposit (k : ℕ)
-deriving Repr, DecidableEq, Inhabited
-
-/-- Number of `BatchCompress` coefficients: `4 + 6·MAX_L`
-(`src/lib/poly_eval.circom:150`). At `MAX_L = 8` this is 52. -/
-def batchPiCount (maxL : ℕ) : ℕ := 4 + 6 * maxL
-
-example : batchPiCount 8 = 52 := by norm_num [batchPiCount]
-
-/-- The layout of the `pe.coeffs` assignments — `src/lib/poly_eval.circom:166-190`.
-Single source of truth, as `piSlot` is for the transact shapes. -/
-def batchPiSlot (maxL : ℕ) (i : ℕ) : BatchPISlot :=
-  let oCms := 4
-  let oCv := oCms + maxL
-  let oAsset := oCv + 2 * maxL
-  let oPublicIn := oAsset + maxL
-  let oDeposit := oPublicIn + maxL
-  if i = 0 then .oldRoot
-  else if i = 1 then .newRoot
-  else if i = 2 then .startIndex
-  else if i = 3 then .actualCount
-  else if i < oCv then .cms (i - oCms)
-  else if i < oAsset then
-    (if (i - oCv) % 2 = 0 then .cvDepX ((i - oCv) / 2) else .cvDepY ((i - oCv) / 2))
-  else if i < oPublicIn then .leafAsset (i - oAsset)
-  else if i < oDeposit then .leafPublicIn (i - oPublicIn)
-  else .isDeposit (i - oDeposit)
-
-/-- The signal a batch slot names. -/
-def batchSlotValue {depth maxL : ℕ} (w : BatchSignals depth maxL) : BatchPISlot → F
-  | .oldRoot => w.oldRoot
-  | .newRoot => w.newRoot
-  | .startIndex => w.startIndex
-  | .actualCount => w.actualCount
-  | .cms k => w.cms k
-  | .cvDepX k => (w.cvDep k).x
-  | .cvDepY k => (w.cvDep k).y
-  | .leafAsset k => w.leafAsset k
-  | .leafPublicIn k => w.leafPublicIn k
-  | .isDeposit k => w.isDeposit k
-
-/-- The `PolyEval` coefficient vector of the batch circuit. The challenge and the
-result are wired at `src/lib/poly_eval.circom:192-193`, and `y` reaches the circuit's
-own output at `src/tree_update_batch.circom:275`. -/
-def batchCoeffs {depth maxL : ℕ} (w : BatchSignals depth maxL) (i : ℕ) : F :=
-  batchSlotValue w (batchPiSlot maxL i)
-
-/-- The coefficient index a batch slot occupies — the inverse of `batchPiSlot`. -/
-def batchSlotIndex (maxL : ℕ) : BatchPISlot → ℕ
-  | .oldRoot => 0
-  | .newRoot => 1
-  | .startIndex => 2
-  | .actualCount => 3
-  | .cms k => 4 + k
-  | .cvDepX k => 4 + maxL + 2 * k
-  | .cvDepY k => 4 + maxL + 2 * k + 1
-  | .leafAsset k => 4 + 3 * maxL + k
-  | .leafPublicIn k => 4 + 4 * maxL + k
-  | .isDeposit k => 4 + 5 * maxL + k
-
-/-- The slots a `maxL` instance has. -/
-def BatchPISlot.InRange (maxL : ℕ) : BatchPISlot → Prop
-  | .cms k | .cvDepX k | .cvDepY k | .leafAsset k | .leafPublicIn k | .isDeposit k => k < maxL
-  | _ => True
-
-theorem batchSlotIndex_lt {maxL : ℕ} {s : BatchPISlot} (hs : s.InRange maxL) :
-    batchSlotIndex maxL s < batchPiCount maxL := by
-  cases s <;> simp only [BatchPISlot.InRange] at hs <;>
-    simp only [batchSlotIndex, batchPiCount] <;> omega
-
-/-- **`batchSlotIndex` is a section of `batchPiSlot`.** -/
-theorem batchPiSlot_batchSlotIndex {maxL : ℕ} {s : BatchPISlot} (hs : s.InRange maxL) :
-    batchPiSlot maxL (batchSlotIndex maxL s) = s := by
-  cases s <;> simp only [BatchPISlot.InRange] at hs <;>
-    simp only [batchSlotIndex, batchPiSlot] <;>
-    repeat' first
-      | rfl
-      | rw [if_neg (by omega)]
-      | rw [if_pos (by omega)]
-      | (congr 1; omega)
-
-/-- The layout as a list of slot names, for `lean/scripts/dump-layout.sh`. -/
-def batchLayoutNames (maxL : ℕ) : List String :=
-  (List.range (batchPiCount maxL)).map (fun i => reprStr (batchPiSlot maxL i))
 
 end Lelantos

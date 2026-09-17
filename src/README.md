@@ -848,12 +848,12 @@ single-leaf inserts spends. Both folds read the frontier as plain linear terms. 
 |---|---|
 | [`../test/ref/`](../test/ref/) | TypeScript reference implementation, with no SDK dependency; the circom is the source of truth |
 | [`../test/lib/`](../test/lib/) | Harness: circuit loader, suite hooks, dimensions, input shapers, signal paths, witness assertions, witness builders |
-| [`../test/transact/`](../test/transact/) | Transact suites by concern: balance, multi-asset, tamper, PolyEval binding, `rho` |
+| [`../test/transact/`](../test/transact/) | Transact suites by concern: balance, multi-asset (including the four-asset full shape), tamper, PolyEval binding, `rho` |
 | [`../test/batch/`](../test/batch/) | Tree-update batch suites by concern: shapes and capacity, deposit binding, frontier, padding, divergent witness |
-| [`../test/gadgets/`](../test/gadgets/) | Library templates in isolation: Merkle, `PolyEval`, `FixedBaseMul`, `BatchAppend` |
+| [`../test/gadgets/`](../test/gadgets/) | Library templates in isolation: Merkle, `MerkleProofOrDummy`, `PathIndexSelectors`, `PolyEval`, `FixedBaseMul`, `BatchAppend`, `HashToAssetGen`, the note derivations, the value-commitment gadgets, `PerAssetValueBalance` and the `SpentNote` / `OutputNote` slots |
 | [`../test/tooling/`](../test/tooling/) | The `just budget` and asset-id gates, and the underconstraint detectors' self-test |
 | [`../test/formal/`](../test/formal/) | Pins the slot order against the Lean dump and `_pubSignals = [y, z]` |
-| [`../test/fuzz/`](../test/fuzz/) | Property-based suites over Transact, Merkle, frontier binding, PolyEval, FixedBaseMul |
+| [`../test/fuzz/`](../test/fuzz/) | Property-based suites over Transact, Merkle, frontier binding, PolyEval, FixedBaseMul, per-asset balance |
 | [`../test/fixtures/`](../test/fixtures/) | Small-parameter wrappers instantiating library templates |
 
 | Script | Role |

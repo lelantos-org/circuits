@@ -1,6 +1,6 @@
 import { expect } from "chai";
 
-import { H_BASE, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "../helpers";
+import { BABYJUB_SUBGROUP_ORDER, EDWARDS_IDENTITY, H_BASE, type Field, type Point } from "../helpers";
 import { fixturePath, readPoint } from "../lib/circuit";
 import { scalarBits } from "../lib/inputs";
 import { expectWitnessFails } from "../lib/expect";
@@ -237,7 +237,7 @@ describe("FixedBaseMulBits (raw, caller-constrained bits)", function () {
         const zeros = scalarBits(0n, WIDTH);
 
         const clean = await ctx.circuit.calculateWitness({ e: zeros }, true);
-        expect(readPoint(clean), "boolean input must give the identity").to.deep.equal([0n, 1n]);
+        expect(readPoint(clean), "boolean input must give the identity").to.deep.equal(EDWARDS_IDENTITY);
 
         const nonBoolean = [...zeros];
         nonBoolean[0] = "2";

@@ -109,8 +109,8 @@ The load-bearing result, and the one with the smallest trusted base.
 | `polyEval_binding` | `Gadgets/PolyEval.lean` | coefficient vectors differing below `n` agree on at most `n - 1` challenges |
 | `transact_pi_binding` | `Circuit/Transact.lean` | two transactions with different public inputs share `(z, y)` for at most `piCount - 1` challenges, 68 at the shipped shape |
 | `transact_pi_binding_slot` | `Circuit/Transact.lean` | …stated per **named** public input |
-| `piSlot_slotIndex` | `Circuit/Witness.lean` | `slotIndex` inverts the coefficient layout, turning a named-field difference into a coefficient index |
-| `slotIndex_piSlot` | `Circuit/Witness.lean` | …and the other way, so no index other than a slot's own carries it |
+| `piSlot_slotIndex` | `Circuit/Layout.lean` | `slotIndex` inverts the coefficient layout, turning a named-field difference into a coefficient index |
+| `slotIndex_piSlot` | `Circuit/Layout.lean` | …and the other way, so no index other than a slot's own carries it |
 | `polyEval_forge` | `Gadgets/PolyEval.lean` | one free coefficient sends `y` to **any** target at a nonzero challenge — one linear equation, no collision |
 | `polyEval_not_binding` | `Gadgets/PolyEval.lean` | …hence compression binds nothing when a coefficient is unconstrained |
 
@@ -157,7 +157,7 @@ result takes a `BatchShape`, the numeric side conditions of an instance.
 | `batch_advances_by_count` | `Circuit/TreeUpdateBatch.lean` | **`new_root` is that tree after appending exactly the first `actual_count` leaves** — the formal content of "odd counts work" |
 | `batch_advances_at_positions` | `Circuit/TreeUpdateBatch.lean` | …the same root as `appendRoot`, a run of single-leaf `InsertsTo` steps at positions `start_index + k` |
 | `batch_new_root_determined` † | `Circuit/TreeUpdateBatch.lean` | **two proofs from the same `old_root`, `start_index`, `actual_count`, `cms` and `cv_dep` reach the same `new_root`**, whatever private frontier each used |
-| `batchPiSlot_batchSlotIndex` | `Circuit/TreeUpdateBatch.lean` | the batch coefficient layout inverts, so `expected/layout-batch-8.txt` is derived from the definition rather than a second copy |
+| `batchPiSlot_batchSlotIndex` | `Circuit/BatchLayout.lean` | the batch coefficient layout inverts, so `expected/layout-batch-8.txt` is derived from the definition rather than a second copy |
 | `BatchShape.deployed` | `Circuit/TreeUpdateBatch.lean` | the numeric side conditions hold at `TreeUpdateBatch(11, 8)`, `COUNT_BITS = 3`; `ZerosCoherent` is the one hypothesis it does not discharge, and `batch_advances_witness` discharges it together with `BatchChainSat` on one assignment |
 | `batch_deposit_opens` | `Circuit/TreeUpdateBatch.lean` | an active deposit leaf's `cv_dep` opens to exactly `leaf_public_in` units of `leaf_asset` |
 | `batchAppend_sound` | `Gadgets/BatchAppend.lean` | the run fits the tree and the gadget's two roots are `batchTree` at counts `0` and `actual_count`: `batchAppend_old_root`, `batchAppend_new_root` |
@@ -219,6 +219,17 @@ factor therefore admit a deposit paid as one asset and spent as the other. `asse
 exhibit it; nothing here rules out its consequences on the deposit path. What does is the
 registered id set, checked outside Lean by `scripts/check-asset-ids.ts` (`just asset-ids`).
 Listed under *Not covered* below.
+
+**Where the tree is, not only where it goes.** `old_root`, `start_index` and `actual_count`
+are *inputs* of the batch, so every row above is conditional on them: a proof over a stale
+root, a wrong start position or a count the payload does not carry satisfies all of them.
+The same holds of the leaves — `batch_deposit_opens` opens leaf `k` at the fields leaf `k`
+declares, not at the asset and amount someone escrowed. `BatchContractObligations` is that
+residue, the batch's counterpart of `ContractObligations`: `challenge_binds_witness`
+stated, and `old_root_is_live`, `start_index_is_committed_count`, `count_matches_payload`
+and `leaves_match_escrow` as stubs naming checks `MASP._requireTreePosition`,
+`MASP._validateBatchHeader` and `MASP._drainDeposit` perform. No theorem assumes any of
+them.
 
 ### Hash binding †
 
@@ -350,10 +361,22 @@ development may derive conservation from the point equation.
   transact chain ends at the vector rather than at the contract.
 * **Under-constrainedness of the compiled R1CS**, beyond what Picus establishes — see
   [Under-constrainedness](#under-constrainedness-of-the-compiled-r1cs) below.
+* **That two input slots hold different notes.** Each slot is opened against the shared
+  root on its own, so one note can fill two of them and `PerAssetValueBalance` will count
+  its value twice on the input side. The circuit assigns the check to its consumer
+  (`src/4x6.circom:56-58`) and `ContractObligations.nullifiers_distinct` is that obligation
+  written down; `MASP._validateRequest` is where it is performed.
 * **Contract obligations.** Nullifier freshness, the `chain_id` / `recipient_address`
   checks and the aux-digest recomputation are recorded in `Lelantos.ContractObligations` as
   `True` and assumed by nothing. A stub there is a claim made outside Lean, not a
-  discharged one.
+  discharged one. The two fields that *are* stated — `challenge_binds_witness` and
+  `nullifiers_distinct` — are still obligations, not results: nothing here proves them.
+* **The batch's position and its payload.** `Lelantos.BatchContractObligations` is the same
+  ledger for `tree_update_batch.circom`, and four of its five fields are stubs: that
+  `old_root` is the live root, that `start_index` is the committed leaf count, that
+  `actual_count` matches the payload, and that each leaf is the one its escrow record
+  describes. Every batch result above is conditional on those inputs, so a proof over a
+  stale root or a wrong start position satisfies all of them.
 * **That the compression is binding, unconditionally.** It is binding only under
   `ContractObligations.challenge_binds_witness`, and that field is discharged by an argument
   Lean states but does not close: every coefficient is pinned by a constraint the prover
@@ -462,7 +485,7 @@ outside it: it imports the finished development and reports on it, which is why
 flowchart BT
     MODEL["<b>Model</b><br/>Field · Bits · Poseidon · Jubjub<br/><i>ambient objects; no circom counterpart</i>"]
     GADGETS["<b>Gadgets</b><br/>Comparators · Common · Note · PolyEval<br/>Balance · Merkle · BatchAppend · ValueCommit · PointBalance<br/><i>one module per circom template</i>"]
-    CIRCUIT["<b>Circuit</b><br/>Spent · Output · Witness · Transact · TreeUpdateBatch<br/><i>the circuits themselves</i>"]
+    CIRCUIT["<b>Circuit</b><br/>Spent · Output · Witness · Layout · Transact<br/>BatchWitness · BatchLayout · TreeUpdateBatch · Obligations<br/><i>the circuits themselves: signals, layout, constraints</i>"]
     PROOFS["<b>Proofs</b><br/>Completeness · BatchCompleteness · Rejection<br/><i>results about the finished system</i>"]
     META["<b>Meta</b><br/>Assumptions · AxiomGuard"]
 
@@ -493,12 +516,17 @@ lean/
       PointBalance         the proved negative result
     Spec/                  what the tree gadgets are proved against; no signals
       QuatTree             ZerosCoherent, InsertsTo, batchTree, the run of inserts, frontier injectivity
-    Circuit/               the circuits themselves
+    Circuit/               the circuits themselves, three modules per circuit:
+                           its signals, its coefficient layout, its constraint system
       Spent                SpentNote
       Output               OutputNote
-      Witness              TxWitness and the 69-slot public-input layout
+      Witness              TxWitness: every signal of Transact
+      Layout               PISlot, piSlot, txCoeffs, and the inverse slotIndex
       Transact             TransactSat, TxWellFormed, TxBinding, transact_sound
+      BatchWitness         BatchSignals: every signal of TreeUpdateBatch
+      BatchLayout          BatchPISlot, batchPiSlot, batchCoeffs, batchSlotIndex
       TreeUpdateBatch      BatchChainSat, BatchDepositSat, the batch advance results
+      Obligations          what each circuit leaves to its verifier, for both
     Proofs/                results about the finished system
       Completeness         concrete satisfying assignments for transact (non-vacuity)
       BatchCompleteness    the same for tree_update_batch, partially filled, empty and filled frontiers
@@ -508,7 +536,8 @@ lean/
       AxiomGuard           build-time axiom check over every declaration
   expected/                generated; regenerate with --update on the relevant script
     axioms.txt             expected output of Meta/Assumptions
-    layout-4x6.txt         expected output of Circuit/Witness :: layoutNames
+    layout-4x6.txt         expected output of Circuit/Layout :: layoutNames
+    layout-batch-8.txt     expected output of Circuit/BatchLayout :: batchLayoutNames
   scripts/                 check-all, check-axioms, dump-layout, check-prime
 ```
 

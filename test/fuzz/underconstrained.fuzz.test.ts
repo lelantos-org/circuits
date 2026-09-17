@@ -162,6 +162,15 @@ describe("underconstrained_4x6 [fuzz]", function () {
         ));
     });
 
+    // Four assets across every slot, so all eleven candidate rows of
+    // `PerAssetValueBalance` carry a different sum and its ~110 `IsEqual`
+    // comparators are exercised in both directions. In the single- and
+    // two-asset shapes above most of those comparisons are trivially equal or
+    // trivially zero, which is exactly when an `IsZero` hint can be free.
+    it("a four-asset shape has no second witness", async () => {
+        await assertNoSecond("fourAssets", tx.fullShapeMultiAsset());
+    });
+
     // Range ceilings, where a Num2Bits sits one bit from rejecting: values at
     // 2^64 - 1 and blinders at 2^252 - 1. A decomposition whose top digit is the
     // only set one exercises constraints the mid-range witnesses never reach.

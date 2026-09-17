@@ -61,14 +61,16 @@ Two further consequences are modelled rather than assumed:
   property, so no fidelity check can fail on it, and the prose around it read as though the
   contract discharged it. It is now
   `challenge_binds_witness : chal (txCoeffs w) w.z` — a relation between the challenge and
-  the *witness*. The remaining three stubs are still `True` and should be read as claims
-  made outside Lean.
+  the *witness*. `ContractObligations.nullifiers_distinct` is stated the same way, over two
+  slots of the same witness. The remaining three transact stubs are still `True` and should
+  be read as claims made outside Lean, as should four of the five fields of
+  `BatchContractObligations`, the same ledger for `tree_update_batch.circom`.
 
 What is still not closed: `publicAssetId`, `publicIn` and `publicOut` are pinned only to
 64 bits each, and two of those directions are genuinely free (see `README.md`). That is
 about `2⁻¹²⁶`, bounded by the range checks rather than eliminated.
 
-Known deliberate omissions, all in the safe directionKnown deliberate omissions, all in the safe direction of the table above — but see the
+Known deliberate omissions, all in the safe direction of the table above — but see the
 section immediately above for why "safe by that table" is not the same as harmless:
 
 * `PerAssetPointBalance` **is** modelled (`TransactSat.point_balance`) but nothing is
@@ -149,8 +151,9 @@ Two things it still cannot check. A citation that quotes nothing from its file g
 existence and range only. And a citation into `contracts/` or `sdk/` — sibling
 repositories rather than directories of this one — is verifiable only in a workspace that
 has checked both out; CI checks out this repository alone, so it counts those as skipped
-and says how many rather than failing on how the tree was cloned. The four that exist
-today are checked locally, which is where a `PubInputs.sol` citation aimed at `src/lib/`
+and says how many rather than failing on how the tree was cloned. The thirteen that exist
+today — mostly the `MASP.sol` checks the two obligation ledgers name — are checked locally,
+which is where a `PubInputs.sol` citation aimed at `src/lib/`
 rather than `src/libs/` was caught. (Naming the wrong path in full here would itself be a
 citation, and this check would fail on the sentence describing it.)
 
@@ -393,7 +396,7 @@ implementations:
 1. `src/lib/poly_eval.circom :: TransactCompressN`
 2. `contracts/src/libs/PubInputs.sol :: compress(Transact, aux)`
 3. `test/ref/compress.ts :: coeffs`
-4. `lean/Lelantos/Circuit/Witness.lean :: piSlot`
+4. `lean/Lelantos/Circuit/Layout.lean :: piSlot`
 
 Checks, each mechanical:
 
