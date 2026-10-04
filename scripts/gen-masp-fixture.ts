@@ -164,6 +164,8 @@ function concat(parts: Uint8Array[]): Uint8Array {
 interface Aux {
     clueRx: Field;
     clueRy: Field;
+    clueQx: Field;
+    clueQy: Field;
     ephPubX: Field;
     ephPubY: Field;
     ciphertext: Uint8Array;
@@ -171,7 +173,7 @@ interface Aux {
 
 /**
  * `PubInputs.auxDigest`: `keccak256(abi.encode(Output[])) mod r`, the payloads
- * encoded as a dynamic array of `(uint256, uint256, uint256, uint256, bytes)`.
+ * encoded as a dynamic array of six `uint256` and one `bytes`.
  *
  * The contract recomputes this word from calldata and hashes it into the
  * transact challenge, so the encoding must match.
@@ -183,10 +185,12 @@ function auxDigest(aux: Aux[]): Field {
         return concat([
             toBeBytes32(o.clueRx),
             toBeBytes32(o.clueRy),
+            toBeBytes32(o.clueQx),
+            toBeBytes32(o.clueQy),
             toBeBytes32(o.ephPubX),
             toBeBytes32(o.ephPubY),
             // Offset of the `bytes` tail from the start of the tuple.
-            toBeBytes32(0xa0n),
+            toBeBytes32(0xe0n),
             toBeBytes32(BigInt(o.ciphertext.length)),
             padded,
         ]);
@@ -294,6 +298,14 @@ async function main() {
     const [P, J] = await Promise.all([Poseidon.build(), Jubjub.build()]);
     const tx = new TxBuilder(P, J, DEPTH);
     const rand = (i: number): Field => P.hash([DOMAIN, BigInt(i)]);
+    // `8^-1` modulo the prime subgroup order, by Fermat.
+    let inv8 = 1n;
+    for (let b = 8n, e = J.order - 2n; e > 0n; e >>= 1n, b = (b * b) % J.order) {
+        if (e & 1n) inv8 = (inv8 * b) % J.order;
+    }
+    // A diversifier: 128 bits, the width a wallet samples.
+    const diversifier = (i: number): Field => rand(i) & ((1n << 128n) - 1n);
+    const principalD = diversifier(4);
 
     // ----- the deposit: Alice's note and the relayer's zero-value fee note -----
     //
@@ -303,11 +315,11 @@ async function main() {
     const principal: Note = {
         asset: ASSET,
         value: DEPOSIT_VALUE,
-        pk: derivePk(P, ALICE_NSK),
+        pk: derivePk(P, ALICE_NSK, principalD),
         rho: rand(0),
         rcm: rand(1),
     };
-    const feeNote: Note = { asset: 0n, value: 0n, pk: derivePk(P, BOB_NSK), rho: rand(2), rcm: rand(3) };
+    const feeNote: Note = { asset: 0n, value: 0n, pk: derivePk(P, BOB_NSK, diversifier(5)), rho: rand(2), rcm: rand(3) };
     const inner = buildInner(P, principal);
     const feeInner = buildInner(P, feeNote);
     const leaf = commitWithInner(P, principal.asset, principal.value, inner);
@@ -338,6 +350,7 @@ async function main() {
         const input: SpentNote = {
             ...principal,
             nsk: ALICE_NSK,
+            d: principalD,
             cm: leaf,
             nf: buildNullifierFromNsk(P, ALICE_NSK, principal.rho, leaf),
             leafIndex: 0,
@@ -352,18 +365,23 @@ async function main() {
             publicOut === 0n ? {} : { publicOut, publicAssetId: ASSET },
         );
 
-        // The encrypted-note payloads. The clue is the witness's own; the
-        // ephemeral key is a subgroup point; the body is stand-in bytes, since
-        // nothing on chain decrypts it. `PubInputs.compress` reads the clue
-        // bits back out of the ciphertext's two-byte big-endian prefix.
+        // The encrypted-note payloads. The clue is the witness's own, with the
+        // subgroup witness `Q = [8^-1]R` that `AuxValidation` doubles back to
+        // `R`; the ephemeral key is a subgroup point; the body is stand-in
+        // bytes, since nothing on chain decrypts it. `PubInputs.compress` reads
+        // the clue bits back out of the ciphertext's two-byte big-endian prefix.
         const aux: Aux[] = Array.from({ length: N_OUT }, (_, j) => {
             const [ephPubX, ephPubY] = J.mulPointEscalar(J.base8, rand(100 + j) % J.order);
+            const R: [Field, Field] = [BigInt(w.out_clue_Rx[j]), BigInt(w.out_clue_Ry[j])];
+            const [clueQx, clueQy] = J.mulPointEscalar(R, inv8);
             const bits = Number(w.out_clue_bits[j]);
             if (bits >> 14 !== 0) throw new Error("clue bits exceed the 14-bit prefix");
             const body = concat([toBeBytes32(rand(200 + j)), toBeBytes32(rand(300 + j))]);
             return {
-                clueRx: BigInt(w.out_clue_Rx[j]),
-                clueRy: BigInt(w.out_clue_Ry[j]),
+                clueRx: R[0],
+                clueRy: R[1],
+                clueQx,
+                clueQy,
                 ephPubX,
                 ephPubY,
                 ciphertext: concat([Uint8Array.of(bits >> 8, bits & 0xff), body]),
@@ -415,6 +433,8 @@ async function main() {
             aux: aux.map((o) => ({
                 clueRx: word(o.clueRx),
                 clueRy: word(o.clueRy),
+                clueQx: word(o.clueQx),
+                clueQy: word(o.clueQy),
                 ephPubX: word(o.ephPubX),
                 ephPubY: word(o.ephPubY),
                 ciphertext: bytesHex(o.ciphertext),
@@ -430,7 +450,7 @@ async function main() {
     const owned = (value: bigint, nsk: Field, i: number): Note => ({
         asset: ASSET,
         value,
-        pk: derivePk(P, nsk),
+        pk: derivePk(P, nsk, diversifier(1000 + i)),
         // Overridden by the builder with the derivation the circuit enforces.
         rho: 0n,
         rcm: rand(i),
@@ -460,6 +480,7 @@ async function main() {
         // both spends open.
         note: {
             nsk: ALICE_NSK.toString(),
+            d: word(principalD),
             asset: principal.asset.toString(),
             value: principal.value.toString(),
             pk: word(principal.pk),

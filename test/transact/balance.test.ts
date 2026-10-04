@@ -6,7 +6,7 @@ import { expect } from "chai";
 import { commit, dummyOutput, nullifier, type Note } from "../helpers";
 import { expectAccepts, expectWitnessFails } from "../lib/expect";
 import { ALICE_NSK, BOB_NSK, MALLORY_NSK, TIMEOUT_CIRCUIT } from "../lib/constants";
-import { DEFAULT_ASSET as ASSET } from "../lib/transact";
+import { DEFAULT_ASSET as ASSET, diversifierOf } from "../lib/transact";
 import { useTransactCircuit } from "./setup";
 
 describe("transact_4x6 / value balance", function () {
@@ -139,7 +139,7 @@ describe("transact_4x6 / value balance", function () {
         const proof = tree.proof(idx);
 
         const forged = {
-            ...n, nsk: MALLORY_NSK, cm,
+            ...n, nsk: MALLORY_NSK, d: diversifierOf(n.rho), cm,
             nf: nullifier(tx.P, MALLORY_NSK, n.rho, cm),
             leafIndex: idx,
             pathElements: proof.pathElements,
@@ -150,7 +150,7 @@ describe("transact_4x6 / value balance", function () {
         await expectWitnessFails(circuit, tx.spend(
             { root, inputs: [forged, inB] },
             [tx.note(100n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-        ), "pk === DerivePk(nsk) must reject a mismatched key");
+        ), "pk === DerivePk(ivk, d) must reject a mismatched key");
     });
 
     // ===== dummy and padding slot semantics =====

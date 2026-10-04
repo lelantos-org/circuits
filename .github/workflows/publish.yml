@@ -57,7 +57,7 @@ jobs:
       - name: Setup circom
         uses: ./.github/actions/setup-circom
 
-      # Each ceremony has its own ptau: Transact(11,4,6) at 69,291 constraints
+      # Each ceremony has its own ptau: Transact(11,4,6) at 69,643 constraints
       # needs 2^17; TreeUpdateBatch(11,8) at 41,521 fits 2^16. `just` verifies
       # the digest on every run, and each cache key includes it.
       - name: Cache ptau-17

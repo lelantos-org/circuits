@@ -5,7 +5,7 @@ include "tags.circom";
 
 // Note keys, commitments and nullifiers.
 //
-//   nsk → ivk = Poseidon(TAG_IVK, nsk) → pk = Poseidon(TAG_PK, ivk)
+//   nsk → ivk = Poseidon(TAG_IVK, nsk) → pk = Poseidon(TAG_PK, ivk, d)
 //       → nk  = Poseidon(TAG_NK, nsk)
 //   inner = Poseidon(TAG_INNER, pk, rho, rcm)
 //   cm    = Poseidon(TAG_CM, asset_id·2^64 + value, inner), the tree leaf
@@ -34,14 +34,18 @@ template DeriveNk() {
     nk <== h.out;
 }
 
+// d is the diversifier: one ivk has a distinct pk per d. d is not range-checked;
+// for any field element the pk opens only under this ivk.
 template DerivePk() {
     signal input ivk;
+    signal input d;
     signal output pk;
 
-    component h = Poseidon(2);
+    component h = Poseidon(3);
     var tag = TAG_PK();
     h.inputs[0] <== tag;
     h.inputs[1] <== ivk;
+    h.inputs[2] <== d;
     pk <== h.out;
 }
 
@@ -70,7 +74,8 @@ template NoteInner() {
 // what binds a leaf to one (asset, value). SpentNote and OutputNote check both,
 // and tree_update_batch checks both on a deposit leaf.
 //
-// TAG_CM separates this hash from DeriveRho, the only other arity-3 hash.
+// TAG_CM separates this hash from DerivePk and DeriveRho, the other arity-3
+// hashes.
 template NoteCommitment() {
     signal input asset_id;
     signal input value;

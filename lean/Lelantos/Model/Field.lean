@@ -59,7 +59,7 @@ theorem two_pow_67_lt_p : 2 ^ 67 < p := by unfold p; norm_num
 
 /-- `2 ^ 128 < p`: `NoteCommitment` packs `asset_id · 2^64 + value` into one field
 element, so with both fields 64-bit range-checked the packing is injective.
-See `src/lib/note.circom:81`. -/
+See `src/lib/note.circom:86`. -/
 theorem two_pow_128_lt_p : 2 ^ 128 < p := by unfold p; norm_num
 
 instance : NeZero p := ⟨by have := p_pos; omega⟩

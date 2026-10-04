@@ -27,8 +27,8 @@ instantiates `Poseidon(3)` and `Poseidon(4)` as distinct permutations.
 
 | Arity | Sites |
 |---|---|
-| 2 | `DeriveIvk`, `DeriveNk`, `DerivePk` |
-| 3 | `NoteCommitment` (`TAG_CM`), `DeriveRho` (`TAG_RHO`) |
+| 2 | `DeriveIvk` (`TAG_IVK`), `DeriveNk` (`TAG_NK`) |
+| 3 | `NoteCommitment` (`TAG_CM`), `DerivePk` (`TAG_PK`), `DeriveRho` (`TAG_RHO`) |
 | 4 | `NoteInner` (`TAG_INNER`), `Nullifier` (`TAG_NF`) |
 | 5 | `MerkleLevel4` and `BatchAppend` nodes (`TAG_MERKLE`), `CoeffDigest` blocks (`TAG_DIGEST` on block 0, the previous block's output on the rest) |
 
@@ -38,7 +38,7 @@ collision-resistance statement and is not claimed in this development.
 
 ## Tags
 
-Mirrors `src/lib/tags.circom:30-40`. These must stay byte-identical to
+Mirrors `src/lib/tags.circom:32-42`. These must stay byte-identical to
 `sdk/src/crypto/tags.ts`; changing any value invalidates every issued proof.
 Values 7 and 10 are reserved and must not be reused.
 -/
@@ -76,6 +76,7 @@ theorem poseidon_collision : PoseidonCollision := by
 /-- `cm = Poseidon(TAG_CM, packed_av, inner)`. -/
 def TAG_CM : F := 1
 def TAG_NF : F := 2
+/-- `pk = Poseidon(TAG_PK, ivk, d)`. -/
 def TAG_PK : F := 3
 def TAG_IVK : F := 4
 def TAG_MERKLE : F := 5

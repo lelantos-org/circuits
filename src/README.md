@@ -29,7 +29,8 @@ Given the contract obligations of [§10](#10-smart-contract-obligations), the
 circuits enforce the following for every accepted transaction.
 
 - **Ownership.** Each spent note is opened against the key chain
-  `nsk → ivk → pk`, and `pk` is bound inside the note commitment.
+  `nsk → ivk → pk`, with `pk = Poseidon(TAG_PK, ivk, d)` for the note's private
+  diversifier `d`, and `pk` is bound inside the note commitment.
 - **No double spend.** Every input slot, real or dummy, emits
   `nf = Poseidon(TAG_NF, nk, rho, cm)` with `nk = Poseidon(TAG_NK, nsk)`. The
   contract rejects a nullifier already in the spent set (§7).
@@ -106,7 +107,7 @@ output addressed to the relayer's key.
 
 Private inputs per slot:
 
-- Input: `asset_id, value, pk, rho, rcm, nsk, path_elements[DEPTH][3],
+- Input: `asset_id, value, pk, rho, rcm, nsk, d, path_elements[DEPTH][3],
   path_indices[DEPTH], is_dummy`.
 - Output: `asset_id, value, pk, rho, rcm`.
 
@@ -382,21 +383,31 @@ value `0`, so `public_asset_id == 0` gives `public_out == 0`.
 
 ```
 nsk  (spend authority)
- ├─ ivk = Poseidon(TAG_IVK, nsk)      (incoming view key)
- │    └─ pk = Poseidon(TAG_PK, ivk)   (bound in note cm)
- └─ nk  = Poseidon(TAG_NK, nsk)       (nullifier-deriving key)
+ ├─ ivk = Poseidon(TAG_IVK, nsk)         (incoming view key)
+ │    └─ pk = Poseidon(TAG_PK, ivk, d)   (bound in note cm; d is the diversifier)
+ └─ nk  = Poseidon(TAG_NK, nsk)          (nullifier-deriving key)
 
 nf = Poseidon(TAG_NF, nk, rho, cm)
-dk = Poseidon(TAG_DK, ivk)            (off-circuit, FMD)
+dk = Poseidon(TAG_DK, ivk)               (off-circuit, FMD)
 ```
 
 `ivk` grants detection and decryption. `nk` grants spent-note visibility.
 Spending requires `nsk`.
 
+**Diversifier.** `d` is a private field element supplied per input slot. One
+`ivk` has a distinct `pk` for each `d`, and every such `pk` opens only under
+that `ivk`, so notes held under different diversifiers are spent by the same
+`nsk`. The circuit does not range-check `d`: wallets use 128-bit values, and
+any field element is accepted. A real input slot enforces
+`pk == Poseidon(TAG_PK, ivk, d)`; on a dummy slot the check is bypassed and `d`
+is unconstrained. An output takes `pk` as an opaque input, so the sender needs
+the recipient's `pk` and not its `d`.
+
 Every input slot constrains `nullifier[i] === Poseidon(TAG_NF, nk, rho, cm)`,
 with `nk` derived in-circuit from `nsk` and `cm` recomputed from the same
 witness. A dummy slot uses prover-chosen `(nsk, rho)`, and the contract inserts
-every nullifier unconditionally.
+every nullifier unconditionally. The nullifier preimage does not contain `d`:
+a note has one nullifier, fixed by `(nk, rho, cm)`.
 
 `cm` is in the nullifier preimage so that two notes sharing a `rho` do not share
 a nullifier. Output `rho` is `Poseidon(TAG_RHO, nullifier[0], j)`, which is
@@ -458,8 +469,9 @@ For any asset mix:
 Padding:
 
 - **Dummy inputs** carry `is_dummy = 1` and skip the `pk` check, the Merkle
-  check and the `asset != 0` check. `DummyZeroValue` enforces
-  `is_dummy · value === 0`. The nullifier and both range checks still apply.
+  check and the `asset != 0` check, leaving `d` unconstrained. `DummyZeroValue`
+  enforces `is_dummy · value === 0`. The nullifier and both range checks still
+  apply.
 - **Padding outputs** are `value = 0` notes under a non-zero asset id, with a
   uniformly sampled `rcm`.
 
@@ -532,7 +544,7 @@ Defined in [`lib/tags.circom`](lib/tags.circom).
 |---|---:|---|---:|
 | `TAG_CM` | 1 | `cm = Poseidon(TAG_CM, packed_av, inner)` | 3 |
 | `TAG_NF` | 2 | `nf = Poseidon(TAG_NF, nk, rho, cm)` | 4 |
-| `TAG_PK` | 3 | `pk = Poseidon(TAG_PK, ivk)` | 2 |
+| `TAG_PK` | 3 | `pk = Poseidon(TAG_PK, ivk, d)` | 3 |
 | `TAG_IVK` | 4 | `ivk = Poseidon(TAG_IVK, nsk)` | 2 |
 | `TAG_MERKLE` | 5 | `node = Poseidon(TAG_MERKLE, c0..c3)` | 5 |
 | `TAG_DK` | 6 | `dk = Poseidon(TAG_DK, ivk)`, off-circuit | 2 |
@@ -542,11 +554,13 @@ Defined in [`lib/tags.circom`](lib/tags.circom).
 | `TAG_INNER` | 14 | `inner = Poseidon(TAG_INNER, pk, rho, rcm)` | 4 |
 | `TAG_DIGEST` | 15 | First block of `CoeffDigest`, in both circuits | 5 |
 
-Values 7 and 10 are reserved and must not be assigned. Values 12 and 13 are
-used off-circuit (`TAG_SUB_TOKEN`, `TAG_FMD_EXPAND`).
+Values 7 and 10 are reserved and must not be assigned. Values 12, 13, 16 and 17
+are used off-circuit (`TAG_SUB_TOKEN`, `TAG_FMD_EXPAND`, `TAG_GD`,
+`TAG_FMD_EXPAND2`).
 
-Sites sharing an arity have distinct leading tags: `TAG_CM` and `TAG_RHO` at 3,
-`TAG_NF` and `TAG_INNER` at 4, `TAG_MERKLE` and `TAG_DIGEST` at 5. A later
+Sites sharing an arity have distinct leading tags: `TAG_IVK` and `TAG_NK` at 2,
+`TAG_CM`, `TAG_PK` and `TAG_RHO` at 3, `TAG_NF` and `TAG_INNER` at 4,
+`TAG_MERKLE` and `TAG_DIGEST` at 5. A later
 `CoeffDigest` block leads with the previous block's output. `POW_2_64` is the
 packing multiplier in `NoteCommitment` and the bound `RangeCheck64` enforces.
 
@@ -559,7 +573,7 @@ public outputs.
 
 | Circuit | Constraints | Wires | Private inputs | Domain | Ceiling |
 |---|---:|---:|---:|---:|---:|
-| `Transact(11, 4, 6)` | 69,291 | 69,422 | 247 | 2^17 | 131,068 |
+| `Transact(11, 4, 6)` | 69,643 | 69,778 | 251 | 2^17 | 131,068 |
 | `TreeUpdateBatch(11, 8)` | 41,521 | 41,466 | 69 | 2^16 | 65,532 |
 
 snarkjs requires `nConstraints + nPubInputs + nOutputs ≤ domain − 1`, so the
@@ -585,13 +599,13 @@ Each gadget compiled on its own at circom's default `--O1`.
 | `RangeCheck64` | 65 |
 | `NoteInner` + `NoteCommitment` | 736 + 606 |
 | `MerkleProofOrDummy(11)` | 9,419 |
-| `SpentNote(11)` | 13,182 |
+| `SpentNote(11)` | 13,270 |
 | `OutputNote` (plus its `DeriveRho`, 605) | 1,473 |
 | `PerAssetValueBalance(4, 6)` | 594 |
 | `CoeffDigest(13)`, four `Poseidon(5)` | 3,340 |
 | `CoeffDigest(36)`, nine `Poseidon(5)` | 7,515 |
 
-`Transact(11, 4, 6)` is four `SpentNote` (52,728), six output slots (12,468),
+`Transact(11, 4, 6)` is four `SpentNote` (53,080), six output slots (12,468),
 the balance, the digest, and about 160 constraints for the transparent bucket,
 the dummy checks and the Horner chain.
 

@@ -192,9 +192,17 @@ function validateCase(shape: TransactShape, c: TransactCase): void {
     }
 }
 
-/** Note derivation shared with `TxBuilder.note`: rcm is rho + 1. */
+/**
+ * The diversifier a vector key's `pk` is derived under: 128-bit, non-zero and
+ * distinct per key. Published per key in `intermediates.keys`.
+ */
+function keyDiversifier(nsk: bigint): Field {
+    return (1n << 127n) | nsk;
+}
+
+/** `rcm` is rho + 1, as in `TxBuilder.note`; `pk` is under the key's diversifier. */
 function note(P: Poseidon, asset: Field, nsk: bigint, value: bigint, rho: Field): Note {
-    return { asset, value, pk: derivePk(P, nsk), rho, rcm: rho + 1n };
+    return { asset, value, pk: derivePk(P, nsk, keyDiversifier(nsk)), rho, rcm: rho + 1n };
 }
 
 /**
@@ -214,6 +222,7 @@ function insertRealInputs(P: Poseidon, tree: MerkleTree, c: TransactCase) {
         spent.push({
             ...n,
             nsk: inp.nsk,
+            d: keyDiversifier(inp.nsk),
             cm,
             nf: buildNullifierFromNsk(P, inp.nsk, n.rho, cm),
             leafIndex,
@@ -370,7 +379,9 @@ export async function buildTransactVectors(shape: TransactShape) {
                     nsk: s(nsk),
                     ivk: s(deriveIvk(P, nsk)),
                     nk: s(deriveNk(P, nsk)),
-                    pk: s(derivePk(P, nsk)),
+                    // pk = Poseidon(TAG_PK, ivk, d).
+                    d: s(keyDiversifier(nsk)),
+                    pk: s(derivePk(P, nsk, keyDiversifier(nsk))),
                 })),
                 // Every note commits in two steps:
                 //   inner = Poseidon(TAG_INNER, pk, rho, rcm)

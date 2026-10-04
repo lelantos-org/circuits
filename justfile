@@ -6,7 +6,7 @@ BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
 # Byte-identical copies of the Hermez ptau files, as unauthenticated release assets.
 PTAU_URL_BASE := "https://github.com/lelantos-org/ptau/releases/download/hermez"
-# Transact(11,4,6) uses the 2^17 ceremony (69,291 constraints; exceeds 2^16).
+# Transact(11,4,6) uses the 2^17 ceremony (69,643 constraints; exceeds 2^16).
 # TreeUpdateBatch(11,8) uses the 2^16 ceremony (41,521). snarkjs sizes the domain
 # from `nConstraints + nPubInputs + nOutputs`, capping a 2^16 ceremony at 65,532
 # constraints and a 2^17 one at 131,068.

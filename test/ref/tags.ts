@@ -5,7 +5,7 @@
 // |-------------|-------|----------------------------------------------------|
 // | TAG_CM      | 1     | cm   = Poseidon(TAG_CM, packed_av, inner)           |
 // | TAG_NF      | 2     | nf   = Poseidon(TAG_NF, nk, rho, cm)                |
-// | TAG_PK      | 3     | pk   = Poseidon(TAG_PK, ivk)                        |
+// | TAG_PK      | 3     | pk   = Poseidon(TAG_PK, ivk, d)                     |
 // | TAG_IVK     | 4     | ivk  = Poseidon(TAG_IVK, nsk)                       |
 // | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)                 |
 // | TAG_DK      | 6     | dk   = Poseidon(TAG_DK, ivk)         (off-circuit)  |
@@ -17,8 +17,9 @@
 // | TAG_INNER   | 14    | inner = Poseidon(TAG_INNER, pk, rho, rcm)           |
 // | TAG_DIGEST  | 15    | first block of the coefficient digest, Poseidon(5)  |
 //
-// 12 (TAG_SUB_TOKEN) and 13 (TAG_FMD_EXPAND) are off-circuit and absent from
-// `TAGS`, which mirrors the circom `TAG_*()` functions one-for-one.
+// 12 (TAG_SUB_TOKEN), 13 (TAG_FMD_EXPAND), 16 (TAG_GD) and 17 (TAG_FMD_EXPAND2)
+// are off-circuit and absent from `TAGS`, which mirrors the circom `TAG_*()`
+// functions one-for-one.
 
 export const TAG_CM = 1n;
 export const TAG_NF = 2n;

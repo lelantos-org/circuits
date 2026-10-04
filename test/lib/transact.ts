@@ -41,6 +41,15 @@ export const TEST_AUX_DIGEST: Field = 0xa17d19e57n;
 // or drops it fails.
 export const TEST_INTENT_HASH: Field = 0x2f00000000000000000000000000000000000000000000000000000000c0ffeen;
 
+/**
+ * The diversifier `TxBuilder.note` derives `pk` under: a function of the note's
+ * `rho`, so `TxBuilder.insert` recovers it. 128-bit and non-zero; distinct for
+ * distinct `rho` below 2^127.
+ */
+export function diversifierOf(rho: Field): Field {
+    return (1n << 127n) | (rho & ((1n << 127n) - 1n));
+}
+
 export interface TxBuildArgs {
     inputs: SpentNote[];
     outputs: Note[];
@@ -72,7 +81,7 @@ export class TxBuilder {
         return {
             asset,
             value,
-            pk: derivePk(this.P, ownerNsk),
+            pk: derivePk(this.P, ownerNsk, diversifierOf(rho)),
             rho,
             rcm: rho + 1n,
         };
@@ -80,12 +89,13 @@ export class TxBuilder {
 
     // Insert a note into `tree`, returning a SpentNote with an empty proof;
     // `finalize` populates path and indices once the root is frozen. The leaf
-    // is the note commitment itself.
-    insert(tree: MerkleTree, n: Note, nsk: Field): SpentNote {
+    // is the note commitment itself. `d` defaults to the diversifier `note`
+    // derives `pk` under.
+    insert(tree: MerkleTree, n: Note, nsk: Field, d: Field = diversifierOf(n.rho)): SpentNote {
         const cm = commit(this.P, n);
         const idx = tree.insert(cm);
         return {
-            ...n, nsk, cm,
+            ...n, nsk, d, cm,
             nf: nullifier(this.P, nsk, n.rho, cm),
             leafIndex: idx,
             pathElements: [], pathIndices: [], isDummy: false,

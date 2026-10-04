@@ -204,11 +204,12 @@ noncomputable def padSlot (d : ℕ) (root : F) : SpentSlot d where
   rho := 0
   rcm := 0
   nsk := 0
+  d := 0
   isDummy := 1
   root := root
   nullifier := nullifierOf (deriveNk 0) 0 padCm
   ivk := deriveIvk 0
-  pkDerived := derivePk (deriveIvk 0)
+  pkDerived := derivePk (deriveIvk 0) 0
   nk := deriveNk 0
   inner := noteInner 0 0 0
   cm := padCm
@@ -268,12 +269,13 @@ theorem outSlotOf_sat {asset value : F} {abits bits : ℕ → F} (hnz : asset �
 /-! ## A real (non-dummy) spent slot
 
 Inhabits `SpentReal`, the conclusion of `spentNote_sound` under `is_dummy = 0`: one unit of
-asset `1`, owned by `nsk = 0`, opened against a root its own path reaches.
+asset `1`, owned by `nsk = 0` under the diversifier `1`, opened against a root its own path
+reaches.
 -/
 
-/-- The spender's key. `pk` must equal the derived key, since the ownership constraint is
-active for a real slot. -/
-noncomputable def realPk : F := pkOfNsk 0
+/-- The spender's key, at diversifier `1`. `pk` must equal the derived key, since the
+ownership constraint is active for a real slot. -/
+noncomputable def realPk : F := pkOfNsk 0 1
 
 /-- One unit of asset `1`, committed. The commitment is the leaf. -/
 noncomputable def realCm : F := noteCm 1 1 realPk 0 0
@@ -290,11 +292,12 @@ noncomputable def realSlot (d : ℕ) : SpentSlot d where
   rho := 0
   rcm := 0
   nsk := 0
+  d := 1
   isDummy := 0
   root := realRoot d
   nullifier := nullifierOf (deriveNk 0) 0 realCm
   ivk := deriveIvk 0
-  pkDerived := derivePk (deriveIvk 0)
+  pkDerived := derivePk (deriveIvk 0) 1
   nk := deriveNk 0
   inner := noteInner realPk 0 0
   cm := realCm
@@ -740,11 +743,12 @@ noncomputable def slotA (D : ℕ) : SpentSlot (D + 1) where
   rho := 0
   rcm := 0
   nsk := 0
+  d := 1
   isDummy := 0
   root := pairRoot D
   nullifier := nullifierOf (deriveNk 0) 0 realCm
   ivk := deriveIvk 0
-  pkDerived := derivePk (deriveIvk 0)
+  pkDerived := derivePk (deriveIvk 0) 1
   nk := deriveNk 0
   inner := noteInner realPk 0 0
   cm := realCm
@@ -785,11 +789,12 @@ noncomputable def slotB (D : ℕ) : SpentSlot (D + 1) where
   rho := 0
   rcm := 0
   nsk := 0
+  d := 1
   isDummy := 0
   root := pairRoot D
   nullifier := nullifierOf (deriveNk 0) 0 cmB
   ivk := deriveIvk 0
-  pkDerived := derivePk (deriveIvk 0)
+  pkDerived := derivePk (deriveIvk 0) 1
   nk := deriveNk 0
   inner := noteInner realPk 0 0
   cm := cmB

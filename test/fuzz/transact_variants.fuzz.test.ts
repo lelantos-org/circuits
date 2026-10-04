@@ -11,7 +11,7 @@ import * as fc from "fast-check";
 import { expectThrows, expectWitnessFails } from "../lib/expect";
 import { bumpSignal } from "../lib/signal_path";
 import { useTransactCircuit } from "../transact/setup";
-import { arbBalancedSplit, arbNsk, MAX_VALUE, fcParamsFor } from "./arbitraries";
+import { arbBalancedSplit, arbField, arbNsk, MAX_VALUE, R, fcParamsFor } from "./arbitraries";
 import { ALICE_NSK, BOB_NSK, DEPTH, TIMEOUT_HEAVY } from "../lib/constants";
 
 // Each trial builds one or two production-depth witnesses, so SUITE_SCALE halves
@@ -96,8 +96,8 @@ describe("transact_4x6 variants [fuzz]", function () {
     });
 
     it("cross-note attack: swapping in_nsk between two differently-owned inputs rejects", async () => {
-        // The swap breaks both the pk-derivation check (DerivePk(nsk1) ≠ pk0) and
-        // the nullifier check (nf0 is derived from DeriveNk(nsk0)).
+        // The swap breaks both the pk-derivation check (DerivePk(ivk1, d0) ≠ pk0)
+        // and the nullifier check (nf0 is derived from DeriveNk(nsk0)).
         await fc.assert(fc.asyncProperty(
             arbBalancedSplit(), arbNsk(), arbNsk(),
             async ({ v1, v2, o1, o2 }, nsk0, nsk1) => {
@@ -114,6 +114,21 @@ describe("transact_4x6 variants [fuzz]", function () {
                 [nsk[0], nsk[1]] = [nsk[1], nsk[0]];
                 const swapped = { ...input, in_nsk: nsk };
                 await expectWitnessFails(ctx.circuit, swapped, "swapped nsk must reject");
+            },
+        ), fcParams);
+    });
+
+    it("a diversifier other than the one pk is derived under rejects", async () => {
+        // d spans the field: DerivePk range-checks nothing, so no value but the
+        // note's own opens its pk.
+        await fc.assert(fc.asyncProperty(
+            arbBalancedSplit(), arbNsk(), arbNsk(), arbField(R - 1n),
+            async (split, aliceNsk, bobNsk, d) => {
+                const input = ctx.tx.transfer(split, aliceNsk, bobNsk, [501n, 502n, 503n, 504n]);
+                fc.pre(d !== BigInt(input.in_d[0]));
+                await ctx.circuit.calculateWitness(input, true);
+                const tampered = { ...input, in_d: [d.toString(), ...input.in_d.slice(1)] };
+                await expectWitnessFails(ctx.circuit, tampered, "a wrong diversifier must reject");
             },
         ), fcParams);
     });

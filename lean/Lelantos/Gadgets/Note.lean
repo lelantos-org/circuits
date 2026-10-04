@@ -21,12 +21,13 @@ Transcription of the seven templates, plus the structural facts they provide:
 
 * `nullifier_binds_cm` — the commitment is part of the nullifier preimage, so two notes
   that share `(nk, rho)` get different nullifiers. This is the faerie-gold defence
-  described at `src/lib/note.circom:109-113`; without `cm` in the preimage an attacker who
+  described at `src/lib/note.circom:114-118`; without `cm` in the preimage an attacker who
   produced a second note with a victim's `rho` could burn the victim's nullifier.
 
 Domain separation is by the leading tag: every same-arity pair of hash sites leads with a
-different constant (`noteCommitment_ne_deriveRho`, `noteInner_ne_nullifier`), and different
-arities are different preimage lengths (`noteCommitment_ne_merkleNode`).
+different constant (`derivePk_ne_noteCommitment`, `derivePk_ne_deriveRho`,
+`noteCommitment_ne_deriveRho`, `noteInner_ne_nullifier`), and different arities are different
+preimage lengths (`noteCommitment_ne_merkleNode`).
 
 The tree leaf is `cm` itself.
 -/
@@ -39,35 +40,36 @@ def deriveIvk (nsk : F) : F := poseidon [TAG_IVK, nsk]
 /-- `DeriveNk` — `src/lib/note.circom:26-35`. -/
 def deriveNk (nsk : F) : F := poseidon [TAG_NK, nsk]
 
-/-- `DerivePk` — `src/lib/note.circom:37-46`. -/
-def derivePk (ivk : F) : F := poseidon [TAG_PK, ivk]
+/-- `DerivePk` — `src/lib/note.circom:39-50`: `Poseidon(TAG_PK, ivk, d)`. `d` is the
+diversifier, an unconstrained field element: one `ivk` has a distinct `pk` per `d`. -/
+def derivePk (ivk d : F) : F := poseidon [TAG_PK, ivk, d]
 
-/-- The full spend-key chain `nsk → ivk → pk`. -/
-def pkOfNsk (nsk : F) : F := derivePk (deriveIvk nsk)
+/-- The full spend-key chain `nsk → ivk → pk`, under the diversifier `d`. -/
+def pkOfNsk (nsk d : F) : F := derivePk (deriveIvk nsk) d
 
-/-- `NoteInner` — `src/lib/note.circom:53-66`. The half of a note that stays private on
+/-- `NoteInner` — `src/lib/note.circom:57-70`. The half of a note that stays private on
 every path: the owner key, `rho` and the hiding randomness. -/
 def noteInner (pk rho rcm : F) : F := poseidon [TAG_INNER, pk, rho, rcm]
 
-/-- `packed_av <== asset_id * POW_2_64() + value` — `src/lib/note.circom:81`. -/
+/-- `packed_av <== asset_id * POW_2_64() + value` — `src/lib/note.circom:86`. -/
 def packAV (assetId value : F) : F := assetId * POW_2_64 + value
 
-/-- `NoteCommitment` — `src/lib/note.circom:74-89`: `Poseidon(TAG_CM, packed_av, inner)`.
+/-- `NoteCommitment` — `src/lib/note.circom:79-94`: `Poseidon(TAG_CM, packed_av, inner)`.
 The third argument is an `inner`, whoever computed it: `SpentNote` and `OutputNote` pass
 `noteInner pk rho rcm`, `TreeUpdateBatch` passes the word a depositor published. -/
 def noteCommitment (assetId value inner : F) : F :=
   poseidon [TAG_CM, packAV assetId value, inner]
 
 /-- The commitment of a whole note: `NoteInner` then `NoteCommitment`, as the two slot
-templates wire them, at `src/lib/spent.circom:54-62` on the input side and at
+templates wire them, at `src/lib/spent.circom:58-66` on the input side and at
 `src/lib/output.circom:36-45` on the output side. -/
 def noteCm (assetId value pk rho rcm : F) : F :=
   noteCommitment assetId value (noteInner pk rho rcm)
 
-/-- `DeriveRho` — `src/lib/note.circom:96-107`. -/
+/-- `DeriveRho` — `src/lib/note.circom:101-112`. -/
 def deriveRho (nf0 index : F) : F := poseidon [TAG_RHO, nf0, index]
 
-/-- `Nullifier` — `src/lib/note.circom:118-131`. -/
+/-- `Nullifier` — `src/lib/note.circom:123-136`. -/
 def nullifierOf (nk rho cm : F) : F := poseidon [TAG_NF, nk, rho, cm]
 
 /-- The node hash of `MerkleLevel4`, `Poseidon(TAG_MERKLE, c0, c1, c2, c3)` —
@@ -102,7 +104,7 @@ theorem packAV_val {x y : F} (hx : x.val < 2 ^ 64) (hy : y.val < 2 ^ 64) :
   rw [packAV_cast, ZMod.val_natCast_of_lt (packAV_bound hx hy)]
 
 /-- Packing is injective on 64-bit-range-checked inputs, since `2^128 < p`. This is the
-precondition stated at `src/lib/note.circom:68-71`. -/
+precondition stated at `src/lib/note.circom:72-75`. -/
 theorem packAV_inj {a v a' v' : F}
     (ha : a.val < 2 ^ 64) (hv : v.val < 2 ^ 64)
     (ha' : a'.val < 2 ^ 64) (hv' : v'.val < 2 ^ 64)
@@ -123,15 +125,21 @@ theorem nullifier_binds_cm (hcr : ¬ PoseidonCollision) {nk rho cm nk' rho' cm' 
   simp only [List.cons.injEq, and_true] at h'
   exact ⟨h'.2.1, h'.2.2.1, h'.2.2.2⟩
 
-/-- The key chain is injective, so a satisfied ownership check pins `nsk`. -/
-theorem pkOfNsk_inj (hcr : ¬ PoseidonCollision) {nsk nsk' : F}
-    (h : pkOfNsk nsk = pkOfNsk nsk') : nsk = nsk' := by
+/-- The key chain is injective, so a satisfied ownership check pins `nsk` and the
+diversifier: a `pk` opens under one `(nsk, d)`. -/
+theorem pkOfNsk_inj (hcr : ¬ PoseidonCollision) {nsk d nsk' d' : F}
+    (h : pkOfNsk nsk d = pkOfNsk nsk' d') : nsk = nsk' ∧ d = d' := by
   unfold pkOfNsk derivePk deriveIvk at h
   have h1 := poseidon_inj hcr h
   simp only [List.cons.injEq, and_true] at h1
-  have h2 := poseidon_inj hcr h1.2
+  have h2 := poseidon_inj hcr h1.2.1
   simp only [List.cons.injEq, and_true] at h2
-  exact h2.2
+  exact ⟨h2.2, h1.2.2⟩
+
+/-- Under one `nsk`, distinct diversifiers give distinct owner keys. -/
+theorem pkOfNsk_diversified (hcr : ¬ PoseidonCollision) {nsk d d' : F} (h : d ≠ d') :
+    pkOfNsk nsk d ≠ pkOfNsk nsk d' :=
+  fun heq => h (pkOfNsk_inj hcr heq).2
 
 /-- `DeriveRho` is injective, so distinct `(nf0, index)` give distinct output `rho`. -/
 theorem deriveRho_inj (hcr : ¬ PoseidonCollision) {a b a' b' : F}
@@ -190,9 +198,9 @@ theorem merkleNode_inj (hcr : ¬ PoseidonCollision) {c c' : ℕ → F}
 
 Same arity, different leading tag; or different arity. -/
 
-/-- **A note commitment is never an output `rho`.** `NoteCommitment` and `DeriveRho` are the
-only two arity-3 sites, and they lead with different tags:
-`TAG_CM` at `src/lib/note.circom:84` and `TAG_RHO` at `src/lib/note.circom:102`. -/
+/-- **A note commitment is never an output `rho`.** `NoteCommitment` and `DeriveRho` are
+arity-3 sites leading with different tags:
+`TAG_CM` at `src/lib/note.circom:89` and `TAG_RHO` at `src/lib/note.circom:107`. -/
 theorem noteCommitment_ne_deriveRho (hcr : ¬ PoseidonCollision) (a v inner nf0 index : F) :
     noteCommitment a v inner ≠ deriveRho nf0 index := by
   intro h
@@ -200,6 +208,29 @@ theorem noteCommitment_ne_deriveRho (hcr : ¬ PoseidonCollision) (a v inner nf0 
   simp only [List.cons.injEq, and_true] at h'
   have hne : (TAG_CM : F) ≠ TAG_RHO := by
     simpa [TAG_CM, TAG_RHO] using tag_ne (m := 1) (n := 11) (by norm_num) (by norm_num)
+      (by norm_num)
+  exact hne h'.1
+
+/-- **An owner key is never a note commitment.** `DerivePk` is the third arity-3 site and
+leads with `TAG_PK`, at `src/lib/note.circom:45`. -/
+theorem derivePk_ne_noteCommitment (hcr : ¬ PoseidonCollision) (ivk d a v inner : F) :
+    derivePk ivk d ≠ noteCommitment a v inner := by
+  intro h
+  have h' := poseidon_inj hcr h
+  simp only [List.cons.injEq, and_true] at h'
+  have hne : (TAG_PK : F) ≠ TAG_CM := by
+    simpa [TAG_PK, TAG_CM] using tag_ne (m := 3) (n := 1) (by norm_num) (by norm_num)
+      (by norm_num)
+  exact hne h'.1
+
+/-- **An owner key is never an output `rho`.** `TAG_PK` against `TAG_RHO`. -/
+theorem derivePk_ne_deriveRho (hcr : ¬ PoseidonCollision) (ivk d nf0 index : F) :
+    derivePk ivk d ≠ deriveRho nf0 index := by
+  intro h
+  have h' := poseidon_inj hcr h
+  simp only [List.cons.injEq, and_true] at h'
+  have hne : (TAG_PK : F) ≠ TAG_RHO := by
+    simpa [TAG_PK, TAG_RHO] using tag_ne (m := 3) (n := 11) (by norm_num) (by norm_num)
       (by norm_num)
   exact hne h'.1
 

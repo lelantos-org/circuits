@@ -42,6 +42,10 @@ interface NoteFields {
 
 const NOTE: NoteFields = { asset: 7n, value: 1000n, rho: 5n, rcm: 6n };
 
+// The diversifier the honest owner's pk is derived under: 128-bit, the width a
+// wallet samples.
+const D: Field = (1n << 127n) + 0xd1n;
+
 /**
  * `cm` over a packed word the reference refuses to build. The hash equality
  * holds over the out-of-range field, so only the range check can reject.
@@ -72,7 +76,7 @@ describe("OutputNote (one output slot)", function () {
     /** The honest witness for `n`, owned by ALICE. */
     function honest(n: NoteFields = NOTE) {
         const { P } = ctx;
-        const pk = derivePk(P, ALICE_NSK);
+        const pk = derivePk(P, ALICE_NSK, D);
         return {
             ...noteFieldsJson(n, pk),
             cm: buildNoteCommitment(P, { ...n, pk }).toString(),
@@ -98,7 +102,7 @@ describe("OutputNote (one output slot)", function () {
         const input = honest();
         input.cm = buildNoteCommitment(P, {
             ...NOTE,
-            pk: derivePk(P, MALLORY_NSK),
+            pk: derivePk(P, MALLORY_NSK, D),
         }).toString();
         await expectWitnessFails(ctx.circuit, input, "the declared pk must be the committed one");
     });
@@ -125,7 +129,7 @@ describe("OutputNote (one output slot)", function () {
 
     it("FAILS when value reaches 2^64", async () => {
         const { P } = ctx;
-        const pk = derivePk(P, ALICE_NSK);
+        const pk = derivePk(P, ALICE_NSK, D);
         const input = honest();
         input.value = TWO_64.toString();
         input.cm = cmOverPacked(P, NOTE.asset * POW_2_64 + TWO_64, NOTE, pk).toString();
@@ -137,7 +141,7 @@ describe("OutputNote (one output slot)", function () {
     it("FAILS when asset_id reaches 2^64", async () => {
         // The asset bound keeps (asset, value) -> packed injective from above.
         const { P } = ctx;
-        const pk = derivePk(P, ALICE_NSK);
+        const pk = derivePk(P, ALICE_NSK, D);
         const input = honest();
         input.asset_id = TWO_64.toString();
         input.cm = cmOverPacked(P, TWO_64 * POW_2_64 + NOTE.value, NOTE, pk).toString();
@@ -150,7 +154,7 @@ describe("OutputNote (one output slot)", function () {
         // (asset 7, value 2^64) and (asset 8, value 0) pack to the same word and
         // so share a cm. Only the in-range reading is accepted.
         const { P } = ctx;
-        const pk = derivePk(P, ALICE_NSK);
+        const pk = derivePk(P, ALICE_NSK, D);
         const inRange = honest({ ...NOTE, asset: 8n, value: 0n });
         expect(inRange.cm).to.equal(cmOverPacked(P, 7n * POW_2_64 + TWO_64, NOTE, pk).toString());
         await expectAccepts(ctx.circuit, inRange);
@@ -174,9 +178,9 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
     }
 
     /** Insert `n`'s commitment into a fresh tree and take its authentication path. */
-    function plant(n: NoteFields, nsk: Field): Planted {
+    function plant(n: NoteFields, nsk: Field, d: Field): Planted {
         const { P } = ctx;
-        const pk = derivePk(P, nsk);
+        const pk = derivePk(P, nsk, d);
         const cm = buildNoteCommitment(P, { ...n, pk });
         const tree = new MerkleTree(P, DEPTH);
         // Two decoys first, so the note sits at a non-zero index and its path
@@ -188,14 +192,16 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
         return { root: tree.root(), pathElements, pathIndices };
     }
 
-    function honest(n: NoteFields = NOTE, nsk: Field = ALICE_NSK) {
+    /** The honest spend of `n`, held by `nsk` under the diversifier `d`. */
+    function honest(n: NoteFields = NOTE, nsk: Field = ALICE_NSK, d: Field = D) {
         const { P } = ctx;
-        const pk = derivePk(P, nsk);
+        const pk = derivePk(P, nsk, d);
         const cm = buildNoteCommitment(P, { ...n, pk });
-        const planted = plant(n, nsk);
+        const planted = plant(n, nsk, d);
         return {
             ...noteFieldsJson(n, pk),
             nsk: nsk.toString(),
+            d: d.toString(),
             path_elements: planted.pathElements.map(lvl => lvl.map(String)),
             path_indices: planted.pathIndices.map(String),
             is_dummy: "0",
@@ -216,6 +222,58 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
             input,
             "(1 - is_dummy) * (pk_check.pk - pk) === 0 must reject a non-owner",
         );
+    });
+
+    // ===== the diversifier =====
+
+    // d is not range-checked: zero, the 128-bit width a wallet samples, and
+    // wider field elements all open the pk derived under them.
+    for (const [label, d] of [
+        ["0", 0n],
+        ["1", 1n],
+        ["2^128 - 1", (1n << 128n) - 1n],
+        ["2^200", 1n << 200n],
+    ] as const) {
+        it(`accepts the spend of a note whose pk is derived under d = ${label}`, async () => {
+            await expectAccepts(ctx.circuit, honest(NOTE, ALICE_NSK, d));
+        });
+    }
+
+    it("gives one nsk a different pk, cm and nullifier under each diversifier", async () => {
+        const [a, b] = [honest(NOTE, ALICE_NSK, D), honest(NOTE, ALICE_NSK, D + 1n)];
+        expect(a.pk, "pk must depend on d").to.not.equal(b.pk);
+        expect(a.root, "cm binds pk, so the leaf moves with d").to.not.equal(b.root);
+        expect(a.nullifier, "the nullifier binds cm").to.not.equal(b.nullifier);
+        await expectAccepts(ctx.circuit, a);
+        await expectAccepts(ctx.circuit, b);
+    });
+
+    // The owner's nsk with the wrong diversifier derives another pk. The rest
+    // of the witness is the honest spend, so only the pk check rejects.
+    for (const [label, wrong] of [
+        ["d + 1", D + 1n],
+        ["0", 0n],
+        ["the pk itself", null],
+    ] as const) {
+        it(`FAILS when the witness d is ${label}, not the diversifier pk is derived under`, async () => {
+            const input = honest();
+            input.d = (wrong ?? BigInt(input.pk)).toString();
+            await expectWitnessFails(
+                ctx.circuit,
+                input,
+                "(1 - is_dummy) * (pk_check.pk - pk) === 0 must reject a wrong diversifier",
+            );
+        });
+    }
+
+    it("FAILS when another nsk presents the owner's diversifier", async () => {
+        const { P } = ctx;
+        const input = honest();
+        input.nsk = MALLORY_NSK.toString();
+        // Nullifier rebuilt under the attacker's key, so only the pk check rejects.
+        const cm = buildNoteCommitment(P, { ...NOTE, pk: BigInt(input.pk) });
+        input.nullifier = buildNullifierFromNsk(P, MALLORY_NSK, NOTE.rho, cm).toString();
+        await expectWitnessFails(ctx.circuit, input, "knowing d does not open the pk without nsk");
     });
 
     it("FAILS on a perturbed sibling", async () => {
@@ -246,7 +304,7 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
     ] as const) {
         it(`FAILS when the spend restates the note's ${field}, nullifier consistent`, async () => {
             const { P } = ctx;
-            const pk = derivePk(P, ALICE_NSK);
+            const pk = derivePk(P, ALICE_NSK, D);
             const input = honest();
             input.asset_id = restated.asset.toString();
             input.value = restated.value.toString();
@@ -292,6 +350,7 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
         await expectAccepts(ctx.circuit, {
             ...noteFieldsJson(n, pk),
             nsk: ALICE_NSK.toString(),
+            d: "0",
             path_elements: Array.from({ length: DEPTH }, (_, d) =>
                 Array.from({ length: ARITY - 1 }, (_, k) => (0xbad0000 + d * 16 + k).toString())),
             path_indices: ["1", "2"],
@@ -300,6 +359,22 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
             nullifier: buildNullifierFromNsk(P, ALICE_NSK, n.rho, cm).toString(),
         });
     });
+
+    // The pk check is the only constraint reading d, so a dummy slot takes any
+    // field element there.
+    for (const [label, d] of [
+        ["0", 0n],
+        ["a 128-bit value", D],
+        ["a value its pk is not derived under", D + 1n],
+        ["2^253", 1n << 253n],
+    ] as const) {
+        it(`accepts ${label} as d at is_dummy = 1`, async () => {
+            const input = honest();
+            input.is_dummy = "1";
+            input.d = d.toString();
+            await expectAccepts(ctx.circuit, input);
+        });
+    }
 
     // A dummy emits a real nullifier, which makes padding indistinguishable on
     // chain; the contract inserts each one into the spent set
@@ -335,6 +410,7 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
             return {
                 ...noteFieldsJson(n, 0n),
                 nsk: ALICE_NSK.toString(),
+                d: "0",
                 path_elements: Array.from({ length: DEPTH }, () => ["0", "0", "0"]),
                 path_indices: ["0", "0"],
                 is_dummy: "1",

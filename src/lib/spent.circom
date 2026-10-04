@@ -7,8 +7,10 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 
 // One spent-note slot.
 //
-// is_dummy = 0 enforces the pk check, Merkle membership and asset_id != 0.
-// is_dummy = 1 bypasses those; the caller's DummyZeroValue forces value == 0.
+// is_dummy = 0 enforces Merkle membership, asset_id != 0 and the pk check:
+//   pk == Poseidon(TAG_PK, Poseidon(TAG_IVK, nsk), d)
+// is_dummy = 1 bypasses those, leaving d unconstrained; the caller's
+// DummyZeroValue forces value == 0.
 //
 // Enforced in both cases:
 //   value, asset_id < 2^64
@@ -26,6 +28,7 @@ template SpentNote(DEPTH) {
     signal input rho;
     signal input rcm;
     signal input nsk;
+    signal input d;
     signal input path_elements[DEPTH][3];
     signal input path_indices[DEPTH];
     signal input is_dummy;
@@ -34,12 +37,13 @@ template SpentNote(DEPTH) {
     signal input root;
     signal input nullifier;
 
-    // 1. nsk → ivk → pk.
+    // 1. nsk → ivk, then (ivk, d) → pk.
     component ivk_d = DeriveIvk();
     ivk_d.nsk <== nsk;
 
     component pk_check = DerivePk();
     pk_check.ivk <== ivk_d.ivk;
+    pk_check.d   <== d;
     (1 - is_dummy) * (pk_check.pk - pk) === 0;
 
     // 2. Range-check value and asset_id, on dummy slots too: the packing in
@@ -66,11 +70,11 @@ template SpentNote(DEPTH) {
     mp.leaf     <== cm.cm;
     mp.root     <== root;
     mp.is_dummy <== is_dummy;
-    for (var d = 0; d < DEPTH; d++) {
-        mp.path_elements[d][0] <== path_elements[d][0];
-        mp.path_elements[d][1] <== path_elements[d][1];
-        mp.path_elements[d][2] <== path_elements[d][2];
-        mp.path_indices[d]     <== path_indices[d];
+    for (var l = 0; l < DEPTH; l++) {
+        mp.path_elements[l][0] <== path_elements[l][0];
+        mp.path_elements[l][1] <== path_elements[l][1];
+        mp.path_elements[l][2] <== path_elements[l][2];
+        mp.path_indices[l]     <== path_indices[l];
     }
 
     // 5. Nullifier. cm is in the preimage, so a rho collision alone cannot lock

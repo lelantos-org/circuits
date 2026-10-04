@@ -328,12 +328,12 @@ coefficients. The digest is not one of them and has no line in the dump.
 |---|---|
 | `:14-24` `ivk = Poseidon(TAG_IVK, nsk)` | `deriveIvk` |
 | `:26-35` `nk = Poseidon(TAG_NK, nsk)` | `deriveNk` |
-| `:37-46` `pk = Poseidon(TAG_PK, ivk)` | `derivePk` |
-| `:53-66` `inner = Poseidon(TAG_INNER, owner_pk, rho, rcm)` | `noteInner` |
-| `:81` `packed_av <== asset*2^64 + value` | `packAV` |
-| `:83-88` `cm = Poseidon(TAG_CM, packed_av, inner)` | `noteCommitment` |
-| `:96-107` `rho = Poseidon(TAG_RHO, nf0, index)` | `deriveRho` |
-| `:118-131` `nf = Poseidon(TAG_NF, nk, rho, cm)` | `nullifierOf` |
+| `:39-50` `pk = Poseidon(TAG_PK, ivk, d)` | `derivePk` |
+| `:57-70` `inner = Poseidon(TAG_INNER, owner_pk, rho, rcm)` | `noteInner` |
+| `:86` `packed_av <== asset*2^64 + value` | `packAV` |
+| `:88-93` `cm = Poseidon(TAG_CM, packed_av, inner)` | `noteCommitment` |
+| `:101-112` `rho = Poseidon(TAG_RHO, nf0, index)` | `deriveRho` |
+| `:123-136` `nf = Poseidon(TAG_NF, nk, rho, cm)` | `nullifierOf` |
 
 `noteCommitment` takes an `inner`, not `(pk, rho, rcm)`, because that is the template's
 interface and `tree_update_batch.circom` instantiates it with a word that is not computed
@@ -346,18 +346,18 @@ order, each field's doc comment citing the source line it mirrors.
 
 | circom | Lean |
 |---|---|
-| `:38-39` `ivk_d = DeriveIvk(nsk)` | `SpentNoteSat.ivk_def` |
-| `:41-42` `pk_check = DerivePk(ivk)` | `SpentNoteSat.pk_derived` |
-| `:43` `(1 - is_dummy) * (pk_check.pk - pk) === 0` | `SpentNoteSat.owns` |
-| `:47-48` `rng_value = RangeCheck64(value)` | `SpentNoteSat.value_range` |
-| `:50-51` `rng_asset = RangeCheck64(asset_id)` | `SpentNoteSat.asset_range` |
-| `:54-57` `inner = NoteInner(pk, rho, rcm)` | `SpentNoteSat.inner_def` |
-| `:59-62` `cm = NoteCommitment(asset_id, value, inner)` | `SpentNoteSat.cm_def` |
-| `:65-74` `mp = MerkleProofOrDummy(DEPTH)`, with the commitment as its `leaf` | `SpentNoteSat.membership` |
-| `:78-79` `nk_d = DeriveNk(nsk)` | `SpentNoteSat.nk_def` |
-| `:81-85` `nf_h.nf === nullifier` | `SpentNoteSat.nf_def` |
-| `:89-90` `asset_nz = IsZero(asset_id)` | `SpentNoteSat.asset_isZero` |
-| `:91` `(1 - is_dummy) * asset_nz.out === 0` | `SpentNoteSat.asset_nonzero_real` |
+| `:41-42` `ivk_d = DeriveIvk(nsk)` | `SpentNoteSat.ivk_def` |
+| `:44-46` `pk_check = DerivePk(ivk, d)` | `SpentNoteSat.pk_derived` |
+| `:47` `(1 - is_dummy) * (pk_check.pk - pk) === 0` | `SpentNoteSat.owns` |
+| `:51-52` `rng_value = RangeCheck64(value)` | `SpentNoteSat.value_range` |
+| `:54-55` `rng_asset = RangeCheck64(asset_id)` | `SpentNoteSat.asset_range` |
+| `:58-61` `inner = NoteInner(pk, rho, rcm)` | `SpentNoteSat.inner_def` |
+| `:63-66` `cm = NoteCommitment(asset_id, value, inner)` | `SpentNoteSat.cm_def` |
+| `:69-78` `mp = MerkleProofOrDummy(DEPTH)`, with the commitment as its `leaf` | `SpentNoteSat.membership` |
+| `:82-83` `nk_d = DeriveNk(nsk)` | `SpentNoteSat.nk_def` |
+| `:85-89` `nf_h.nf === nullifier` | `SpentNoteSat.nf_def` |
+| `:93-94` `asset_nz = IsZero(asset_id)` | `SpentNoteSat.asset_isZero` |
+| `:95` `(1 - is_dummy) * asset_nz.out === 0` | `SpentNoteSat.asset_nonzero_real` |
 
 ### `src/lib/output.circom`
 
@@ -395,22 +395,22 @@ order, each field's doc comment citing the source line it mirrors.
 
 | circom | Lean |
 |---|---|
-| `:71-86` `spent[i] = SpentNote(DEPTH)` and its wiring | `TransactSat.spent_sat` |
-| `:85` `spent[i].root <== merkle_root` | `TransactSat.spent_root` |
-| `:89-90` `in_dz` wiring | `TransactSat.dummy_zero` |
-| `:98` `dummy_acc[0] <== 0` | `TransactSat.dummy_acc_base` |
-| `:99-101` `dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i]` | `TransactSat.dummy_acc_step` |
-| `:102-104` `all_dummy = IsEqual(dummy_acc[N_IN], N_IN)` | `TransactSat.dummy_all_eq` |
-| `:105` `all_dummy.out === 0` | `TransactSat.not_all_dummy` |
-| `:114-117` `out_rho[j] === DeriveRho(nullifier[0], j)` | `TransactSat.rho_derived` |
-| `:119-125` `out_note[j] = OutputNote()` and its wiring | `TransactSat.out_sat` |
-| `:131-132` `rng_pub_asset = RangeCheck64(public_asset_id)` | `TransactSat.pub_asset_range` |
-| `:134-135` `rng_pub_out = RangeCheck64(public_out)` | `TransactSat.pub_out_range` |
-| `:142-143` `pub_out_z = IsZero(public_out)` | `TransactSat.pub_out_isZero` |
-| `:144` `pub_out_z.out * public_asset_id === 0` | `TransactSat.transfer_names_no_asset` |
-| `:147-157` `vbal = PerAssetValueBalance(N_IN, N_OUT)` and its wiring | `TransactSat.value_balance` |
-| `:160-171` `pe = TransactCompressN(N_IN, N_OUT)`, its wiring, and `y <== pe.y` | `TransactSat.compress` |
-| `:172` `digest <== pe.digest` | `TransactSat.digest_def` |
+| `:72-88` `spent[i] = SpentNote(DEPTH)` and its wiring | `TransactSat.spent_sat` |
+| `:87` `spent[i].root <== merkle_root` | `TransactSat.spent_root` |
+| `:91-92` `in_dz` wiring | `TransactSat.dummy_zero` |
+| `:100` `dummy_acc[0] <== 0` | `TransactSat.dummy_acc_base` |
+| `:101-103` `dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i]` | `TransactSat.dummy_acc_step` |
+| `:104-106` `all_dummy = IsEqual(dummy_acc[N_IN], N_IN)` | `TransactSat.dummy_all_eq` |
+| `:107` `all_dummy.out === 0` | `TransactSat.not_all_dummy` |
+| `:116-119` `out_rho[j] === DeriveRho(nullifier[0], j)` | `TransactSat.rho_derived` |
+| `:121-127` `out_note[j] = OutputNote()` and its wiring | `TransactSat.out_sat` |
+| `:133-134` `rng_pub_asset = RangeCheck64(public_asset_id)` | `TransactSat.pub_asset_range` |
+| `:136-137` `rng_pub_out = RangeCheck64(public_out)` | `TransactSat.pub_out_range` |
+| `:144-145` `pub_out_z = IsZero(public_out)` | `TransactSat.pub_out_isZero` |
+| `:146` `pub_out_z.out * public_asset_id === 0` | `TransactSat.transfer_names_no_asset` |
+| `:149-159` `vbal = PerAssetValueBalance(N_IN, N_OUT)` and its wiring | `TransactSat.value_balance` |
+| `:162-173` `pe = TransactCompressN(N_IN, N_OUT)`, its wiring, and `y <== pe.y` | `TransactSat.compress` |
+| `:174` `digest <== pe.digest` | `TransactSat.digest_def` |
 
 ## Defence 2 — witness parity harness
 
@@ -499,7 +499,7 @@ model field abstracts, a wider one naming a whole template. A line reached only 
 template-wide citation is **pointer-only**: evidence about the template, not about that
 line. A line nothing reaches is **uncited**.
 
-261 of 262 constraints are transcribed. The residue is pinned in `expected/coverage.txt` and
+264 of 265 constraints are transcribed. The residue is pinned in `expected/coverage.txt` and
 diffed the way `check-axioms.sh` pins the trusted base, so a new uncited constraint appears
 in review rather than in nobody's eye. It is *exactly* the one exception Defence 1 states,
 `EmptySubtreeHashes`, and nothing is pointer-only. Two lines of `MerkleRoot`'s level loop

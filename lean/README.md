@@ -242,7 +242,8 @@ Notes:
 | `noteCm_inj` † | `Gadgets/Note.lean` | `cm` binds all five note fields |
 | `merkleMember_inj` † | `Gadgets/Merkle.lean` | The root binds the leaf at a position |
 | `merkleNode_inj` † | `Gadgets/Note.lean` | Injectivity of the Merkle node hash |
-| `noteCommitment_ne_deriveRho` † | `Gadgets/Note.lean` | The two arity-3 sites are separated by their leading tags |
+| `pkOfNsk_inj` †, `pkOfNsk_diversified` † | `Gadgets/Note.lean` | `pk` binds `nsk` and the diversifier `d`; one `nsk` has a distinct `pk` per `d` |
+| `derivePk_ne_noteCommitment` †, `derivePk_ne_deriveRho` †, `noteCommitment_ne_deriveRho` † | `Gadgets/Note.lean` | The three arity-3 sites are separated by their leading tags |
 | `noteInner_ne_nullifier` † | `Gadgets/Note.lean` | The two arity-4 sites are separated by their leading tags |
 | `noteCommitment_ne_merkleNode` † | `Gadgets/Note.lean` | A leaf is not an internal node (arity 3 against 5) |
 | `digestBlock_zero_ne_merkleNode` † | `Gadgets/CoeffDigest.lean` | Block 0 of a digest is not a Merkle node |

@@ -3,7 +3,7 @@
   "generator": "@lelantos-org/circuits@0.17.0",
   "files": {
     "transact-4x6.json": {
-      "sha256": "57f4582ab1b8818075297e253a0282afe5d604447db5f171d1c94e4f60ffdfcf",
+      "sha256": "95b24d5d345a34fe1906ce878de5c556b822d08208b955d793b1737154695bce",
       "coeffCount": 13,
       "layoutDigest": "0x2a27471a7ff7bc19b44d7a7567edbe2c382dc1bea4e6e52b23bcab9349c96a9a"
     },

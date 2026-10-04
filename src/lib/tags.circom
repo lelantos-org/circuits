@@ -7,7 +7,7 @@ pragma circom 2.2.3;
 // |-------------|-------|------------------------------------------------------|
 // | TAG_CM      | 1     | cm   = Poseidon(TAG_CM, packed_av, inner)             |
 // | TAG_NF      | 2     | nf   = Poseidon(TAG_NF, nk, rho, cm)                  |
-// | TAG_PK      | 3     | pk   = Poseidon(TAG_PK, ivk)                          |
+// | TAG_PK      | 3     | pk   = Poseidon(TAG_PK, ivk, d)                       |
 // | TAG_IVK     | 4     | ivk  = Poseidon(TAG_IVK, nsk)                         |
 // | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)                   |
 // | TAG_DK      | 6     | dk   = Poseidon(TAG_DK, ivk)          (off-circuit)   |
@@ -20,8 +20,10 @@ pragma circom 2.2.3;
 // | TAG_DIGEST  | 15    | first block of the coefficient digest, Poseidon(5)    |
 //
 // Reserved off-circuit, defined only in sdk/src/crypto/tags.ts:
-// | TAG_SUB_TOKEN  | 12 | sub token = Poseidon(TAG_SUB_TOKEN, ivk, epoch)      |
-// | TAG_FMD_EXPAND | 13 | h_i       = Poseidon(TAG_FMD_EXPAND, ck_x, ck_y, i)  |
+// | TAG_SUB_TOKEN   | 12 | sub token = Poseidon(TAG_SUB_TOKEN, ivk, epoch)      |
+// | TAG_FMD_EXPAND  | 13 | h_i       = Poseidon(TAG_FMD_EXPAND, ck_x, ck_y, i)  |
+// | TAG_GD          | 16 | g_d       = Poseidon(TAG_GD, d, ctr), base candidate |
+// | TAG_FMD_EXPAND2 | 17 | h_i       = Poseidon(TAG_FMD_EXPAND2, i)             |
 //
 // Call sites hoist the result through a `var` before assigning it to a signal:
 // the witness-graph builder (`build-circuit`) cannot store a function result

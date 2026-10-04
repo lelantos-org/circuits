@@ -8,7 +8,7 @@ import { TAG_CM, TAG_INNER, TAG_IVK, TAG_NF, TAG_NK, TAG_PK, TAG_RHO } from "./t
 export interface Note {
     asset: Field;
     value: Field;
-    /** Poseidon(TAG_PK, ivk) — the cm-binding pubkey. */
+    /** Poseidon(TAG_PK, ivk, d) — the cm-binding pubkey. */
     pk: Field;
     rho: Field;
     /** Hiding randomness; the only secret in a published `inner` or `cm`. */
@@ -17,6 +17,8 @@ export interface Note {
 
 export interface SpentNote extends Note {
     nsk: Field;
+    /** Diversifier `pk` is derived under. Unconstrained on a dummy slot. */
+    d: Field;
     cm: Field;
     nf: Field;
     leafIndex: number;
@@ -89,12 +91,16 @@ export function deriveIvk(P: Poseidon, nsk: Field): Field {
     return P.hash([TAG_IVK, nsk]);
 }
 
-export function derivePkFromIvk(P: Poseidon, ivk: Field): Field {
-    return P.hash([TAG_PK, ivk]);
+/**
+ * pk = Poseidon(TAG_PK, ivk, d). Mirrors DerivePk in note.circom. `d` is the
+ * diversifier: any field element, giving one ivk a distinct pk per value.
+ */
+export function derivePkFromIvk(P: Poseidon, ivk: Field, d: Field): Field {
+    return P.hash([TAG_PK, ivk, d]);
 }
 
-export function derivePk(P: Poseidon, nsk: Field): Field {
-    return derivePkFromIvk(P, deriveIvk(P, nsk));
+export function derivePk(P: Poseidon, nsk: Field, d: Field): Field {
+    return derivePkFromIvk(P, deriveIvk(P, nsk), d);
 }
 
 /**

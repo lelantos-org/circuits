@@ -52,6 +52,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
     signal input in_rho[N_IN];
     signal input in_rcm[N_IN];
     signal input in_nsk[N_IN];
+    signal input in_d[N_IN];
     signal input in_path_elements[N_IN][DEPTH][3];
     signal input in_path_indices[N_IN][DEPTH];
     signal input in_is_dummy[N_IN];
@@ -75,6 +76,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
         spent[i].rho      <== in_rho[i];
         spent[i].rcm      <== in_rcm[i];
         spent[i].nsk      <== in_nsk[i];
+        spent[i].d        <== in_d[i];
         spent[i].is_dummy <== in_is_dummy[i];
         for (var d = 0; d < DEPTH; d++) {
             spent[i].path_elements[d][0] <== in_path_elements[i][d][0];

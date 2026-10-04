@@ -2,6 +2,8 @@
 // require the circuit to reject it. Each row's `reason` names the constraint
 // expected to fire.
 
+import { expect } from "chai";
+
 import {
     type CircomTransactInput,
     type TransactWitnessBundle,
@@ -81,7 +83,8 @@ const TAMPER_CASES: TamperCase[] = [
     ...perOutput("out_value[%]", "out_cm no longer matches, and the transaction is unbalanced"),
 
     // -- keys and nullifiers --
-    ...perInput("in_pk[%]",     "pk === DerivePk(nsk) rejects a forged pk"),
+    ...perInput("in_pk[%]",     "pk === DerivePk(ivk, d) rejects a forged pk"),
+    ...perInput("in_d[%]",      "pk === DerivePk(ivk, d) rejects a diversifier pk is not derived under"),
     ...perInput("nullifier[%]", "nf === Poseidon(TAG_NF, nk, rho, cm) rejects a forged nullifier"),
 
     // -- 64-bit range checks: RangeCheck64 on every asset id and every value --
@@ -191,6 +194,42 @@ describe("transact_4x6 / single-field tamper", function () {
             const input = honest(base);
             writeSignal(input, path, mutate(input));
             await expectWitnessFails(ctx.circuit, input, `${path}: ${reason} — did not reject`);
+        });
+    }
+
+    // ===== diversifier =====
+    //
+    // pk = Poseidon(TAG_PK, ivk, d). The `in_d[%]` rows above cover a wrong d in
+    // every real slot.
+
+    it("spends two notes one nsk holds under different non-zero diversifiers", async () => {
+        const input = ctx.tx.balanced();
+        expect(input.in_nsk[0], "one owner").to.equal(input.in_nsk[1]);
+        expect(input.in_d[0], "two diversifiers").to.not.equal(input.in_d[1]);
+        expect(input.in_pk[0], "so two owner keys").to.not.equal(input.in_pk[1]);
+        for (const i of [0, 1]) expect(BigInt(input.in_d[i]), `in_d[${i}]`).to.not.equal(0n);
+        await expectAccepts(ctx.circuit, input);
+    });
+
+    it("FAILS when two real inputs' diversifiers are transposed", async () => {
+        const input = ctx.tx.balanced();
+        const [d0, d1] = [readSignal(input, "in_d[0]"), readSignal(input, "in_d[1]")];
+        writeSignal(input, "in_d[0]", d1);
+        writeSignal(input, "in_d[1]", d0);
+        await expectWitnessFails(ctx.circuit, input, "each slot's pk opens only under its own d");
+    });
+
+    // Slot 1 of `oneRealRestDummy` is a dummy: the pk check is bypassed, and
+    // nothing else reads d.
+    for (const [label, d] of [
+        ["1", 1n],
+        ["a 128-bit value", (1n << 128n) - 1n],
+        ["2^253", 1n << 253n],
+    ] as const) {
+        it(`accepts ${label} as a dummy input's d`, async () => {
+            const input = oneRealRestDummy();
+            writeSignal(input, "in_d[1]", d);
+            await expectAccepts(ctx.circuit, input);
         });
     }
 

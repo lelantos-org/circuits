@@ -29,6 +29,11 @@ import { useCircuits } from "../lib/harness";
 
 const NSKS: Field[] = [ALICE_NSK, BOB_NSK, 1n, 0xdead_beefn];
 
+// Diversifiers: zero, small, 128-bit (the width a wallet samples) and wider.
+// `DerivePk` range-checks none of them.
+const D: Field = (1n << 127n) + 0xd1n;
+const DS: Field[] = [0n, 1n, D, (1n << 128n) - 1n, 1n << 200n];
+
 describe("note derivations (keys, commitment, rho, nullifier)", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
@@ -55,9 +60,9 @@ describe("note derivations (keys, commitment, rho, nullifier)", function () {
 
     const ivkOf = (nsk: Field) => out("ivk", { nsk: nsk.toString() });
     const nkOf = (nsk: Field) => out("nk", { nsk: nsk.toString() });
-    const pkOf = (ivk: Field) => out("pk", { ivk: ivk.toString() });
+    const pkOf = (ivk: Field, d: Field = D) => out("pk", { ivk: ivk.toString(), d: d.toString() });
 
-    // ===== key hierarchy: nsk -> ivk -> pk, and nsk -> nk =====
+    // ===== key hierarchy: nsk -> ivk -> pk under a diversifier, and nsk -> nk =====
 
     it("derives ivk, nk and pk exactly as the reference does", async () => {
         const { P } = ctx;
@@ -65,20 +70,22 @@ describe("note derivations (keys, commitment, rho, nullifier)", function () {
             const ivk = await ivkOf(nsk);
             expect(ivk, `ivk(${nsk})`).to.equal(deriveIvk(P, nsk));
             expect(await nkOf(nsk), `nk(${nsk})`).to.equal(deriveNk(P, nsk));
-            expect(await pkOf(ivk), `pk(${nsk})`).to.equal(derivePkFromIvk(P, ivk));
+            for (const d of DS) {
+                expect(await pkOf(ivk, d), `pk(${nsk}, ${d})`).to.equal(derivePkFromIvk(P, ivk, d));
+            }
         }
     });
 
-    // If two of TAG_IVK, TAG_NK and TAG_PK were equal, the derivations above
-    // would still agree with a reference sharing the mistake, but two of these
-    // values would coincide.
-    it("separates the three derivations by tag, not by arity", async () => {
+    // ivk and nk share arity 2 over the same nsk: if TAG_IVK and TAG_NK were
+    // equal, the derivations above would still agree with a reference sharing
+    // the mistake, but the two values would coincide.
+    it("separates ivk from nk by tag, and pk from both", async () => {
         for (const nsk of NSKS) {
             const [ivk, nk] = [await ivkOf(nsk), await nkOf(nsk)];
             expect(ivk, `ivk and nk collide at nsk ${nsk}`).to.not.equal(nk);
             // pk takes ivk, so compare it against the same argument, not nsk.
             expect(await pkOf(ivk), "pk(ivk) must not equal ivk").to.not.equal(ivk);
-            expect(await pkOf(nk), "the tags must separate pk(nk) from pk(ivk)")
+            expect(await pkOf(nk), "pk(nk) must differ from pk(ivk)")
                 .to.not.equal(await pkOf(ivk));
         }
     });
@@ -87,6 +94,22 @@ describe("note derivations (keys, commitment, rho, nullifier)", function () {
         const alice = await pkOf(await ivkOf(ALICE_NSK));
         const bob = await pkOf(await ivkOf(BOB_NSK));
         expect(alice).to.not.equal(bob);
+    });
+
+    it("gives one ivk a different pk under each diversifier", async () => {
+        const ivk = await ivkOf(ALICE_NSK);
+        const seen = new Set<string>();
+        for (const d of DS) {
+            const pk = (await pkOf(ivk, d)).toString();
+            expect(seen.has(pk), `pk repeats at d = ${d}`).to.equal(false);
+            seen.add(pk);
+        }
+    });
+
+    // Not symmetric in its two arguments: (ivk, d) and (d, ivk) are different keys.
+    it("does not confuse the diversifier with the ivk", async () => {
+        const ivk = await ivkOf(ALICE_NSK);
+        expect(await pkOf(ivk, D)).to.not.equal(await pkOf(D, ivk));
     });
 
     // ===== note commitment: inner, then cm =====
@@ -164,12 +187,16 @@ describe("note derivations (keys, commitment, rho, nullifier)", function () {
         }
     });
 
-    // cm shares arity 3 with DeriveRho and inner shares arity 4 with the
-    // nullifier, so those two pairs are separated only by tag.
-    it("separates cm from rho, and inner from the nullifier, by tag", async () => {
+    // cm, pk and rho share arity 3, and inner shares arity 4 with the
+    // nullifier, so those sites are separated only by tag.
+    it("separates cm, pk and rho, and inner from the nullifier, by tag", async () => {
         const [a, b, c] = [0x111n, 0x222n, 0x333n];
-        expect(await out("cm", { asset_id: "0", value: a.toString(), inner: b.toString() }))
-            .to.not.equal(await out("rho", { nf0: a.toString(), index: b.toString() }));
+        const cm = await out("cm", { asset_id: "0", value: a.toString(), inner: b.toString() });
+        const rho = await out("rho", { nf0: a.toString(), index: b.toString() });
+        const pk = await pkOf(a, b);
+        expect(cm).to.not.equal(rho);
+        expect(pk, "TAG_PK must separate pk from cm").to.not.equal(cm);
+        expect(pk, "TAG_PK must separate pk from rho").to.not.equal(rho);
         expect(await out("inner", innerInput(a, b, c)))
             .to.not.equal(await out("nf", { nk: a.toString(), rho: b.toString(), cm: c.toString() }));
     });

@@ -67,6 +67,7 @@ export type CircomTransactInput = CircomCoeffInputs & {
     in_rho: string[];
     in_rcm: string[];
     in_nsk: string[];
+    in_d: string[];
     in_path_elements: string[][][];
     in_path_indices: string[][];
     in_is_dummy: string[];
@@ -102,6 +103,7 @@ export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
         in_rho: w.in_rho,
         in_rcm: w.in_rcm,
         in_nsk: w.in_nsk,
+        in_d: w.in_d,
         in_path_elements: w.in_path_elements,
         in_path_indices: w.in_path_indices,
         in_is_dummy: w.in_is_dummy,
@@ -182,6 +184,7 @@ export function toCircomInput(P: Poseidon, opts: BuildOpts): TransactWitnessBund
         in_rho: inputs.map((i) => i.rho.toString()),
         in_rcm: inputs.map((i) => i.rcm.toString()),
         in_nsk: inputs.map((i) => i.nsk.toString()),
+        in_d: inputs.map((i) => i.d.toString()),
         in_path_elements: inputs.map((i) =>
             i.pathElements.map((level) => level.map((e) => e.toString())),
         ),
@@ -223,6 +226,7 @@ export function dummyInputAt(P: Poseidon, depth: number, rho: Field): SpentNote 
     return {
         ...note,
         nsk,
+        d: 0n,
         cm,
         nf,
         leafIndex: 0,

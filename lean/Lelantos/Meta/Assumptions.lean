@@ -116,6 +116,10 @@ claim made outside Lean; a stated field is an assumption, not a result.
 #print axioms Lelantos.noteInner_inj
 #print axioms Lelantos.noteCommitment_inj
 #print axioms Lelantos.noteCm_inj
+#print axioms Lelantos.pkOfNsk_inj
+#print axioms Lelantos.pkOfNsk_diversified
+#print axioms Lelantos.derivePk_ne_noteCommitment
+#print axioms Lelantos.derivePk_ne_deriveRho
 #print axioms Lelantos.noteCommitment_ne_deriveRho
 #print axioms Lelantos.noteInner_ne_nullifier
 #print axioms Lelantos.noteCommitment_ne_merkleNode

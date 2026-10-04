@@ -60,6 +60,7 @@
       "SpentSlot.rho": "main.in_rho[{i<N_IN}]",
       "SpentSlot.rcm": "main.in_rcm[{i<N_IN}]",
       "SpentSlot.nsk": "main.in_nsk[{i<N_IN}]",
+      "SpentSlot.d": "main.in_d[{i<N_IN}]",
       "SpentSlot.isDummy": "main.in_is_dummy[{i<N_IN}]",
       "SpentSlot.root": "main.merkle_root",
       "SpentSlot.nullifier": "main.nullifier[{i<N_IN}]",
@@ -94,7 +95,7 @@
     "absent": {
       "TxWitness.dummyAllOut": {
         "was": "main.all_dummy.out",
-        "why": "`all_dummy.out === 0` (transact.circom:118) pins it, so the optimizer folds it to the constant. That constraint is `TransactSat.not_all_dummy`, and `TxWellFormed.someRealInput` is what it buys; if this signal comes back, the constraint is gone."
+        "why": "`all_dummy.out === 0` (transact.circom:107) pins it, so the optimizer folds it to the constant. That constraint is `TransactSat.not_all_dummy`, and `TxWellFormed.someRealInput` is what it buys; if this signal comes back, the constraint is gone."
       },
       "TxWitness.zIsZero": {
         "was": "main.pe.pe.z_nz.out",
@@ -118,7 +119,7 @@
       },
       "TxWitness.dgBlock": {
         "was": "main.pe.dg.h[3].out",
-        "why": "`out <== h[BLOCKS - 1].out`, `digest <== dg.out` (poly_eval.circom:85, 169) and `digest <== pe.digest` (transact.circom:188) merge the last block's output with the public output `main.digest`. The first three blocks survive. `CoeffDigestSat.out_def` is that merge; if this signal reappears, the public digest is no longer the fold of the coefficients."
+        "why": "`out <== h[BLOCKS - 1].out`, `digest <== dg.out` (poly_eval.circom:85, 169) and `digest <== pe.digest` (transact.circom:174) merge the last block's output with the public output `main.digest`. The first three blocks survive. `CoeffDigestSat.out_def` is that merge; if this signal reappears, the public digest is no longer the fold of the coefficients."
       },
       "SpentSlot.mpChain": {
         "was": "main.spent[0].mp.mr.cur[0]",
