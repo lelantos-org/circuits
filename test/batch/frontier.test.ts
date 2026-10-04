@@ -1,9 +1,6 @@
-// Frontier binding and both roots.
-//
-// BatchAppend rebuilds `old_root` from `frontier_in`, so a relayer cannot pair a
-// real `oldRoot` with a forged frontier, which would permanently corrupt the
-// on-chain root; `new_root === append.new_root` binds the advanced tree.
-// `gadgets/batch_append.test.ts` covers the gadget alone at small depth.
+// Frontier binding and both roots. BatchAppend rebuilds `old_root` from
+// `frontier_in`, so a relayer cannot pair a real `oldRoot` with a forged
+// frontier; `new_root === append.new_root` binds the advanced tree.
 
 import { expect } from "chai";
 
@@ -32,8 +29,7 @@ describe("tree_update_batch / frontier and roots", function () {
     });
 
     it("frontier binding: corrupted frontier entry rejected", async () => {
-        // Honest oldRoot + cms but tampered frontier ⇒ the old-root rebuild
-        // diverges from old_root ⇒ `old_root === append.old_root` fails.
+        // The rebuild diverges, so `old_root === append.old_root` fails.
         const { batch, circuit } = ctx;
         const w = batch.single({ val: 1000n, isDeposit: 1 }, 8);
         // Slot 1 at level 1 is read: 8 has digit 2 there.
@@ -47,8 +43,6 @@ describe("tree_update_batch / frontier and roots", function () {
     });
 
     it("frontier binding: empty-tree frontier with wrong oldRoot rejected", async () => {
-        // Honest all-zero frontier with a forged oldRoot. BatchAppend rebuilds
-        // the empty-tree root and the equality check rejects the mismatch.
         const { batch, circuit } = ctx;
         const w = batch.single({ val: 1n, isDeposit: 1 });
         w.oldRoot = w.oldRoot + 1n;
@@ -57,9 +51,6 @@ describe("tree_update_batch / frontier and roots", function () {
     });
 
     it("FAILS when new_root does not match the batched insert", async () => {
-        // Counterpart of the old_root frontier test: old_root binds the input
-        // frontier and `new_root === append.new_root` binds the resulting root,
-        // so a relayer cannot name an arbitrary root for the advanced tree.
         const { batch, circuit } = ctx;
         const w = batch.single({ val: 100n, isDeposit: 1 }, 4);
         w.newRoot = w.newRoot + 1n;
@@ -69,8 +60,7 @@ describe("tree_update_batch / frontier and roots", function () {
 
     it("FAILS on a non-zero frontier slot nothing reads", async () => {
         // The slot at the digit is the lowest unread slot. Checked at level 0,
-        // where the digit is non-zero, and at the first level where it is 0;
-        // both slots are pinned to zero.
+        // where the digit is non-zero, and at the first level where it is 0.
         const { batch, circuit } = ctx;
         const start = 21;
         const honest = batch.single({ val: 9n, isDeposit: 1 }, start);

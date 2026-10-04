@@ -10,26 +10,18 @@ Poseidon is modelled as an opaque function `poseidon : List F → F`. Every circ
 
 `Function.Injective poseidon` is refutable: `List F` is infinite and `F` is finite, so no
 injection exists (`poseidon_not_injective`). As an axiom it would make the development
-inconsistent: `False` would yield `TxWellFormed w` for every `w` while still type-checking
-and passing `#print axioms`.
-
-A conclusion of the form `P ∨ PoseidonCollision` is equally uninformative, since
-`PoseidonCollision` is provable (`poseidon_collision`) and discharges it by `Or.inr`; the same
-holds for any statement that only asserts some collision exists. A non-trivial treatment
-requires either concrete colliding preimages built from the prover's witness or a
-concrete-security formulation with an explicit adversary and advantage bound. Neither is
-modelled here.
+inconsistent.
 
 Collision resistance instead appears as an explicit hypothesis `hcr : ¬ PoseidonCollision`
-on the theorems that need it, and nowhere else. The hypothesis is unsatisfiable, so those
-theorems are vacuous read literally, but the vacuity is local and visible in the statement:
-the environment stays consistent, no other theorem is weakened, and `transact_sound` and the
-arithmetic layer depend on no hash assumption. See `Lelantos.TxBinding` for where the
-hypothesis is discharged, and `lean/README.md` for the list of what is not proved.
+on the theorems that need it, and nowhere else. The hypothesis is unsatisfiable
+(`poseidon_collision`), so those theorems are vacuous read literally; a non-vacuous
+treatment (concrete colliding preimages, or an explicit adversary and advantage bound) is
+not modelled. The environment stays consistent, and `transact_sound` and the arithmetic
+layer depend on no hash assumption. See `Lelantos.TxBinding` for where the hypothesis is
+discharged, and `lean/README.md` for the list of what is not proved.
 
-Modelling the arguments as a `List` rather than a fixed arity also gives cross-arity
-separation. This matches circom, which instantiates `Poseidon(3)` and `Poseidon(4)` as
-distinct permutations.
+Modelling the arguments as a `List` gives cross-arity separation, matching circom, which
+instantiates `Poseidon(3)` and `Poseidon(4)` as distinct permutations.
 
 ## Arities in use
 
@@ -42,14 +34,13 @@ distinct permutations.
 
 Every same-arity pair of sites leads with a different tag, except the later blocks of
 `CoeffDigest`, which lead with a hash output. Separating those from a Merkle node is not a
-collision-resistance statement and is not claimed anywhere in this development.
+collision-resistance statement and is not claimed in this development.
 
 ## Tags
 
-Mirrors `src/lib/tags.circom:32-42`. These must stay byte-identical to
-`sdk/src/crypto/tags.ts`; changing any value invalidates every previously issued proof.
-Values 7 (the retired Pedersen asset generator) and 10 (the retired leaf hash) have no
-definition here, as they have none in the circom, and must not be reused.
+Mirrors `src/lib/tags.circom:30-40`. These must stay byte-identical to
+`sdk/src/crypto/tags.ts`; changing any value invalidates every issued proof.
+Values 7 and 10 are reserved and must not be reused.
 -/
 
 namespace Lelantos
@@ -67,18 +58,15 @@ theorem poseidon_not_injective : ¬ Function.Injective poseidon := fun hinj =>
 def PoseidonCollision : Prop := ∃ a b : List F, a ≠ b ∧ poseidon a = poseidon b
 
 /-- Collision resistance as a hypothesis: no collision means equal digests force equal
-preimages. Every hash-binding theorem takes this as an explicit argument — see the module
-note for why it is not an axiom. -/
+preimages. See the module note for why it is not an axiom. -/
 theorem poseidon_inj (hcr : ¬ PoseidonCollision) {a b : List F}
     (h : poseidon a = poseidon b) : a = b := by
   by_contra hab
   exact hcr ⟨a, b, hab, h⟩
 
-/-- The collision-resistance hypothesis is unsatisfiable: collisions exist.
-
-Stated explicitly so the reading of every `hcr`-taking theorem is unambiguous. Such a
-theorem is conditional on a false hypothesis, and an empty `#print axioms` result does not
-mean hash binding was proved. -/
+/-- The collision-resistance hypothesis is unsatisfiable: collisions exist. Every
+`hcr`-taking theorem is conditional on a false hypothesis, and an empty `#print axioms`
+result does not mean hash binding was proved. -/
 theorem poseidon_collision : PoseidonCollision := by
   by_contra hnc
   exact poseidon_not_injective fun _ _ hab => poseidon_inj hnc hab
@@ -97,7 +85,7 @@ def TAG_NK : F := 9
 def TAG_RHO : F := 11
 /-- `inner = Poseidon(TAG_INNER, pk, rho, rcm)`. -/
 def TAG_INNER : F := 14
-/-- Leads block 0 of the coefficient digest (`CoeffDigest`, `src/lib/poly_eval.circom:60`). -/
+/-- Leads block 0 of the coefficient digest (`CoeffDigest`, `src/lib/poly_eval.circom:43`). -/
 def TAG_DIGEST : F := 15
 
 /-- Two small tag values are different field elements. Used by the same-arity separation

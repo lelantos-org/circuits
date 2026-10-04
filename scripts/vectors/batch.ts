@@ -1,9 +1,7 @@
 // tree_update_batch vectors.
 //
 // A batch commits `actual_count` leaves starting at `start_index`; the
-// remaining slots are padding the circuit constrains to zero. Cases cover a
-// single deposit, an odd count, and a mixed deposit/spend batch at a non-zero
-// start index.
+// remaining slots are padding the circuit constrains to zero.
 
 import {
     Jubjub,
@@ -78,7 +76,6 @@ const BATCH_CASES: BatchCase[] = [
 const VECTOR_PK = 0xabcn;
 const VECTOR_RCM = 3n;
 
-/** One built leaf, with the note behind it. */
 interface BuiltLeaf {
     /** What `cms[k]` carries: the note commitment on a spend leaf, `inner` on a deposit leaf. */
     word: Field;
@@ -93,12 +90,9 @@ interface BuiltLeaf {
 }
 
 /**
- * Build a leaf from its spec.
- *
- * Either way the leaf is the commitment of the note `(asset, value, pk, rho,
- * rcm)`. A deposit slot publishes `inner` beside the public amount and the
- * circuit hashes the three; a spend slot publishes the commitment itself and
- * zeroes the two amount fields.
+ * Build a leaf from its spec. A deposit slot publishes `inner` beside the
+ * asset and public amount, and the circuit hashes the three; a spend slot
+ * publishes the commitment itself and zeroes the two amount fields.
  */
 function buildLeafFor(P: Poseidon, l: BatchLeafSpec, k: number): BuiltLeaf {
     const rho = BigInt(k + 1);
@@ -181,8 +175,6 @@ export async function buildBatchVectors() {
         }
 
         const compression: Compression = {
-            // Every input signal, evaluated into y. `ref/compress.ts ::
-            // batchCoeffs` documents why each word is a coefficient.
             coeffs: batchCoeffs(coeffSlots).map(s),
             digest: s(digest),
             challenge: challenge.map(s),
@@ -202,9 +194,8 @@ export async function buildBatchVectors() {
                 oldRoot: s(oldRoot),
                 newRoot: s(newRoot),
                 frontierIn: frontier.map((lvl) => lvl.map(s)),
-                // Per slot: the calldata word, and the leaf the tree holds. On a
-                // deposit slot they differ, so a consumer that rebuilds the tree
-                // from `cms` alone inserts the wrong value:
+                // Per slot: the calldata word and the leaf the tree holds, which
+                // differ on a deposit slot:
                 //   leaf = isDeposit ? Poseidon(TAG_CM, leafAsset·2^64 + leafPublicIn, cms) : cms
                 leaves: built.map((b, k) => ({
                     slot: k,
@@ -213,8 +204,7 @@ export async function buildBatchVectors() {
                     leafAsset: s(b.leafAsset),
                     leafPublicIn: s(b.leafPublicIn),
                     isDeposit: b.isDeposit,
-                    // The note the leaf commits to, so a consumer can check its
-                    // own `inner` and commitment against `leaf`.
+                    // The note the leaf commits to.
                     note: {
                         asset: s(c.leaves[k].asset),
                         value: s(c.leaves[k].value),
@@ -246,10 +236,8 @@ export async function buildBatchVectors() {
             layout,
             layoutDigest: layoutDigest(layout),
             // Empty: every input signal of the batch is evaluated into `y`, and
-            // the one other preimage word, the digest, is a public signal. The
-            // field is published rather than omitted so `test/reference.test.ts`
-            // covers it; any entry added here must be named, and that test then
-            // requires a divergent-witness test for it.
+            // the one other preimage word, the digest, is a public signal.
+            // `test/reference.test.ts` rejects any entry added here.
             //
             // The deposit fields must not be challenge-only: they are signals of
             // this circuit, and hashing a signal into `z` binds nothing because

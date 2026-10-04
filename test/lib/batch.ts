@@ -111,13 +111,11 @@ export function seededLeaf(
 }
 
 /**
- * Filler value for the pre-batch leaves of frontier block `(level, index)`.
- *
- * One of three constants, by the block's slot under its parent, so `fillBlocks`
- * builds a production-depth prefill from three hash chains instead of one hash
- * per leaf. The frontier slot `(level, k)` then holds constant `k` hashed up
- * `level` times: distinct across the slots of a level and across levels, so a
- * misrouted slot changes a root.
+ * Filler value for the pre-batch leaves of frontier block `(level, index)`:
+ * one of three constants, by the block's slot under its parent, so `fillBlocks`
+ * builds the prefill from three hash chains instead of one hash per leaf. The
+ * frontier slot `(level, k)` then holds constant `k` hashed up `level` times:
+ * distinct across slots and levels, so a misrouted slot changes a root.
  */
 export function prefillLeaf(_level: number, index: number): Field {
     return 0xdead0000n + BigInt(index % 4);
@@ -184,9 +182,6 @@ export function buildHonest(
  * Call after mutating any coefficient, so the failure comes from the
  * constraint under test rather than stale calldata. `frontier` is outside the
  * coefficient vector and does not require it.
- *
- * Implemented as `bindFiatShamir` applied to the calldata view that matches the
- * witness, so the derivation has a single definition.
  */
 export function rebindFiatShamir(w: BatchWitness): void {
     w.digest = treeUpdateBatchDigest(w);
@@ -194,19 +189,13 @@ export function rebindFiatShamir(w: BatchWitness): void {
 }
 
 /**
- * Snapshot a witness's logical public inputs — the calldata view.
+ * Snapshot a witness's logical public inputs: the calldata view.
  *
- * A structural clone rather than a field-by-field copy. The copy must be deep:
- * otherwise the two views share arrays, a divergence case mutates both, and
- * `expectNotForgeable` compares a view against itself and passes vacuously. A
- * hand-written projection would lose that property for any field added to
- * `TreeUpdateBatchPublicArgs`.
- *
- * `BatchWitness` extends the public args with `frontier`, `z` and `y`;
- * carrying them along is harmless, since the challenge and coefficient functions
- * read only the public fields. The view's `digest` is the witness's at the time
- * of the snapshot; a divergence case decides whether to leave it or recompute
- * it for the rewritten coefficients (`redigest`).
+ * The copy must be deep: otherwise the two views share arrays, a divergence
+ * case mutates both, and `expectNotForgeable` compares a view against itself.
+ * The clone also carries `frontier`, `z` and `y`; the challenge and coefficient
+ * functions read only the public fields. The view's `digest` is the witness's
+ * at the time of the snapshot; `redigest` recomputes it.
  */
 export function calldataView(w: BatchWitness): TreeUpdateBatchPublicArgs {
     return structuredClone(w);
@@ -222,12 +211,9 @@ export function redigest(c: TreeUpdateBatchPublicArgs): void {
  * the three public signals the contract would hand the verifier for that
  * calldata.
  *
- * `rebindFiatShamir` combines two roles that are separate in deployment:
- * deriving the challenge and choosing the witness. The contract derives `z` and
- * `y` from calldata; the prover then picks any witness satisfying the R1CS at
- * that `z`, and Groth16 does not require the two to describe the same batch.
- * Combining them makes the divergence unrepresentable, so a signal hashed into
- * `z` but pinned by no constraint appears bound when it is free.
+ * The contract derives `z` and `y` from calldata; the prover then picks any
+ * witness satisfying the R1CS at that `z`, and Groth16 does not require the two
+ * to describe the same batch.
  *
  * Use this to test whether the prover can diverge from the contract's calldata,
  * and `rebindFiatShamir` to test whether a specific constraint fires.
@@ -241,11 +227,10 @@ export function bindFiatShamir(w: BatchWitness, calldata: TreeUpdateBatchPublicA
 /**
  * `count` leaves in the layout MASP's deposit path emits: slot 2i is a
  * principal and slot 2i+1 its fee note. The circuit does not require this
- * (every constraint is per-slot), but it is the shape a flush produces.
+ * layout: every constraint is per-slot.
  *
- * Fee notes carry zero value at asset 0, the zero-fee deposit: a permitted
- * shape (`_validateDeposit`: "The fee note's value may be zero"), and the one
- * a flush of four such deposits fills half its slots with.
+ * Fee notes carry zero value at asset 0, the zero-fee deposit, which
+ * `_validateDeposit` permits.
  */
 export function depositPairs(P: Poseidon, count: number): LeafWitness[] {
     return Array.from({ length: count }, (_, i) =>
@@ -256,42 +241,35 @@ export function depositPairs(P: Poseidon, count: number): LeafWitness[] {
 
 /**
  * The builders above with the hash bound, for suites that hold a `P` for their
- * whole run. Mirrors `lib/transact.ts :: TxBuilder`.
+ * whole run.
  */
 export class BatchBuilder {
     constructor(public readonly P: Poseidon) {}
 
-    /** `simpleLeaf`: only the discriminating fields, the rest fixed. */
     leaf(opts: { val: Field; isDeposit: 0 | 1; asset?: Field; pk?: Field }): LeafWitness {
         return simpleLeaf({ P: this.P, ...opts });
     }
 
-    /** `buildLeafWitness`: every field chosen. */
     leafWith(opts: Omit<Parameters<typeof buildLeafWitness>[0], "P">): LeafWitness {
         return buildLeafWitness({ P: this.P, ...opts });
     }
 
-    /** `seededLeaf`: k distinct leaves from k seeds. */
     seeded(seed: number, isDeposit: 0 | 1, val?: Field, asset?: Field): LeafWitness {
         return seededLeaf(this.P, seed, isDeposit, val, asset);
     }
 
-    /** `count` seeded leaves, seeds `0..count-1`, deposit flag per slot. */
     seededMany(count: number, isDeposit: (i: number) => 0 | 1): LeafWitness[] {
         return Array.from({ length: count }, (_, i) => this.seeded(i, isDeposit(i)));
     }
 
-    /** `buildHonest`: `leaves` inserted after `prefilled` filler leaves. */
     honest(prefilled: number, leaves: LeafWitness[]): BatchWitness {
         return buildHonest(this.P, prefilled, leaves);
     }
 
-    /** One `leaf(opts)` batch at `prefilled` (default 0): the base most single-constraint cases mutate. */
     single(opts: Parameters<BatchBuilder["leaf"]>[0], prefilled = 0): BatchWitness {
         return this.honest(prefilled, [this.leaf(opts)]);
     }
 
-    /** `depositPairs`: principal/fee pairs as a flush emits them. */
     depositPairs(count: number): LeafWitness[] {
         return depositPairs(this.P, count);
     }

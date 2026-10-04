@@ -1,7 +1,6 @@
 pragma circom 2.2.3;
 
-// Test wrapper: PolyEval(26). The gadget is generic in N; see
-// TransactCompressN for the production public-input layout.
+// Test wrapper: PolyEval(26); the gadget is generic in N.
 
 include "../../src/lib/poly_eval.circom";
 

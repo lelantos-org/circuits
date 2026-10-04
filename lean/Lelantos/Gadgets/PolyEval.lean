@@ -10,7 +10,7 @@ import Mathlib.Tactic.Push
 /-!
 # `PolyEval` — public-input compression
 
-`src/lib/poly_eval.circom:30` compresses `N` logical public inputs into one field element
+`src/lib/poly_eval.circom:18` compresses `N` logical public inputs into one field element
 `y`, evaluated at the challenge `z`:
 
     z_nz.out === 0;                                  // z != 0
@@ -26,28 +26,22 @@ Results:
 * `polyEval_sound` — the accumulator chain computes `y = Σ_k coeffs[k] · z^k`, and
   `polyEvalSat_z_ne_zero` — the challenge is nonzero.
 * `polyEval_binding` — two distinct coefficient vectors agree on at most `N - 1` points
-  of the field. With `N = 13` (the shipped transact layout) that is at most 12 challenges,
-  and with `N = 36` (the batch layout) at most 35, out of `|F| = p ≈ 2^253.6`.
+  of the field.
 * `polyEval_forge`, `polyEval_not_binding` — at a fixed nonzero challenge, one freely
   chosen coefficient sends `y` to any target.
 
 ## What `polyEval_binding` is and is not
 
-It counts challenges for two vectors that are both fixed. It is not a statement about a
-prover. On its own the evaluation binds nothing: `z` is a circuit input derived from
-calldata the prover authored, so the prover reads it before choosing a witness, and
-`polyEval_forge` is what a vector chosen after `z` can do.
+It counts challenges for two fixed vectors; it is not a statement about a prover. `z` is
+derived from calldata the prover authored, and a vector chosen after `z` reaches any `y`
+(`polyEval_forge`).
 
-The count becomes a probability bound once the witness's coefficient vector is fixed
-before `z` is drawn. Both consumers arrange that outside this template: `TransactCompressN`
-and `BatchCompress` output a `CoeffDigest` of their coefficients as a second public signal,
-and the contract hashes that word into `z` (`Lelantos.Gadgets.CoeffDigest`,
-`Lelantos.Circuit.Transact`). The step from the count to the probability is the
-Fiat-Shamir argument, in the random-oracle model for keccak256. It is prose and is not
-formalised here.
-
-`z ≠ 0` is enforced by the template independently of how the consumer derives `z`. At
-`z = 0` the chain reduces to `y = coeffs[0]`.
+The count becomes a probability bound once the coefficient vector is fixed before `z` is
+drawn. Both consumers arrange that outside this template: `TransactCompressN` and
+`BatchCompress` output a `CoeffDigest` of their coefficients as a second public signal, and
+the contract hashes that word into `z` (`Lelantos.Gadgets.CoeffDigest`,
+`Lelantos.Circuit.Transact`). The Fiat-Shamir step from the count to the probability, in the
+random-oracle model for keccak256, is not formalised.
 -/
 
 namespace Lelantos
@@ -56,7 +50,7 @@ namespace Lelantos
 def polyEval (c : ℕ → F) (n : ℕ) (z : F) : F := ∑ k ∈ Finset.range n, c k * z ^ k
 
 /-- The Horner accumulator as circom builds it: step `j` folds in coefficient
-`c (n - 1 - j)`. Mirrors `src/lib/poly_eval.circom:41-43`. -/
+`c (n - 1 - j)`. Mirrors `src/lib/poly_eval.circom:29-31`. -/
 def hornerAcc (c : ℕ → F) (n : ℕ) (z : F) : ℕ → F
   | 0 => 0
   | j + 1 => hornerAcc c n z j * z + c (n - 1 - j)
@@ -83,20 +77,20 @@ theorem hornerAcc_full (c : ℕ → F) (n : ℕ) (z : F) :
   rw [hornerAcc_eq c n z n le_rfl]
   simp [polyEval]
 
-/-- The constraint system of `PolyEval(n)` — `src/lib/poly_eval.circom:30-45`.
+/-- The constraint system of `PolyEval(n)` — `src/lib/poly_eval.circom:18-33`.
 `acc` is the intermediate signal array; `zInv` and `zOut` are the `IsZero` signals of the
 challenge check. -/
 structure PolyEvalSat (n : ℕ) (c : ℕ → F) (z zInv zOut : F) (acc : ℕ → F) (y : F) : Prop where
-  /-- `:35-36` — `z_nz = IsZero()` on `z`. -/
+  /-- `:23-24` — `z_nz = IsZero()` on `z`. -/
   z_isZero : IsZeroSat z zInv zOut
-  /-- `:37` — `z_nz.out === 0`: the challenge is nonzero. At `z = 0` the chain reduces to
+  /-- `:25` — `z_nz.out === 0`: the challenge is nonzero. At `z = 0` the chain reduces to
   `y = coeffs[0]` and every other coefficient drops out of the public signals. -/
   z_nonzero : zOut = 0
-  /-- `:40` — `acc[0] <== 0`. -/
+  /-- `:28` — `acc[0] <== 0`. -/
   base : acc 0 = 0
-  /-- `:41-43` — the Horner step, reindexed by `j = N - i`. -/
+  /-- `:29-31` — the Horner step, reindexed by `j = N - i`. -/
   step : ∀ j, j < n → acc (j + 1) = acc j * z + c (n - 1 - j)
-  /-- `:44` — `y <== acc[N]`. -/
+  /-- `:32` — `y <== acc[N]`. -/
   result : y = acc n
 
 theorem polyEvalSat_acc {n : ℕ} {c : ℕ → F} {z zInv zOut : F} {acc : ℕ → F} {y : F}
@@ -131,8 +125,8 @@ theorem polyEval_congr {c c' : ℕ → F} {n : ℕ} (z : F) (h : ∀ k, k < n �
 
 /-- **The honest assignment.** Every coefficient vector and nonzero challenge admits a
 satisfying `PolyEval` assignment, with the accumulator and `y` determined by them. This is
-the gadget's completeness, and turns a forged coefficient vector from `polyEval_forge` back
-into a witness. -/
+the gadget's completeness, and turns a forged coefficient vector from `polyEval_forge` into
+a witness. -/
 theorem polyEvalSat_horner (n : ℕ) (c : ℕ → F) {z : F} (hz : z ≠ 0) :
     PolyEvalSat n c z z⁻¹ 0 (hornerAcc c n z) (polyEval c n z) where
   z_isZero := ⟨by rw [neg_mul, mul_inv_cancel₀ hz]; ring, by ring⟩
@@ -157,10 +151,7 @@ theorem polyEvalSat_of_acc {n : ℕ} {c : ℕ → F} {z zInv zOut : F} {acc : �
 /-! ## Freedom
 
 `polyEval` is affine in each coefficient: the map `v ↦ y` is a degree-one polynomial with
-slope `z ^ k`, invertible whenever `z ≠ 0`. So a coefficient chosen after the challenge is
-known sets `y` to anything. This is why the evaluation alone is not a binding, and why the
-consumers commit to the coefficient vector with a digest that the challenge is derived
-from.
+slope `z ^ k`, invertible whenever `z ≠ 0`.
 -/
 
 /-- Changing one coefficient shifts `y` by `(v - c k) · z ^ k`. -/
@@ -181,10 +172,7 @@ theorem polyEval_update (c : ℕ → F) {n k : ℕ} (hk : k < n) (z v : F) :
 
 /-- **One free coefficient hits every `y`.** At a nonzero challenge, a prover who may
 choose coefficient `k` freely can drive the compression output to any target, leaving every
-other coefficient, hence every other public input, unchanged.
-
-No collision is needed: the forged vector is the unique solution of one linear equation in
-one unknown. -/
+other coefficient, hence every other public input, unchanged. -/
 theorem polyEval_forge (c : ℕ → F) {n k : ℕ} (hk : k < n) {z : F} (hz : z ≠ 0) (t : F) :
     polyEval (Function.update c k (c k + (t - polyEval c n z) / z ^ k)) n z = t := by
   have hzk : z ^ k ≠ 0 := pow_ne_zero k hz
@@ -196,10 +184,9 @@ theorem polyEval_forge (c : ℕ → F) {n k : ℕ} (hk : k < n) {z : F} (hz : z 
 `z` and any target `y`, there is a coefficient vector agreeing with a given one everywhere
 except at `k` whose evaluation is that target.
 
-A verifier that saw only `(y, z)` could not distinguish the two. The circuits' verifier
-also sees the digest public signal, which the challenge is derived from; a vector changed
-at `k` has a different digest unless Poseidon collides (`digest_inj`), so this construction
-does not give a forgery against them. -/
+This is not a forgery against the circuits: their verifier also sees the digest public
+signal the challenge is derived from, and a vector changed at `k` has a different digest
+unless Poseidon collides (`digest_inj`). -/
 theorem polyEval_not_binding {n k : ℕ} (hk : k < n) {z : F} (hz : z ≠ 0) (c : ℕ → F)
     (t : F) :
     ∃ c' : ℕ → F, (∀ m, m ≠ k → c' m = c m) ∧ polyEval c' n z = t :=

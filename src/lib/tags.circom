@@ -11,24 +11,22 @@ pragma circom 2.2.3;
 // | TAG_IVK     | 4     | ivk  = Poseidon(TAG_IVK, nsk)                         |
 // | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)                   |
 // | TAG_DK      | 6     | dk   = Poseidon(TAG_DK, ivk)          (off-circuit)   |
-// | TAG_ASSET   | 7     | Retired (Pedersen asset generator). Never reuse.      |
+// | TAG_ASSET   | 7     | Reserved. Never reuse.                                |
 // | TAG_FMD_BIT | 8     | FMD bit derivation, Poseidon(6)       (off-circuit)   |
 // | TAG_NK      | 9     | nk   = Poseidon(TAG_NK, nsk)                          |
-// | TAG_LEAF    | 10    | Retired (the leaf is cm itself). Never reuse.         |
+// | TAG_LEAF    | 10    | Reserved. Never reuse.                                |
 // | TAG_RHO     | 11    | rho  = Poseidon(TAG_RHO, nullifier[0], out_index)     |
 // | TAG_INNER   | 14    | inner = Poseidon(TAG_INNER, pk, rho, rcm)             |
 // | TAG_DIGEST  | 15    | first block of the coefficient digest, Poseidon(5)    |
 //
-// Reserved off-circuit, defined only in sdk/src/crypto/tags.ts. Listed here so
-// the value space stays single-sourced and a new in-circuit tag cannot collide:
+// Reserved off-circuit, defined only in sdk/src/crypto/tags.ts:
 // | TAG_SUB_TOKEN  | 12 | sub token = Poseidon(TAG_SUB_TOKEN, ivk, epoch)      |
 // | TAG_FMD_EXPAND | 13 | h_i       = Poseidon(TAG_FMD_EXPAND, ck_x, ck_y, i)  |
 //
-// Call sites hoist the result through a `var` before assigning it to a signal.
-// The witness-graph builder (`build-circuit`, which produces the relayer's
-// native witness calculator) cannot store a function result into a signal, so
-// inlining these breaks `just build-graph`. The R1CS is unaffected: the call
-// folds to a constant. The same applies to EMPTY_SUBTREE in common.circom.
+// Call sites hoist the result through a `var` before assigning it to a signal:
+// the witness-graph builder (`build-circuit`) cannot store a function result
+// into a signal, so inlining these breaks `just build-graph`. The R1CS is
+// unaffected. The same applies to EMPTY_SUBTREE in common.circom.
 function TAG_CM()     { return 1; }
 function TAG_NF()     { return 2; }
 function TAG_PK()     { return 3; }

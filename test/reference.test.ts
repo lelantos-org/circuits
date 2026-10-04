@@ -1,16 +1,7 @@
-// Unit tests for `ref/`, the reference implementation the published vectors are
-// generated from.
-//
-// These cover the parts of `ref/` that circuit tests do not reach. Anything a
-// circuit consumes is checked transitively: a wrong Poseidon or asset generator
-// makes commitments disagree with circom and fails a constraint. The values
-// below are not checked that way:
-//
-//   - `z` is an unconstrained circuit input, so an incorrect ABI encoding
-//     produces a witness the circuit accepts and a challenge the contract
-//     recomputes differently.
-//   - The FMD clue signals carry no in-circuit constraints at all.
-//   - `rootFromPath` and `cacheKeyStride` have no circuit counterpart.
+// Unit tests for the parts of `ref/` that circuit tests do not reach: `z` and
+// its ABI preimage (an unconstrained circuit input), the FMD clue signals (no
+// in-circuit constraints), and `rootFromPath` and `cacheKeyStride` (no circuit
+// counterpart).
 
 import { expect } from "chai";
 
@@ -44,8 +35,6 @@ describe("reference / merkle path recomputation", function () {
 
     const ctx = useGadgets();
 
-    // `rootFromPath` is an independent implementation of the same quaternary
-    // node hashing as `MerkleTree`; this pins the two to the same result.
     for (const depth of [2, 10]) {
         it(`rootFromPath reproduces MerkleTree.root() at every leaf (depth ${depth})`, () => {
             const tree = new MerkleTree(ctx.P, depth);
@@ -71,14 +60,10 @@ describe("reference / merkle path recomputation", function () {
         expect(rootFromPath(ctx.P, tree.leaves[0], pathElements, pathIndices)).to.not.equal(tree.root());
     });
 
-    // The node cache is keyed by `level * stride + index`. If the stride does not
-    // exceed the widest level's index range, a level-1 key collides with a
-    // level-2 key and the tree returns a wrong root.
     it("cacheKeyStride keeps (level, index) keys injective for every supported depth", () => {
         for (let depth = 1; depth <= 25; depth++) {
             const stride = cacheKeyStride(depth);
             for (let level = 1; level <= depth; level++) {
-                // Largest index reachable at this level.
                 const maxIndex = 4 ** (depth - level) - 1;
                 expect(
                     maxIndex,
@@ -91,11 +76,7 @@ describe("reference / merkle path recomputation", function () {
         }
     });
 
-    // `fillBlocks` seeds the node cache instead of hashing every internal node, so
-    // it must agree with a naive fill of the same leaves, including the frontier,
-    // which reads the seeded siblings. Checked with one constant everywhere and
-    // with the per-slot constants batch witnesses use, where the frontier slots
-    // of a level must also differ.
+    // One constant everywhere, and the per-slot constants batch witnesses use.
     const fills: [string, (level: number, index: number) => Field][] = [
         ["one constant", () => 0xdeadn],
         ["prefillLeaf", prefillLeaf],
@@ -116,8 +97,7 @@ describe("reference / merkle path recomputation", function () {
                     expect(fast.root(), `root at ${where}`).to.equal(naive.root());
                     expect(fast.frontier(), `frontier at ${where}`).to.deep.equal(naive.frontier());
 
-                    // The prefill is a base for further inserts, so the
-                    // post-insert state must agree too.
+                    // The prefill is a base for further inserts.
                     if (n < capacity) {
                         naive.insert(7n);
                         fast.insert(7n);
@@ -129,8 +109,6 @@ describe("reference / merkle path recomputation", function () {
             }
         });
 
-        // A naive fill at this depth is ~350k hashes, so this checks the boundary
-        // counts rather than every n.
         it(`fillBlocks (${name}) agrees with a naive fill at depth 10 boundary counts`, () => {
             for (const n of [0, 1, 3, 4, 5, 15, 16, 17, 63, 64, 21, 1023, 1024, 4097]) {
                 const fast = new MerkleTree(ctx.P, 10);
@@ -168,8 +146,7 @@ describe("reference / merkle path recomputation", function () {
 });
 
 describe("reference / quadratic residues", () => {
-    // 5 is a non-residue in BN254 Fr, so multiplying a square by it produces a
-    // known non-residue to test the negative case against.
+    // 5 is a non-residue in BN254 Fr, so a square times it is a non-residue.
     const QNR = 5n;
 
     it("legendreSymbol classifies squares and non-squares", () => {
@@ -191,8 +168,6 @@ describe("reference / fuzzy message detection", function () {
 
     const ctx = useGadgets();
 
-    // The clue signals carry no in-circuit constraints, so these cases are the
-    // only coverage of the scheme's correctness.
     it("a detection key detects every clue flagged for its flag key", () => {
         const gen = deterministicClueGen(ctx.P, ctx.J);
         for (let i = 0; i < 32; i++) {
@@ -219,8 +194,7 @@ describe("reference / fuzzy message detection", function () {
         for (let i = 0; i < N; i++) {
             if (fmdTest(ctx.J, ctx.P, other, gen.next().clue)) matched++;
         }
-        // Expected N / 2^gamma = 4. The bound is loose: the security property is
-        // that detection is rate-limited, not that it never fires.
+        // Expected N / 2^gamma = 4; the bound is loose.
         expect(matched, `${matched}/${N} matched an unrelated detection key`).to.be.lessThan(N / 8);
     });
 
@@ -254,10 +228,6 @@ describe("reference / snark compression", () => {
         Array.from({ length: 100 }, (_, i) => BigInt(i) ** 3n + 7n),
     ];
 
-    // `abi.encode(uint256[])` is
-    //   32-byte offset (0x20) || 32-byte length || N x 32-byte big-endian.
-    // The circuit places no constraint on `z`, so an error here is invisible to
-    // witness generation and surfaces only when the contract recomputes `z`.
     it("abiEncodeCoeffs matches the abi.encode(uint256[]) layout", () => {
         for (const coeffs of CASES) {
             const enc = abiEncodeCoeffs(coeffs);
@@ -293,19 +263,9 @@ describe("reference / snark compression", () => {
         );
     });
 
-    // The vectors record `abiEncodedChallenge` so the contract side can localise
-    // a mismatch to the encoding; recomputing it here checks the published value.
-    //
     // Each case carries two vectors: `challenge` is every logical public input
     // and is what `z` hashes; `coeffs` is the leading run `y` evaluates. The
-    // word after the coefficients is the digest, a public signal of its own:
-    // `transact` hashes 38 and evaluates 13, `tree_update_batch` hashes 37 and
-    // evaluates 36. Transact's other 24 words are not circuit signals, so only
-    // `z` binds them; every batch input is a signal and must be evaluated. See
-    // src/README.md § 2a.
-    //
-    // Driven from index.json, so a shape change (a new circuit, or a different
-    // MAX_L) is covered without editing this file.
+    // word after the coefficients is the digest. See src/README.md § 2a.
     const INDEX = readJson("vectors/index.json");
     const VECTOR_FILES: string[] = Object.keys(INDEX.files);
 
@@ -313,23 +273,12 @@ describe("reference / snark compression", () => {
         expect(VECTOR_FILES.length, "no vector files listed").to.be.greaterThan(0);
     });
 
-    // ===== a challenge-only field must be one the circuit cannot see =====
-    //
     // A word in the challenge preimage but not the coefficient vector is bound
     // only if the circuit holds no copy of it: `z` is a circuit input the prover
     // reads before choosing a witness, so hashing a signal into it binds nothing
-    // (src/README.md § 2a).
-    //
-    // Omitting a word from the coefficients is sound only when the word is not a
-    // circuit signal, so no witness copy exists to disagree with calldata. Only
-    // `transact` meets that condition, checked against the compiled circuit by
-    // `test/transact/binding.test.ts :: the challenge-only fields are not
-    // circuit signals`.
-    //
-    // Every word of the `tree_update_batch` preimage is a signal, and a
-    // challenge-only signal lets a prover mint unbacked notes. It is therefore
-    // absent from this set, and publishing a challenge-only field for it fails
-    // here.
+    // (src/README.md § 2a). Only `transact` has such words. Every word of the
+    // `tree_update_batch` preimage is a signal, and a challenge-only signal
+    // lets a prover mint unbacked notes.
     const MAY_DEMOTE = new Set(["transact"]);
 
     for (const file of VECTOR_FILES) {
@@ -374,8 +323,8 @@ describe("reference / snark compression", () => {
                 expect(vec.circuitOutput.digest, `${where}: circuit digest`).to.equal(
                     vec.compression.digest,
                 );
-                // The digest commits exactly the coefficients, and is the
-                // preimage word that follows them.
+                // The digest commits the coefficients and is the preimage word
+                // that follows them.
                 expect(coeffDigest(coeffs).toString(), `${where}: digest of coeffs`).to.equal(
                     vec.compression.digest,
                 );

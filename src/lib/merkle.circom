@@ -31,14 +31,12 @@ template MerkleLevel4() {
     signal c2;
     signal c3;
 
-    // c0 = s0·cur + (1-s0)·sib[0]
     signal c0_cur;
     signal c0_sib;
     c0_cur <== sel.s[0] * cur;
     c0_sib <== (1 - sel.s[0]) * siblings[0];
     c0 <== c0_cur + c0_sib;
 
-    // c1 = s1·cur + s0·sib[0] + (s2+s3)·sib[1]
     signal c1_cur;
     signal c1_sib0;
     signal c1_sib1;
@@ -47,7 +45,6 @@ template MerkleLevel4() {
     c1_sib1 <== (sel.s[2] + sel.s[3]) * siblings[1];
     c1 <== c1_cur + c1_sib0 + c1_sib1;
 
-    // c2 = s2·cur + (s0+s1)·sib[1] + s3·sib[2]
     signal c2_cur;
     signal c2_sib1;
     signal c2_sib2;
@@ -56,7 +53,6 @@ template MerkleLevel4() {
     c2_sib2 <== sel.s[3] * siblings[2];
     c2 <== c2_cur + c2_sib1 + c2_sib2;
 
-    // c3 = s3·cur + (1-s3)·sib[2]
     signal c3_cur;
     signal c3_sib;
     c3_cur <== sel.s[3] * cur;

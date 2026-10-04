@@ -3,14 +3,9 @@ import Lelantos.Circuit.Transact
 /-!
 # Non-vacuity: `TransactSat` is satisfiable
 
-`transact_sound` has the shape `TransactSat w → TxWellFormed w`, which is vacuously true if
-`TransactSat` is unsatisfiable. This file rules that out by constructing satisfying
-assignments. Each discharges every constraint — key chain, both range checks, the two-step
-commitment, the full Merkle chain, nullifier, the transparent-bucket constraint, every
-balance candidate, the coefficient digest and the Horner evaluation at a nonzero
-challenge — rather than avoiding them with `nIn = nOut = 0`.
-
-Three transactions, each ruling out a different way for the theorem to be vacuous:
+`transact_sound` has the shape `TransactSat w → TxWellFormed w`, which is vacuous if
+`TransactSat` is unsatisfiable. This file constructs satisfying assignments that discharge
+every constraint rather than avoiding them with `nIn = nOut = 0`.
 
 | Witness | What it rules out |
 |---|---|
@@ -18,9 +13,7 @@ Three transactions, each ruling out a different way for the theorem to be vacuou
 | `withdrawTx` | the transparent bucket being satisfiable only when empty |
 | `dualTx` | the per-asset balance being satisfiable only when one asset carries value, and membership only at position `0` over zero siblings |
 
-`ofParts` assembles all three from the parts that differ; everything derived — comparator
-witnesses, accumulator chains, the digest blocks, the Horner accumulator — is filled in
-once.
+`ofParts` assembles all three from the parts that differ and fills in every derived signal.
 
 This is not a completeness theorem about the SDK's witness generator, nor a claim that
 every legal transaction is satisfiable.
@@ -31,14 +24,12 @@ namespace Witness
 
 /-! ## Bit arrays -/
 
-/-- The all-zero bit array. -/
 def zeroBits : ℕ → F := fun _ => 0
 
 theorem num2Bits_zero (n : ℕ) : Num2BitsSat n 0 zeroBits := by
   refine ⟨fun i _ => by simp [zeroBits, IsBit], ?_⟩
   simp [zeroBits]
 
-/-- The bit array of the value `1`. -/
 def oneBits : ℕ → F := fun i => if i = 0 then 1 else 0
 
 theorem num2Bits_one {n : ℕ} (hn : 0 < n) : Num2BitsSat n 1 oneBits := by
@@ -49,12 +40,10 @@ theorem num2Bits_one {n : ℕ} (hn : 0 < n) : Num2BitsSat n 1 oneBits := by
   · intro b _ hb; simp [hb]
   · intro hmem; exact absurd (Finset.mem_range.mpr hn) hmem
 
-/-- Asset id `2` is non-zero in the field — needed by the withdrawal witness, where it is
-the asset of an output slot. -/
+/-- Asset id `2` is non-zero in the field, as an output slot requires. -/
 theorem two_ne_zero_F : (2 : F) ≠ 0 := by
   simpa using natCast_ne_of_lt (m := 2) (n := 0) two_lt_p p_pos (by norm_num)
 
-/-- The bit array of the value `2`. -/
 def twoBits : ℕ → F := fun i => if i = 1 then 1 else 0
 
 theorem num2Bits_two {n : ℕ} (hn : 1 < n) : Num2BitsSat n 2 twoBits := by
@@ -67,9 +56,7 @@ theorem num2Bits_two {n : ℕ} (hn : 1 < n) : Num2BitsSat n 2 twoBits := by
 
 /-! ## Generic witness builders
 
-Each definition here produces the signals one gadget expects, together with the proof that
-they satisfy it. The transactions below are assembled from these, so the constraints are
-discharged by the same construction the circuit performs.
+Each definition produces the signals one gadget expects, with the proof that they satisfy it.
 -/
 
 /-- `IsZero`'s witness hint, as circomlib computes it. -/
@@ -114,16 +101,14 @@ theorem accChain_witness (n : ℕ) (init : F) (t : ℕ → F) :
 
 /-! ### Two-slot vectors
 
-Both the input and the output side of a witness are described by "this slot at index `0`,
-that one everywhere else". `pair` names the shape once and `pair_forall` / `pair_cases`
-discharge the per-slot obligations in one line each.
+`pair` describes both the input and the output side of a witness; `pair_forall` /
+`pair_cases` discharge the per-slot obligations.
 -/
 
 /-- The slot vector holding `hd` at index `0` and `tl i` elsewhere. -/
 def pair {α : Type} (hd : α) (tl : ℕ → α) (i : ℕ) : α := if i = 0 then hd else tl i
 
-/-- An accumulator whose only non-zero term sits at index `0`. Needed because every
-transaction below carries exactly one real input slot, at an arity the shape leaves open. -/
+/-- An accumulator whose only non-zero term sits at index `0` equals that term. -/
 theorem accOf_single {t : ℕ → F} (ht : ∀ i, i ≠ 0 → t i = 0) :
     ∀ n, 0 < n → accOf 0 t n = t 0 := by
   intro n
@@ -178,11 +163,9 @@ noncomputable def chainFrom (leaf : F) : ℕ → F
   | 0 => leaf
   | d + 1 => merkleNode (slots 0 (chainFrom leaf d) zeroBits)
 
-/-- The root a leaf is opened against, at tree depth `d`.
-
-Indexed by depth because the deployed shape is `Transact(11, 4, 6)` while the small concrete
-witnesses below sit at depth 10. The path is all-zero, so depth affects only the chain
-length. -/
+/-- The root a leaf is opened against, at tree depth `d`. The depth is a parameter because
+the deployed shape is `Transact(11, 4, 6)` while the concrete witnesses below sit at
+depth 10. -/
 noncomputable def rootFrom (d : ℕ) (leaf : F) : F := chainFrom leaf d
 
 theorem merkleRoot_chain (d : ℕ) (leaf : F) :
@@ -199,7 +182,7 @@ theorem merkleProofOrDummy_real (d : ℕ) (leaf : F) :
   ⟨by simp [IsBit], merkleRoot_chain d leaf, by ring, by ring⟩
 
 /-- A dummy membership proof: the path is unconstrained, so the advertised `root` is a
-parameter and the difference is left non-zero. -/
+parameter. -/
 theorem merkleProofOrDummy_dummy (d : ℕ) (leaf root : F) :
     MerkleProofOrDummySat d leaf (fun _ => zeroBits) (fun _ => 0) root 1
       (rootFrom d leaf - root) (rootFrom d leaf) (fun _ => zeroBits) (fun _ => selZero)
@@ -211,10 +194,9 @@ theorem merkleProofOrDummy_dummy (d : ℕ) (leaf root : F) :
 /-- Padding notes commit to the all-zero note. The commitment is also the leaf. -/
 noncomputable def padCm : F := noteCm 0 0 0 0 0
 
-/-- One padding input slot. Its `nsk` is `0`, so its nullifier is the derived nullifier of
-the all-zero note, an instance of the prover-chosen value described by
-`dummy_nullifier_unconstrained`. Its asset id is `0`, which a dummy slot may carry and
-which both range checks accept. -/
+/-- One padding input slot. Its `nsk` is `0`, so its nullifier is that of the all-zero note,
+an instance of the prover-chosen value described by `dummy_nullifier_unconstrained`. Its
+asset id is `0`, which a dummy slot may carry. -/
 noncomputable def padSlot (d : ℕ) (root : F) : SpentSlot d where
   assetId := 0
   value := 0
@@ -285,9 +267,8 @@ theorem outSlotOf_sat {asset value : F} {abits bits : ℕ → F} (hnz : asset �
 
 /-! ## A real (non-dummy) spent slot
 
-Inhabits `SpentReal`, the conclusion of `spentNote_sound`, showing its hypothesis
-`is_dummy = 0` is satisfiable: one unit of asset `1`, owned by `nsk = 0`, opened against a
-root its own path reaches.
+Inhabits `SpentReal`, the conclusion of `spentNote_sound` under `is_dummy = 0`: one unit of
+asset `1`, owned by `nsk = 0`, opened against a root its own path reaches.
 -/
 
 /-- The spender's key. `pk` must equal the derived key, since the ownership constraint is
@@ -301,7 +282,7 @@ noncomputable def realCm : F := noteCm 1 1 realPk 0 0
 noncomputable def realRoot (d : ℕ) : F := rootFrom d realCm
 
 /-- A real spent slot: `is_dummy = 0`, so ownership, the non-zero asset id and Merkle
-membership are all enforced rather than bypassed. -/
+membership are all enforced. -/
 noncomputable def realSlot (d : ℕ) : SpentSlot d where
   assetId := 1
   value := 1
@@ -337,20 +318,13 @@ theorem realSlot_sat (d : ℕ) : SpentNoteSat (realSlot d) := by
 
 /-! ## Assembling a transaction
 
-The transactions below differ only in their slots and their transparent bucket. `ofParts`
-derives everything else — the comparator witnesses, the accumulator chains, the digest and
-the Horner accumulator — so a witness is described only by its distinguishing parts.
+`ofParts` derives the comparator witnesses, the accumulator chains, the digest and the
+Horner accumulator from the slots and the transparent bucket.
 -/
 
-/-- The parts of a witness that differ between transactions.
-
-Indexed by `depth` as well as the shape: the deployed shape is `Transact(11, 4, 6)` while
-the small concrete witnesses below sit at depth 10. `ofParts` only forwards the depth, but
-the two types differ. -/
+/-- The parts of a witness that differ between transactions. -/
 structure Parts (depth nIn nOut : ℕ) where
-  /-- The spent-note slots. -/
   spent : ℕ → SpentSlot depth
-  /-- The output-note slots. -/
   out : ℕ → OutputSlot
   /-- The advertised Merkle root. -/
   root : F
@@ -382,8 +356,7 @@ noncomputable def rhsOf {depth nIn nOut : ℕ} (w : TxWitness depth nIn nOut) (c
   accOf (w.publicOut * eqOut w.publicAssetId (candOf w c)) (outTermOf w c)
 
 /-- The chosen signals, with every derived one left at zero. The challenge is `1`: the
-circuit rejects `z = 0`. The address and clue fields are absent from `TxWitness`: they are
-bound through the challenge, not through `PolyEval`, so the circuit does not carry them. -/
+circuit rejects `z = 0`. -/
 noncomputable def baseOf {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) :
     TxWitness depth nIn nOut where
   z := 1
@@ -413,16 +386,14 @@ noncomputable def baseOf {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) :
   -- `IsZero(1)`: `inv = 1`, `out = 0`.
   zInv := 1
   zIsZero := 0
-  -- The dummy count and the comparator that rejects the all-dummy witness. With some slot
-  -- real the difference `nIn - count` is non-zero, so its inverse and `out = 0` satisfy
-  -- `IsZero`.
+  -- The dummy count and the all-dummy comparator. With some slot real, `nIn - count` is
+  -- non-zero, so its inverse and `out = 0` satisfy `IsZero`.
   dummyAcc := accOf 0 (fun i => (p.spent i).isDummy)
   dummyAllInv := isZeroInv ((nIn : F) - accOf 0 (fun i => (p.spent i).isDummy) nIn)
   dummyAllOut := 0
 
-/-- The full assignment. The digest and the Horner accumulator are both computed from the
-base's coefficient vector. Neither is a coefficient, so filling them in leaves that vector
-unchanged (`baseOf_coeffs`). -/
+/-- The full assignment: the digest and the Horner accumulator are computed from the base's
+coefficient vector, which they leave unchanged (`baseOf_coeffs`). -/
 noncomputable def ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) :
     TxWitness depth nIn nOut :=
   let base := baseOf p
@@ -475,10 +446,9 @@ theorem baseOf_coeffs {depth nIn nOut : ℕ} (p : Parts depth nIn nOut) (k : ℕ
   unfold txCoeffs
   cases piSlot nIn nOut k <;> rfl
 
-/-- **The constraint system, reduced to what is specific to a transaction.** Everything
-generic — the comparator and accumulator witnesses, the digest fold and the `PolyEval`
-chain — is discharged here; the hypotheses are exactly the facts that depend on which notes
-the transaction moves. -/
+/-- **The constraint system, reduced to what is specific to a transaction.** The comparator
+and accumulator witnesses, the digest fold and the `PolyEval` chain are discharged here; the
+hypotheses are the facts that depend on which notes the transaction moves. -/
 theorem transactSat_ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut)
     (hspent : ∀ i, SpentNoteSat (p.spent i))
     (hroot : ∀ i, (p.spent i).root = p.root)
@@ -532,7 +502,7 @@ private theorem accOf_dummies {t : ℕ → F} (h0 : t 0 = 0) (h1 : ∀ i, i ≠ 
       rw [hcast, show m + 1 - 1 = m from rfl]
       ring
 
-/-- …hence the comparator input `nIn - count` is exactly 1, and in particular non-zero. -/
+/-- …hence the comparator input `nIn - count` is 1, and in particular non-zero. -/
 private theorem notAllDummy_of_head {nIn : ℕ} (hn : 0 < nIn) {t : ℕ → F} (h0 : t 0 = 0)
     (h1 : ∀ i, i ≠ 0 → t i = 1) : (nIn : F) - accOf 0 t nIn ≠ 0 := by
   have hone : (nIn : F) - accOf 0 t nIn = 1 := by
@@ -551,10 +521,8 @@ of asset `1`. Nothing is withdrawn, so the transparent bucket names asset `0`.
 assignment carries one real spend. `TransactSat.not_all_dummy` is the modelled constraint
 and `notAllDummy_of_head` discharges it here.
 
-Written once for an arbitrary arity: every slot vector is index-generic, and the balance
-sums collapse to one term whichever candidate is selected. The same construction therefore
-serves the small `Transact(10, 2, 2)` and the deployed `Transact(11, 4, 6)`, whose
-soundness results each need a witness of their own type.
+Stated for an arbitrary shape, so it serves both `Transact(10, 2, 2)` and the deployed
+`Transact(11, 4, 6)`.
 -/
 
 noncomputable def minIn (depth : ℕ) : ℕ → SpentSlot depth :=
@@ -629,8 +597,7 @@ theorem minTx_sat (depth nIn nOut : ℕ) (hnIn : 0 < nIn) (hnOut : 0 < nOut) :
 
 /-! ## The two-in/two-out instance of it
 
-`spendTx` is `minTx 10 2 2`. The withdrawal and the downstream results are stated over the
-shape-specific abbreviations below.
+`spendTx` is `minTx 10 2 2`. The withdrawal is stated over the abbreviations below.
 -/
 
 noncomputable abbrev spendIn : ℕ → SpentSlot 10 := minIn 10
@@ -650,11 +617,9 @@ theorem spendTx_sat : TransactSat spendTx := minTx_sat 10 2 2 (by norm_num) (by 
 
 /-! ## A withdrawal
 
-The witness above leaves the transparent bucket empty, so its bucket constraint is
-satisfied by `0 · 0`, and uses asset ids `0` and `1` only. This one spends the shielded
-asset-`1` note and withdraws its unit through the bucket, which therefore names asset `1`
-with `IsZero(public_out) = 0`. Its two outputs are empty notes of assets `1` and `2`, so the
-five balance candidates are `1, 0, 1, 2, 1`: three different ids.
+Spends the shielded asset-`1` note and withdraws its unit through the bucket, which
+therefore names asset `1` with `IsZero(public_out) = 0`. Its two outputs are empty notes of
+assets `1` and `2`, so the five balance candidates are `1, 0, 1, 2, 1`.
 -/
 
 noncomputable def withdrawOut : ℕ → OutputSlot :=
@@ -698,11 +663,9 @@ theorem withdrawTx_sat : TransactSat withdrawTx :=
 
 /-! ## Two real inputs, two assets
 
-Every witness above opens one real note, so only one asset ever carries value. This one
-opens two, of assets `1` and `2`, at positions `0` and `1` under the same level-0 node, and
-pays each out as a note. Both sides of the balance are non-zero for two different
-candidates, both input slots take the non-dummy branch, and the second takes a path index
-other than `0`, with a non-zero sibling.
+Opens two real notes, of assets `1` and `2`, at positions `0` and `1` under the same level-0
+node, and pays each out as a note. Both sides of the balance are non-zero for two different
+candidates, and the second slot takes a path index other than `0`, with a non-zero sibling.
 -/
 
 /-- The selector signals for position `1`. -/
@@ -923,13 +886,8 @@ theorem dualTx_sat : TransactSat dualTx :=
 end Witness
 
 /-- **`transact_sound` is not vacuous.** There is an assignment satisfying the whole
-constraint system, so the implication has non-empty domain.
-
-Stated at `TxWitness 10 2 2` rather than at the deployed shape: the smallest shape keeps the
-concrete witnesses readable. `Transact(11, 4, 6)` has its own witness further down.
-
-No compiled circuit is needed to instantiate the type: every result here is proved for the
-generic `Transact(depth, nIn, nOut)`. -/
+constraint system, at `TxWitness 10 2 2`; the deployed `Transact(11, 4, 6)` has its own
+witness below. -/
 theorem transactSat_satisfiable : ∃ w : TxWitness 10 2 2, TransactSat w :=
   ⟨Witness.minTx 10 2 2, Witness.minTx_sat 10 2 2 (by norm_num) (by norm_num)⟩
 
@@ -938,10 +896,8 @@ theorem transact_wellFormed_witness : TxWellFormed (Witness.minTx 10 2 2) :=
   transact_sound (by norm_num) (by norm_num) (Witness.minTx_sat 10 2 2 (by norm_num) (by norm_num))
 
 /-- **`transact4x6_sound` is not vacuous.** The deployed shape, `Transact(11, 4, 6)`.
-
 `Transact4x6` is a distinct type from the one above, so this does not follow from
-`transactSat_satisfiable`; it shows the soundness result for the deployed shape is not
-vacuous, and that the six-output end of the slot bound in `transact_sound` is reachable. -/
+`transactSat_satisfiable`. -/
 theorem transact4x6Sat_satisfiable : ∃ w : Transact4x6, TransactSat w :=
   ⟨Witness.minTx 11 4 6, Witness.minTx_sat 11 4 6 (by norm_num) (by norm_num)⟩
 
@@ -959,9 +915,8 @@ theorem spentNoteSat_real_satisfiable : ∃ s : SpentSlot 10, SpentNoteSat s ∧
 theorem spentReal_witness : SpentReal (Witness.realSlot 10) :=
   spentNote_sound (Witness.realSlot_sat 10) rfl
 
-/-- **A transaction that moves value is satisfiable.** Shows the balance machinery is
-satisfiable with non-trivial sums: this witness spends one unit of asset `1` through a
-non-dummy input slot into an output note, and withdraws nothing. -/
+/-- **A transaction that moves value is satisfiable.** The witness spends one unit of asset
+`1` through a non-dummy input slot into an output note, and withdraws nothing. -/
 theorem transactSat_spend_satisfiable :
     ∃ w : TxWitness 10 2 2, TransactSat w ∧ (w.spent 0).isDummy = 0 ∧ (w.out 0).value = 1 ∧
       w.publicOut = 0 ∧ w.publicAssetId = 0 :=
@@ -972,9 +927,8 @@ amount. -/
 theorem transact_wellFormed_spend : TxWellFormed Witness.spendTx :=
   transact_sound (by norm_num) (by norm_num) Witness.spendTx_sat
 
-/-- **A withdrawal is satisfiable.** The witness above leaves the transparent bucket empty.
-This one withdraws the spent unit, so the bucket names a non-zero asset with a non-zero
-amount, and its outputs carry two different asset ids, so the balance candidates do not all
+/-- **A withdrawal is satisfiable.** The bucket names a non-zero asset with a non-zero
+amount, and the outputs carry two different asset ids, so the balance candidates do not all
 agree. -/
 theorem transactSat_withdraw_satisfiable :
     ∃ w : TxWitness 10 2 2, TransactSat w ∧
@@ -988,9 +942,8 @@ theorem transact_wellFormed_withdraw : TxWellFormed Witness.withdrawTx :=
 
 /-- **A transaction moving two distinct assets is satisfiable.** Both input slots are real,
 opened at different positions under one root, and carry one unit each of assets `1` and
-`2`; each unit leaves as an output note. So the per-asset balance is satisfied with
-non-zero sums for two different candidates, not only where every value-carrying slot
-agrees. -/
+`2`; each unit leaves as an output note, so the per-asset balance is satisfied with
+non-zero sums for two different candidates. -/
 theorem transactSat_twoAsset_satisfiable :
     ∃ w : TxWitness 10 2 2, TransactSat w ∧
       (w.spent 0).isDummy = 0 ∧ (w.spent 1).isDummy = 0 ∧

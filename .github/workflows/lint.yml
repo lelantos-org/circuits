@@ -25,8 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # circom: 'false', since circomspect reads the sources directly and this
-      # job compiles no circuit.
+      # circomspect reads the sources directly; this job compiles no circuit.
       - name: Setup toolchain
         uses: ./.github/actions/setup
         with:
@@ -59,12 +58,7 @@ jobs:
         if: steps.cache-cargo.outputs.cache-hit != 'true'
         run: cargo install circomspect --locked --version "${CIRCOMSPECT_VERSION}"
 
-      # circomspect exits non-zero on any warning. Known-safe analysis passes
-      # are suppressed via --allow flags, with rationale in the justfile `lint`
-      # recipe.
-      #
-      # This step is blocking. With CIRCOMSPECT_VERSION pinned, new findings come
-      # only from circuit changes. Known-safe findings are waived in the justfile
-      # baseline with a rationale, not here.
+      # circomspect exits non-zero on any warning. Waived passes and their
+      # rationale are in the justfile `lint` recipe.
       - name: Run circomspect
         run: just lint

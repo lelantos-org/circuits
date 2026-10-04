@@ -5,26 +5,21 @@ import Lelantos.Proofs.Completeness
 # Non-vacuity of the batch results
 
 `Circuit/TreeUpdateBatch.lean` proves theorems of the form `BatchSat … → P`, which are
-vacuous unless something satisfies `BatchSat`; `Proofs/Completeness.lean` covers the
-transact circuit only. This file exhibits satisfying assignments for
+vacuous unless something satisfies `BatchSat`. This file exhibits satisfying assignments for
 `TreeUpdateBatch(11, 8)`, the deployed shape.
 
 `batchAt S fr` is one assignment per start position `S` and frontier `fr`, committing three
-leaves into eight slots: an odd, partially-filled batch, so the padding constraints and the
-leaf zeroing are exercised rather than satisfied by `active ≡ 1`. Slot `0` is a deposit of
-one unit of asset `1`, so its leaf goes through the deposit commitment, both of its range
-checks decompose a non-zero value, and the asset guard is satisfied with a non-zero asset;
-slots `1` and `2` are spend leaves, where the leaf is the word itself. Both branches of the
-leaf mux are therefore taken on active slots. The mix is not one the contract would accept
-in a single batch — it pins `is_deposit` uniformly — but the circuit does not know that, and
-the point here is the constraint system.
+leaves into eight slots, so the padding constraints and the leaf zeroing are not satisfied
+by `active ≡ 1`. Slot `0` is a deposit of one unit of asset `1`; slots `1` and `2` are spend
+leaves, so both branches of the leaf mux are taken on active slots. The contract would not
+accept this mix in a single batch, since it pins `is_deposit` uniformly; the circuit has no
+such constraint.
 
 Two instances:
 
-* `batch`, at `start_index = 0` over an empty frontier — the base the named theorems use;
+* `batch`, at `start_index = 0` over an empty frontier;
 * `batchSat_nonzero_frontier`, at `start_index = 21` over a frontier holding a non-zero value
-  in every slot a root reads, so both roots take their frontier branches and the zero pin
-  accepts an honestly filled frontier.
+  in every slot a root reads.
 
 The empty-subtree fills are `emptyChain`, so `ZerosCoherent` is discharged rather than assumed.
 -/
@@ -33,11 +28,7 @@ namespace Lelantos
 
 namespace BatchWitness
 
-/-! ## Shape
-
-Named constants rather than numerals, so the arithmetic below matches the circuit's and the
-shape is defined in one place.
--/
+/-! ## Shape -/
 
 /-- `MAX_L`: slots per batch. -/
 abbrev slots : ℕ := 8
@@ -54,7 +45,6 @@ abbrev filled : ℕ := 3
 `active[k] = LessThan(countBits + 1)(k, actual_count)`, as `batchAppend_witness` computes it.
 -/
 
-/-- `active[k]`, as the gadget computes it. -/
 abbrev act : ℕ → F := lessThanActive countBits filled
 
 /-- The activity vector, evaluated: the first `filled` slots are active, the rest padding. -/
@@ -62,8 +52,7 @@ theorem act_eq (k : ℕ) (hk : k < slots) : act k = if k < filled then 1 else 0 
   interval_cases k <;> norm_num [lessThanActive, natBits]
 
 /-- The padding constraints. An active slot zeroes the `1 - active` factor; a padding slot
-carries zero in every per-leaf field, which is the `hx` hypothesis. `hx` ranges over all
-padding slots (five, for `filled = 3` of `slots = 8`). -/
+carries zero in every per-leaf field, which is the `hx` hypothesis. -/
 theorem pad_mul {x : ℕ → F} (hx : ∀ j, ¬ j < filled → x j = 0) (k : ℕ) (hk : k < slots) :
     (1 - act k) * x k = 0 := by
   rw [act_eq k hk]
@@ -73,8 +62,7 @@ theorem pad_mul {x : ℕ → F} (hx : ∀ j, ¬ j < filled → x j = 0) (k : ℕ
 
 /-! ## Slots
 
-Three distinct words and zeroed padding slots. Slot `0` is a deposit; the single-slot
-indicator `head` describes all three of its deposit fields.
+Three distinct words and zeroed padding slots. Slot `0` is a deposit.
 -/
 
 /-- Slot `k`'s word in `cms`: on slot `0` the depositor's `inner`, on slots `1` and `2` a
@@ -112,7 +100,7 @@ noncomputable def leafOf (k : ℕ) : F := cm k + head k * (depCmOf k - cm k)
 
 /-! ## The assignment
 
-The tree's signals are `batchAppendWitness`, which defines each as exactly the expression its
+The tree's signals are `batchAppendWitness`, which defines each as the expression its
 constraint requires. -/
 
 /-- The tree's signals at start `S` over frontier `fr`. -/
@@ -221,8 +209,7 @@ non-empty domain. -/
 theorem batchSat_satisfiable : ∃ w : BatchSignals 11 8, BatchSat 3 emptyChain w :=
   ⟨BatchWitness.batch, BatchWitness.batch_sat⟩
 
-/-- The assignment is not the degenerate full batch: three leaves in eight slots, so the padding
-constraints and the leaf zeroing are exercised rather than satisfied by `active ≡ 1`. -/
+/-- The assignment is not the full batch: three leaves in eight slots, with slot 3 inactive. -/
 theorem batchSat_partial_batch :
     BatchWitness.batch.actualCount = ((3 : ℕ) : F) ∧ BatchWitness.batch.append.active 3 = 0 :=
   ⟨rfl, by

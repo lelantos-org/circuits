@@ -5,30 +5,23 @@
 # The layout is hand-transcribed and must agree with
 # `src/lib/poly_eval.circom :: TransactCompressN`,
 # `contracts/src/lib/PubInputs.sol :: compress(Transact, aux)` and
-# `test/ref/compress.ts :: coeffs`: four implementations of one order.
+# `test/ref/compress.ts :: coeffs`.
 #
-# `lean/expected/layout-4x6.txt` is also consumed by `test/formal/layout_parity.test.ts`,
-# which checks it against `test/ref/compress.ts`, the generator of the published
-# `vectors/`. This links the order to the SDK without either repo importing the other.
+# `lean/expected/layout-4x6.txt` is also checked by `test/formal/layout_parity.test.ts`
+# against `test/ref/compress.ts`, the generator of the published `vectors/`.
 #
-# Two layouts are dumped, the transact shapes and `BatchCompress(MAX_L)`, and they
-# differ in kind.
+# Transact dump: the 13 words `PubInputs.sol` evaluates, the logical public inputs
+# that are signals of the circuit; it hashes 38 words to derive `z`. Hashed but not
+# evaluated, so absent from the dump: the digest of the thirteen (a public output of
+# the circuit, also passed to the verifier) and the words that are not circuit
+# signals (the five address and chain words, the FMD clue triples, the payload
+# digest). The calldata prefix is 19 words (`src/4x6.circom`), which fixes the
+# offsets of the uint64 and address words `compress` re-masks in assembly.
 #
-# The 13-slot transact dump is the polynomial, not the challenge preimage.
-# `PubInputs.sol` hashes 38 words to derive `z` and evaluates only these 13, the
-# logical public inputs that are signals of the circuit. The digest of those thirteen
-# is a public output of the circuit: its calldata word is hashed into `z` and passed
-# to the verifier, and it is not evaluated, so it has no line in the dump. The five
-# address and chain words, the FMD clue triples and the payload digest are hashed
-# into `z` only, because they are not signals of the circuit. The calldata prefix is
-# 19 words (`src/4x6.circom`), which fixes the offsets of the uint64 and address
-# words `compress` re-masks in assembly.
-#
-# The batch dump has no challenge-only words: all `4 + 4*MAX_L` words are signals of
-# `tree_update_batch.circom`, so all 36 are coefficients. Its digest is likewise a
-# public output, hashed (37 words in all) and not evaluated, with no line in the
-# dump. `test/formal/batch_layout_parity.test.ts` asserts the same against the
-# published vector, with this file as the Lean reference.
+# Batch dump: all `4 + 4*MAX_L` words are signals of `tree_update_batch.circom`, so
+# all 36 are coefficients. Its digest is a public output, hashed (37 words in all)
+# and not evaluated. `test/formal/batch_layout_parity.test.ts` asserts the same
+# against the published vector.
 #
 # Regenerate after an intentional layout change:  lean/scripts/dump-layout.sh --update
 set -euo pipefail

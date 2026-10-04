@@ -1,9 +1,7 @@
-// Transact vectors for every shipped shape (4x6 only).
-//
-// One case produces one vector. The construction matches `TxBuilder` in
-// test/lib/transact.ts (same note derivation, forced output rho and aux digest)
-// but keeps its own leaf and dummy bookkeeping, since the published
-// `intermediates` block exposes values TxBuilder does not return.
+// Transact vectors for every shipped shape (4x6 only); one case produces one
+// vector. The construction matches `TxBuilder` in test/lib/transact.ts but
+// keeps its own leaf and dummy bookkeeping, since the published `intermediates`
+// block exposes values TxBuilder does not return.
 
 import {
     Jubjub,
@@ -69,10 +67,8 @@ interface TransactShape {
     nIn: number;
     nOut: number;
     /**
-     * Quaternary tree depth this shape's circuit is instantiated at.
-     *
-     * Per shape, not global: the Merkle path length in the witness must match
-     * the circuit or witness calculation rejects it.
+     * Quaternary tree depth this shape's circuit is instantiated at; the
+     * Merkle path length in the witness must match it.
      */
     depth: number;
     source: string;
@@ -103,14 +99,9 @@ export const TRANSACT_SHAPES: TransactShape[] = [
         nOut: 6,
         depth: 11,
         source: "src/4x6.circom",
-        // `Transact(11, 4, 6)`. Six outputs so a withdrawal's change lands on
-        // the denomination ladder in one spend; four inputs because an input
-        // slot costs roughly 3.4x an output slot.
-        //
         // These vectors pin the 38-word challenge preimage, whose leading 13
-        // coefficients the Lean development proves against, as a byte-exact
-        // target for the `PubInputs.compress` overload. Its 19-word calldata
-        // prefix fixes every word `compress` re-masks in assembly.
+        // words are the coefficients, as a byte-exact target for the
+        // `PubInputs.compress` overload.
         cases: [
             {
                 name: "internal-4in6out-balanced",
@@ -207,11 +198,9 @@ function note(P: Poseidon, asset: Field, nsk: bigint, value: bigint, rho: Field)
 }
 
 /**
- * Insert every real input into `tree`, in slot order.
- *
- * Returns the spent notes with empty proofs, since the root is not yet frozen,
- * plus the leaves the published `intermediates` block exposes. The leaf is the
- * note commitment itself.
+ * Insert every real input into `tree`, in slot order. Returns the spent notes
+ * with empty proofs, since the root is not yet frozen, plus the leaves the
+ * published `intermediates` block exposes.
  */
 function insertRealInputs(P: Poseidon, tree: MerkleTree, c: TransactCase) {
     const spent: SpentNote[] = [];
@@ -255,14 +244,11 @@ function fillSlots(P: Poseidon, depth: number, c: TransactCase, finalizedReal: S
 
 /**
  * Two-pass Fiat-Shamir: build the witness at z = 0, flatten it into the
- * challenge preimage, hash that into the real z, then rebuild. `z` is a public
- * input, so it cannot be part of what derives it.
+ * challenge preimage, hash that into the real z, then set z. The coefficient
+ * digest is fixed in the first pass: it is a function of the coefficient
+ * signals alone and is itself a word of the preimage.
  *
- * The coefficient digest is fixed in the first pass: it is a function of the
- * coefficient signals alone and is itself a word of the preimage.
- *
- * `flatten` and `coeffs` differ (38 words hashed, 13 evaluated). See `coeffs`
- * in test/ref/compress.ts.
+ * `flatten` and `coeffs` differ: 38 words hashed, 13 evaluated.
  */
 function buildWitness(
     P: Poseidon,
@@ -333,9 +319,8 @@ export async function buildTransactVectors(shape: TransactShape) {
         const finalizedReal = spent.map((sn) => ({ ...sn, ...tree.proof(sn.leafIndex) }));
         const { inputs, dummyMeta } = fillSlots(P, shape.depth, c, finalizedReal);
 
-        // Output rho is forced to the derivation the circuit enforces. Only
-        // `rho` is replaced; `rcm` stays the small reproducible value `note`
-        // gave it.
+        // Output rho is forced to the derivation the circuit enforces; `rcm`
+        // stays the value `note` gave it.
         const nf0 = inputs[0].nf;
         const outputs: Note[] = c.outputs.map((o, j) => ({
             ...note(P, c.asset, o.nsk, o.value, BigInt(3000 * (j + 1))),
@@ -346,10 +331,9 @@ export async function buildTransactVectors(shape: TransactShape) {
         const { witnessInput, challenge, coeffs: polyCoeffs, z, y } =
             buildWitness(P, c, inputs, outputs, clueList, merkleRoot);
 
-        // The compiled circuit is the oracle for `y`, not the TypeScript Horner
-        // evaluation. `circuitSignals` drops the challenge-only fields: they are
-        // logical public inputs but not signals, and the witness calculator
-        // rejects a key the circuit does not declare.
+        // The compiled circuit is the oracle for `y`. `circuitSignals` drops the
+        // challenge-only fields: the witness calculator rejects a key the
+        // circuit does not declare.
         const w = await circuit.calculateWitness(circuitSignals(witnessInput), true);
         await circuit.checkConstraints(w);
         const circuitY = readOutput(w, 0);
@@ -419,15 +403,11 @@ export async function buildTransactVectors(shape: TransactShape) {
                 // coefficients, four per block, zero-padded,
                 //   h_0     = Poseidon(TAG_DIGEST, w[0..3])
                 //   h_{b+1} = Poseidon(h_b, w[4b+4 .. 4b+7])
-                // The circuit outputs it; calldata carries the same value right
-                // after the coefficients, hashed into z and not evaluated.
                 digest: {
                     absorbed: digestPrefix(witnessInput).map(s),
                     value: witnessInput.digest,
                 },
                 merkle: {
-                    // Per-shape depth rather than the global `DEPTH` constant,
-                    // which may differ from the shape's instantiation.
                     depth: shape.depth,
                     leaves: tree.leaves.map(s),
                     root: s(merkleRoot),

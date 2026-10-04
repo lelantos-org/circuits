@@ -1,9 +1,6 @@
 // Poseidon over BN254 with the iden3 constants, matching circomlib's
-// `Poseidon(n)` template.
-//
-// poseidon-lite exports one fixed-arity function per width and returns bigints.
-// Arities in use: 2 (keys), 3 (cm, rho), 4 (inner, nf), 5 (Merkle nodes and the
-// coefficient digest), 6 (FMD).
+// `Poseidon(n)` template. Arities in use: 2 (keys), 3 (cm, rho), 4 (inner, nf),
+// 5 (Merkle nodes and the coefficient digest), 6 (FMD).
 
 import {
     poseidon1,
@@ -31,8 +28,7 @@ const TABLE: Record<number, (xs: Field[]) => bigint> = {
 export class Poseidon {
     private constructor() {}
 
-    // Async factory, for symmetry with `Jubjub.build()`, which awaits
-    // circomlibjs.
+    // Async for symmetry with `Jubjub.build()`.
     static async build(): Promise<Poseidon> {
         return new Poseidon();
     }

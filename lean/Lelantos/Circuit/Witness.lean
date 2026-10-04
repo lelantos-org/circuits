@@ -5,15 +5,11 @@ import Lelantos.Circuit.Output
 # The `Transact` signal set
 
 The signals of `Transact(DEPTH, N_IN, N_OUT)`: the two slot arrays, the transparent bucket,
-the three public signals `(y, digest, z)` and the dummy-count accumulator. Nothing here
-says what the circuit constrains — that is `Lelantos.Circuit.Transact` — and nothing here
-says how the public inputs are ordered, which is `Lelantos.Circuit.Layout`.
+the three public signals `(y, digest, z)` and the dummy-count accumulator. The constraints
+are in `Lelantos.Circuit.Transact`, the public-input order in `Lelantos.Circuit.Layout`.
 
 Each field names a signal of the compiled circuit; `lean/expected/signal-map.json` records
 which, and `test/formal/signal_parity.test.ts` checks the name against `build/*.sym`.
-
-There is no public input: a transact proof never moves tokens in. Shielding goes through
-the deposit escrow and `tree_update_batch.circom`.
 -/
 
 namespace Lelantos
@@ -21,13 +17,12 @@ namespace Lelantos
 /-- Every signal of `Transact(depth, nIn, nOut)`. -/
 structure TxWitness (depth nIn nOut : ℕ) where
   /-- The public signals, `(y, digest, z)` in the verifier's order
-  (`src/lib/transact.circom:42-44`). `z` is the challenge, an input; `y` and `digest` are
+  (`src/lib/transact.circom:37-39`). `z` is the challenge, an input; `y` and `digest` are
   outputs. -/
   z : F
   y : F
   /-- The coefficient digest: `CoeffDigest` of the coefficient vector, a public output. It is
-  not a coefficient and is not evaluated into `y`. The prover writes the same value into
-  calldata, and the contract hashes that word into `z` and passes it to the verifier. -/
+  not a coefficient and is not evaluated into `y`. -/
   digest : F
   /-- Logical public inputs: private signals of the circuit, bound through `y` and
   `digest`. -/

@@ -1,8 +1,5 @@
 """Shared helpers for `check-citations.py`, `check-coverage.py` and `check-names.py`:
 repository paths, the scanned file set, and result reporting.
-
-`check-axioms.sh` and `dump-layout.sh` are shell checks (they invoke `lake`) that
-follow the same output convention.
 """
 
 from __future__ import annotations
@@ -17,10 +14,8 @@ REPO = os.path.abspath(os.path.join(LEAN, ".."))
 SRC = os.path.join(REPO, "src")
 SEARCH_ROOTS = [REPO, os.path.dirname(REPO)]
 
-# Sibling repositories. A citation into them resolves only when they are checked out
-# alongside this one. CI checks out this repository alone, where such a citation is
-# unverifiable rather than wrong, so it is skipped (as `just vectors-consumers-check`
-# does) to keep the result independent of workspace layout.
+# Sibling repositories. CI checks out this repository alone, where a citation into
+# them is unverifiable rather than wrong, so it is skipped.
 EXTERNAL_ROOTS = ("contracts", "sdk")
 
 

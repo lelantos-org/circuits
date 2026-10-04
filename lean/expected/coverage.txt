@@ -1,1 +1,1 @@
-UNCITED src/lib/common.circom:66: zeros[i] <== zero;
+UNCITED src/lib/common.circom:62: zeros[i] <== zero;

@@ -197,17 +197,17 @@ it described; `batch_capacity` consumes the one range check that replaced it.
 | `:11-15` `RangeCheck64` → `Num2Bits(64)` | `RangeCheck64Sat` / `Num2BitsSat` (`Bits.lean`). The template has no `bits` output; the model's bit array is the internal `n2b.out` |
 | `:22` `dummy*(dummy-1) === 0` | `DummyZeroValueSat` (first conjunct) |
 | `:23` `dummy*value === 0` | `DummyZeroValueSat` (second conjunct) |
-| `:57-65` `cand[]` fill | `candAt` |
-| `:76-78` `pub_eq[c] = IsEqual(pa, cand[c])` | `PerAssetValueBalanceSat.pubEq_sat` |
-| `:81` `lhs[c][0] <== 0` | `lhs_chain` initial value. There is no public-input term |
-| `:82` `rhs[c][0] <== public_out * pub_eq[c]` | `rhs_chain` initial value |
-| `:85-87` `in_eq[c][i] = IsEqual(in_asset[i], cand[c])` | `inEq_sat` |
-| `:88` `in_term[c][i] <== in_value[i] * in_eq[c][i]` | `inTerm_def` |
-| `:89` `lhs[c][i+1] <== lhs[c][i] + in_term[c][i]` | `lhs_chain` step |
-| `:92-94` `out_eq[c][j] = IsEqual(out_asset[j], cand[c])` | `outEq_sat` |
-| `:95` `out_term[c][j] <== out_value[j] * out_eq[c][j]` | `outTerm_def` |
-| `:96` `rhs[c][j+1] <== rhs[c][j] + out_term[c][j]` | `rhs_chain` step |
-| `:99` `lhs[c][N_IN] === rhs[c][N_OUT]` | `balanced` |
+| `:49-57` `cand[]` fill | `candAt` |
+| `:68-70` `pub_eq[c] = IsEqual(pa, cand[c])` | `PerAssetValueBalanceSat.pubEq_sat` |
+| `:72` `lhs[c][0] <== 0` | `lhs_chain` initial value. There is no public-input term |
+| `:73` `rhs[c][0] <== public_out * pub_eq[c]` | `rhs_chain` initial value |
+| `:76-78` `in_eq[c][i] = IsEqual(in_asset[i], cand[c])` | `inEq_sat` |
+| `:79` `in_term[c][i] <== in_value[i] * in_eq[c][i]` | `inTerm_def` |
+| `:80` `lhs[c][i+1] <== lhs[c][i] + in_term[c][i]` | `lhs_chain` step |
+| `:83-85` `out_eq[c][j] = IsEqual(out_asset[j], cand[c])` | `outEq_sat` |
+| `:86` `out_term[c][j] <== out_value[j] * out_eq[c][j]` | `outTerm_def` |
+| `:87` `rhs[c][j+1] <== rhs[c][j] + out_term[c][j]` | `rhs_chain` step |
+| `:90` `lhs[c][N_IN] === rhs[c][N_OUT]` | `balanced` |
 
 ### `src/lib/common.circom` / `src/lib/merkle.circom`
 
@@ -230,30 +230,30 @@ instance in `BatchShape`.
 
 | circom | Lean |
 |---|---|
-| `:57-70` `BATCH_WINDOW` | `batchWindow`; `batchWindow_eq_circom` against the literal clamp |
-| `:75-84` `BATCH_SRC`, `p = 4 * j + k - r` | `batchSrc`; `batchSrc_eq_circom` against the signed `ℤ` computation |
-| `:88-104` `BATCH_NPROD` | none needed — it only sizes `prod`, and `assert(pi == NPROD)` fails compilation on a mismatch |
-| `:115` `assert(EMPTY_SUBTREE(0) == 0)` | `ZerosCoherent`, first conjunct — a hypothesis, see exception 1 |
-| `:119` `assert(MAX_L <= 4 ** DEPTH)` | none needed — a compile-time guard on the shape. No result uses it: `batchAppend_capacity` bounds the run by the tree from the `last_idx_bits` range check at any `MAX_L` |
-| `:129` `assert((1 << COUNT_BITS) == MAX_L)` | `BatchShape.pow_count` |
-| `:130-131` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchAppendSat.count_bits` |
-| `:133-139` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchAppendSat.active_def` |
-| `:144-145` `Num2Bits(BITS)(start_index)` | `BatchAppendSat.index_bits` |
-| `:146-147` `last_idx_bits.in <== start_index + actual_count - 1` | `BatchAppendSat.last_idx_bits` |
-| `:153` `bb[d] <== idx_bits.out[2 * d] * idx_bits.out[2 * d + 1]` | `BatchAppendSat.bb_def` / `bitPairs` |
-| `:154-157` `s[d][0..3]` over the bits and `bb` | `batchSel`, `appendSel` |
-| `:161-169` `(1 - read) * frontier_in[d][k] === 0` | `BatchAppendSat.frontier_pin` / `batchRead` |
-| `:175` `old_node[0] <== 0` | `BatchAppendSat.old_base` |
-| `:178` `old_h[d].inputs[0] <== tag` | `BatchAppendSat.old_def` via `merkleNode` |
-| `:179-187` `old_prod[d][k] <== s[d][k] * old_node[d]` with the frontier and empty-subtree terms | `BatchAppendSat.old_def` via `oldChild` |
-| `:190` `old_node[d + 1] <== old_h[d].out` | `BatchAppendSat.old_def` |
-| `:192` `old_root <== old_node[DEPTH]` | `BatchAppendSat.old_root_def` |
-| `:203` `assert(W[DEPTH] == 1)` | `batchWindow_top` |
-| `:207` `node[OFF[0] + t] <== active[t] * leaves[t]` | `BatchAppendSat.leaf_def` |
-| `:222` `h[hi].inputs[0] <== tag` | `BatchAppendSat.node_def` via `merkleNode` |
-| `:225-240` `prod[pi] <== s[d][r] * node[OFF[d] + src]` with the frontier and empty-subtree terms | `BatchAppendSat.node_def` via `batchChild` |
-| `:242` `node[OFF[d + 1] + j] <== h[hi].out` | `BatchAppendSat.node_def` |
-| `:247` `new_root <== node[OFF[DEPTH]]` | `BatchAppendSat.new_root_def` |
+| `:53-66` `BATCH_WINDOW` | `batchWindow`; `batchWindow_eq_circom` against the literal clamp |
+| `:71-80` `BATCH_SRC`, `p = 4 * j + k - r` | `batchSrc`; `batchSrc_eq_circom` against the signed `ℤ` computation |
+| `:84-100` `BATCH_NPROD` | none needed — it only sizes `prod`, and `assert(pi == NPROD)` fails compilation on a mismatch |
+| `:111` `assert(EMPTY_SUBTREE(0) == 0)` | `ZerosCoherent`, first conjunct — a hypothesis, see exception 1 |
+| `:115` `assert(MAX_L <= 4 ** DEPTH)` | none needed — a compile-time guard on the shape. No result uses it: `batchAppend_capacity` bounds the run by the tree from the `last_idx_bits` range check at any `MAX_L` |
+| `:125` `assert((1 << COUNT_BITS) == MAX_L)` | `BatchShape.pow_count` |
+| `:126-127` `Num2Bits(COUNT_BITS)(actual_count - 1)` | `BatchAppendSat.count_bits` |
+| `:129-135` `LessThan(COUNT_BITS+1)(k, actual_count)` | `BatchAppendSat.active_def` |
+| `:140-141` `Num2Bits(BITS)(start_index)` | `BatchAppendSat.index_bits` |
+| `:142-143` `last_idx_bits.in <== start_index + actual_count - 1` | `BatchAppendSat.last_idx_bits` |
+| `:149` `bb[d] <== idx_bits.out[2 * d] * idx_bits.out[2 * d + 1]` | `BatchAppendSat.bb_def` / `bitPairs` |
+| `:150-153` `s[d][0..3]` over the bits and `bb` | `batchSel`, `appendSel` |
+| `:157-165` `(1 - read) * frontier_in[d][k] === 0` | `BatchAppendSat.frontier_pin` / `batchRead` |
+| `:171` `old_node[0] <== 0` | `BatchAppendSat.old_base` |
+| `:174` `old_h[d].inputs[0] <== tag` | `BatchAppendSat.old_def` via `merkleNode` |
+| `:175-183` `old_prod[d][k] <== s[d][k] * old_node[d]` with the frontier and empty-subtree terms | `BatchAppendSat.old_def` via `oldChild` |
+| `:186` `old_node[d + 1] <== old_h[d].out` | `BatchAppendSat.old_def` |
+| `:188` `old_root <== old_node[DEPTH]` | `BatchAppendSat.old_root_def` |
+| `:199` `assert(W[DEPTH] == 1)` | `batchWindow_top` |
+| `:203` `node[OFF[0] + t] <== active[t] * leaves[t]` | `BatchAppendSat.leaf_def` |
+| `:218` `h[hi].inputs[0] <== tag` | `BatchAppendSat.node_def` via `merkleNode` |
+| `:221-236` `prod[pi] <== s[d][r] * node[OFF[d] + src]` with the frontier and empty-subtree terms | `BatchAppendSat.node_def` via `batchChild` |
+| `:238` `node[OFF[d + 1] + j] <== h[hi].out` | `BatchAppendSat.node_def` |
+| `:243` `new_root <== node[OFF[DEPTH]]` | `BatchAppendSat.new_root_def` |
 
 `oldChild` and `batchChild` state the children exactly as the circuit sums them: the frontier
 slot as a linear term, then one term per digit — a selector product with a window node or the
@@ -285,30 +285,30 @@ constraint system, not a signal, so it is an argument of `BatchSat` rather than 
 
 | circom | Lean |
 |---|---|
-| `:126` `is_deposit*(1-is_deposit) === 0` | `BatchSat.deposit_bit` |
-| `:127` `(1-is_deposit)*leaf_asset === 0` | `BatchSat.spend_zero_asset` |
-| `:128` `(1-is_deposit)*leaf_public_in === 0` | `BatchSat.spend_zero_public_in` |
-| `:143-144` `rng_asset = RangeCheck64(leaf_asset)` | `BatchSat.asset_range` |
-| `:146-147` `rng_public_in = RangeCheck64(leaf_public_in)` | `BatchSat.public_in_range` |
-| `:149-152` `dep_cm = NoteCommitment(leaf_asset, leaf_public_in, cms)` | `BatchSat.dep_cm_def`, with `cms[k]` in the `inner` position |
-| `:154` `dep_delta <== is_deposit * (dep_cm.cm - cms)` | `BatchSat.dep_delta_def` |
-| `:155` `leaves <== cms + dep_delta` | `BatchSat.leaf_def` |
-| `:161-171` `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, `leaves`, `frontier_in` | `BatchSat.append` |
-| `:172` `old_root === append.old_root` | `BatchSat.old_root_def` |
-| `:173` `new_root === append.new_root` | `BatchSat.new_root_def` |
-| `:178` `(1-append.active)*cms === 0` | `BatchSat.pad_cm` |
-| `:179-181` `(1-append.active)*{leaf_asset, leaf_public_in, is_deposit} === 0` | `BatchSat.pad_asset` … `pad_is_deposit` |
-| `:193-194` `leaf_asset_z = IsZero(leaf_asset)` | `BatchSat.asset_isZero` |
-| `:195` step 5 `leaf_asset_z.out * leaf_public_in === 0` | `BatchSat.no_value_under_zero` |
-| `:199-211` `pe = BatchCompress(MAX_L)`, its wiring, and `y <== pe.y` | `BatchSat.compress`, a `PolyEvalSat` over `batchCoeffs`. The coefficient order is `batchPiSlot` / `batchSlotValue`, dumped to `expected/layout-batch-8.txt` by `dump-layout.sh` |
-| `:212` `digest <== pe.digest` | `BatchSat.digest_def`, a `CoeffDigestSat` over the same `batchCoeffs` |
+| `:98` `is_deposit*(1-is_deposit) === 0` | `BatchSat.deposit_bit` |
+| `:99` `(1-is_deposit)*leaf_asset === 0` | `BatchSat.spend_zero_asset` |
+| `:100` `(1-is_deposit)*leaf_public_in === 0` | `BatchSat.spend_zero_public_in` |
+| `:113-114` `rng_asset = RangeCheck64(leaf_asset)` | `BatchSat.asset_range` |
+| `:116-117` `rng_public_in = RangeCheck64(leaf_public_in)` | `BatchSat.public_in_range` |
+| `:119-122` `dep_cm = NoteCommitment(leaf_asset, leaf_public_in, cms)` | `BatchSat.dep_cm_def`, with `cms[k]` in the `inner` position |
+| `:124` `dep_delta <== is_deposit * (dep_cm.cm - cms)` | `BatchSat.dep_delta_def` |
+| `:125` `leaves <== cms + dep_delta` | `BatchSat.leaf_def` |
+| `:131-141` `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, `leaves`, `frontier_in` | `BatchSat.append` |
+| `:142` `old_root === append.old_root` | `BatchSat.old_root_def` |
+| `:143` `new_root === append.new_root` | `BatchSat.new_root_def` |
+| `:148` `(1-append.active)*cms === 0` | `BatchSat.pad_cm` |
+| `:149-151` `(1-append.active)*{leaf_asset, leaf_public_in, is_deposit} === 0` | `BatchSat.pad_asset` … `pad_is_deposit` |
+| `:160-161` `leaf_asset_z = IsZero(leaf_asset)` | `BatchSat.asset_isZero` |
+| `:162` step 5 `leaf_asset_z.out * leaf_public_in === 0` | `BatchSat.no_value_under_zero` |
+| `:166-178` `pe = BatchCompress(MAX_L)`, its wiring, and `y <== pe.y` | `BatchSat.compress`, a `PolyEvalSat` over `batchCoeffs`. The coefficient order is `batchPiSlot` / `batchSlotValue`, dumped to `expected/layout-batch-8.txt` by `dump-layout.sh` |
+| `:179` `digest <== pe.digest` | `BatchSat.digest_def`, a `CoeffDigestSat` over the same `batchCoeffs` |
 
 Two things the previous revision's table had and this one does not: a row marked **absent**
 for a curve-membership check the model could not express, and a split into two structures.
 Both existed because of the deposit value commitment. The deposit binding is a hash now,
 transcribed in full by `dep_cm_def`, `dep_delta_def` and `leaf_def`.
 
-The guard at `:195` is ungated. It reads `IsZero(leaf_asset).out * leaf_public_in === 0` on
+The guard at `:162` is ungated. It reads `IsZero(leaf_asset).out * leaf_public_in === 0` on
 every slot, active or not, deposit or not; `spend_zero_public_in` and `pad_public_in` are
 what make it vacuous off the deposit slots. The model states it ungated too. Gating it in
 the model would add a hypothesis the circuit does not have.
@@ -326,14 +326,14 @@ coefficients. The digest is not one of them and has no line in the dump.
 
 | circom | Lean |
 |---|---|
-| `:19-29` `ivk = Poseidon(TAG_IVK, nsk)` | `deriveIvk` |
-| `:31-40` `nk = Poseidon(TAG_NK, nsk)` | `deriveNk` |
-| `:42-51` `pk = Poseidon(TAG_PK, ivk)` | `derivePk` |
-| `:62-75` `inner = Poseidon(TAG_INNER, owner_pk, rho, rcm)` | `noteInner` |
-| `:93` `packed_av <== asset*2^64 + value` | `packAV` |
-| `:95-100` `cm = Poseidon(TAG_CM, packed_av, inner)` | `noteCommitment` |
-| `:108-119` `rho = Poseidon(TAG_RHO, nf0, index)` | `deriveRho` |
-| `:133-146` `nf = Poseidon(TAG_NF, nk, rho, cm)` | `nullifierOf` |
+| `:14-24` `ivk = Poseidon(TAG_IVK, nsk)` | `deriveIvk` |
+| `:26-35` `nk = Poseidon(TAG_NK, nsk)` | `deriveNk` |
+| `:37-46` `pk = Poseidon(TAG_PK, ivk)` | `derivePk` |
+| `:53-66` `inner = Poseidon(TAG_INNER, owner_pk, rho, rcm)` | `noteInner` |
+| `:81` `packed_av <== asset*2^64 + value` | `packAV` |
+| `:83-88` `cm = Poseidon(TAG_CM, packed_av, inner)` | `noteCommitment` |
+| `:96-107` `rho = Poseidon(TAG_RHO, nf0, index)` | `deriveRho` |
+| `:118-131` `nf = Poseidon(TAG_NF, nk, rho, cm)` | `nullifierOf` |
 
 `noteCommitment` takes an `inner`, not `(pk, rho, rcm)`, because that is the template's
 interface and `tree_update_batch.circom` instantiates it with a word that is not computed
@@ -374,20 +374,20 @@ order, each field's doc comment citing the source line it mirrors.
 
 | circom | Lean |
 |---|---|
-| `:35-36` `z_nz = IsZero(z)` | `PolyEvalSat.z_isZero` |
-| `:37` `z_nz.out === 0` | `PolyEvalSat.z_nonzero` |
-| `:40` `acc[0] <== 0` | `PolyEvalSat.base` |
-| `:41-43` Horner step | `PolyEvalSat.step` |
-| `:44` `y <== acc[N]` | `PolyEvalSat.result` |
-| `:68-84` `h[b] = Poseidon(5)`, tag or previous output, four words zero-padded | `CoeffDigestSat.block_zero` / `block_succ`, over `padded` |
-| `:85` `out <== h[BLOCKS - 1].out` | `CoeffDigestSat.out_def` |
-| `:151-163` `prefix[]` fill | `piSlot` + `slotValue` |
-| `:165-169` `dg = CoeffDigest(N)` over `prefix`, `digest <== dg.out` | `TransactSat.digest_def` |
-| `:171-176` `pe = PolyEval(N)` over `prefix`, `y <== pe.y` | `TransactSat.compress`, over `txCoeffs` |
-| `:216-219` `coeffs[0..3]`, the four scalar words | `batchPiSlot` + `batchSlotValue`, indices `0..3` |
-| `:221-236` `cms`, `leaf_asset`, `leaf_public_in`, `is_deposit` blocks | `batchPiSlot` + `batchSlotValue`, the four per-slot arrays |
-| `:238-242` `dg = CoeffDigest(N)` over `coeffs`, `digest <== dg.out` | `BatchSat.digest_def` |
-| `:244-249` `pe = PolyEval(N)` over `coeffs`, `y <== pe.y` | `BatchSat.compress` |
+| `:23-24` `z_nz = IsZero(z)` | `PolyEvalSat.z_isZero` |
+| `:25` `z_nz.out === 0` | `PolyEvalSat.z_nonzero` |
+| `:28` `acc[0] <== 0` | `PolyEvalSat.base` |
+| `:29-31` Horner step | `PolyEvalSat.step` |
+| `:32` `y <== acc[N]` | `PolyEvalSat.result` |
+| `:51-67` `h[b] = Poseidon(5)`, tag or previous output, four words zero-padded | `CoeffDigestSat.block_zero` / `block_succ`, over `padded` |
+| `:68` `out <== h[BLOCKS - 1].out` | `CoeffDigestSat.out_def` |
+| `:121-133` `prefix[]` fill | `piSlot` + `slotValue` |
+| `:135-139` `dg = CoeffDigest(N)` over `prefix`, `digest <== dg.out` | `TransactSat.digest_def` |
+| `:141-146` `pe = PolyEval(N)` over `prefix`, `y <== pe.y` | `TransactSat.compress`, over `txCoeffs` |
+| `:181-184` `coeffs[0..3]`, the four scalar words | `batchPiSlot` + `batchSlotValue`, indices `0..3` |
+| `:186-201` `cms`, `leaf_asset`, `leaf_public_in`, `is_deposit` blocks | `batchPiSlot` + `batchSlotValue`, the four per-slot arrays |
+| `:203-207` `dg = CoeffDigest(N)` over `coeffs`, `digest <== dg.out` | `BatchSat.digest_def` |
+| `:209-214` `pe = PolyEval(N)` over `coeffs`, `y <== pe.y` | `BatchSat.compress` |
 | — the digest is a public output, not a coefficient | **absent by design** — no `PISlot` or `BatchPISlot` constructor; it is the field `digest` of the witness, constrained by `digest_def` |
 | — the address words, clue fields and payload digest are not coefficients | **absent by design** — no `PISlot` constructor; they are challenge words, see § "The direction the table does not have a column for" |
 
@@ -395,22 +395,22 @@ order, each field's doc comment citing the source line it mirrors.
 
 | circom | Lean |
 |---|---|
-| `:76-91` `spent[i] = SpentNote(DEPTH)` and its wiring | `TransactSat.spent_sat` |
-| `:90` `spent[i].root <== merkle_root` | `TransactSat.spent_root` |
-| `:94-95` `in_dz` wiring | `TransactSat.dummy_zero` |
-| `:111` `dummy_acc[0] <== 0` | `TransactSat.dummy_acc_base` |
-| `:112-114` `dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i]` | `TransactSat.dummy_acc_step` |
-| `:115-117` `all_dummy = IsEqual(dummy_acc[N_IN], N_IN)` | `TransactSat.dummy_all_eq` |
-| `:118` `all_dummy.out === 0` | `TransactSat.not_all_dummy` |
-| `:127-130` `out_rho[j] === DeriveRho(nullifier[0], j)` | `TransactSat.rho_derived` |
-| `:132-138` `out_note[j] = OutputNote()` and its wiring | `TransactSat.out_sat` |
-| `:144-145` `rng_pub_asset = RangeCheck64(public_asset_id)` | `TransactSat.pub_asset_range` |
-| `:147-148` `rng_pub_out = RangeCheck64(public_out)` | `TransactSat.pub_out_range` |
-| `:158-159` `pub_out_z = IsZero(public_out)` | `TransactSat.pub_out_isZero` |
-| `:160` `pub_out_z.out * public_asset_id === 0` | `TransactSat.transfer_names_no_asset` |
-| `:163-173` `vbal = PerAssetValueBalance(N_IN, N_OUT)` and its wiring | `TransactSat.value_balance` |
-| `:176-187` `pe = TransactCompressN(N_IN, N_OUT)`, its wiring, and `y <== pe.y` | `TransactSat.compress` |
-| `:188` `digest <== pe.digest` | `TransactSat.digest_def` |
+| `:71-86` `spent[i] = SpentNote(DEPTH)` and its wiring | `TransactSat.spent_sat` |
+| `:85` `spent[i].root <== merkle_root` | `TransactSat.spent_root` |
+| `:89-90` `in_dz` wiring | `TransactSat.dummy_zero` |
+| `:98` `dummy_acc[0] <== 0` | `TransactSat.dummy_acc_base` |
+| `:99-101` `dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i]` | `TransactSat.dummy_acc_step` |
+| `:102-104` `all_dummy = IsEqual(dummy_acc[N_IN], N_IN)` | `TransactSat.dummy_all_eq` |
+| `:105` `all_dummy.out === 0` | `TransactSat.not_all_dummy` |
+| `:114-117` `out_rho[j] === DeriveRho(nullifier[0], j)` | `TransactSat.rho_derived` |
+| `:119-125` `out_note[j] = OutputNote()` and its wiring | `TransactSat.out_sat` |
+| `:131-132` `rng_pub_asset = RangeCheck64(public_asset_id)` | `TransactSat.pub_asset_range` |
+| `:134-135` `rng_pub_out = RangeCheck64(public_out)` | `TransactSat.pub_out_range` |
+| `:142-143` `pub_out_z = IsZero(public_out)` | `TransactSat.pub_out_isZero` |
+| `:144` `pub_out_z.out * public_asset_id === 0` | `TransactSat.transfer_names_no_asset` |
+| `:147-157` `vbal = PerAssetValueBalance(N_IN, N_OUT)` and its wiring | `TransactSat.value_balance` |
+| `:160-171` `pe = TransactCompressN(N_IN, N_OUT)`, its wiring, and `y <== pe.y` | `TransactSat.compress` |
+| `:172` `digest <== pe.digest` | `TransactSat.digest_def` |
 
 ## Defence 2 — witness parity harness
 
@@ -515,7 +515,7 @@ at the width of the template.
 
 Writing it found two things beyond drifted line numbers. `merkle.circom`'s
 `root <== cur[depth]` was cited three lines off, and — the more interesting one — the
-citation form `` `:70-77, 118-119` `` was being read as a single span, silently discarding
+citation form `` `:65-72, 105-106` `` was being read as a single span, silently discarding
 everything after the comma. Several fields that looked cited had no working citation over
 half of what they mirrored. The scanner now parses span lists, and anchors them together.
 

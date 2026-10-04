@@ -4,28 +4,20 @@ import Mathlib.Tactic.Ring
 /-!
 # `src/lib/balance.circom` — range checks and per-asset conservation
 
-Per-asset value conservation, `PerAssetValueBalance` (`src/lib/balance.circom:49`), the
-central soundness result of the circuit.
-
-The transparent bucket sits on the output side only: a transact proof never moves tokens
-in (shielding goes through the deposit escrow and `tree_update_batch.circom`), so the
-equation is
+Per-asset value conservation, `PerAssetValueBalance` (`src/lib/balance.circom:41`). The
+transparent bucket sits on the output side only (a transact proof never moves tokens in),
+so the equation is
 
     Σ in_value[i]·[in_asset[i] = c]
       = Σ out_value[j]·[out_asset[j] = c] + public_out·[public_asset_id = c].
 
-The circuit checks it only for the `N_IN + N_OUT + 1` asset ids that appear in the
-transaction (eleven at the deployed `Transact(11, 4, 6)`).
+The circuit checks it for the `N_IN + N_OUT + 1` asset ids that appear in the transaction;
 `perAssetValueBalance_all_assets` extends that to every asset id in the field.
 
-`perAssetValueBalance_nat` lifts the field equality to `ℕ`, consuming the 64-bit range
-checks: with at most `n + 1` summands below `2^64` per side and `n ≤ 7`, both sides stay
-under `8 · 2^64 = 2^67 < p`, so the field equality is an exact integer equality and cannot
-be forged by wrapping. This is the precondition stated at `src/lib/balance.circom:44-48`;
-removing a `RangeCheck64` upstream removes the hypothesis of this theorem.
-
-Conservation is integer arithmetic over asset ids compared as field elements. There is no
-value commitment and no group argument anywhere in it.
+`perAssetValueBalance_nat` lifts the field equality to `ℕ` using the 64-bit range checks:
+at most `n + 1` summands below `2^64` per side and `n ≤ 7` keep both sides under
+`8 · 2^64 = 2^67 < p`, so the equality cannot be forged by wrapping. This is the
+precondition stated at `src/lib/balance.circom:37-40`.
 -/
 
 namespace Lelantos
@@ -33,7 +25,7 @@ namespace Lelantos
 /-! ## `RangeCheck64` and `DummyZeroValue` -/
 
 /-- `RangeCheck64` — `src/lib/balance.circom:11-15`. A wrapper over `Num2Bits(64)`; `bits`
-is the decomposition's internal `n2b.out` array, which the template no longer exports. -/
+is the decomposition's internal `n2b.out` array, which the template does not export. -/
 def RangeCheck64Sat (v : F) (bits : ℕ → F) : Prop := Num2BitsSat 64 v bits
 
 /-- **Soundness of `RangeCheck64`.** `2^64 < p`, so this is a bound over `ℕ`. -/
@@ -63,19 +55,19 @@ theorem dummyZeroValue_zero {n : ℕ} {dummy value : ℕ → F} (h : DummyZeroVa
 /-! ## `PerAssetValueBalance` -/
 
 /-- The candidate asset set: `{in_asset[*]} ∪ {out_asset[*]} ∪ {public_asset_id}`,
-laid out exactly as `src/lib/balance.circom:57-65` fills `cand[]`. -/
+laid out as `src/lib/balance.circom:49-57` fills `cand[]`. -/
 def candAt (nIn nOut : ℕ) (inA outA : ℕ → F) (pa : F) (c : ℕ) : F :=
   if c < nIn then inA c else if c < nIn + nOut then outA (c - nIn) else pa
 
 /-- Running-sum accumulator, the shape circom uses for `lhs[c][·]` and `rhs[c][·]`
-(`src/lib/balance.circom:81-96`). -/
+(`src/lib/balance.circom:72-87`). -/
 structure AccChainSat (n : ℕ) (init : F) (t acc : ℕ → F) : Prop where
   /-- `lhs[c][0] <== 0`, resp. `rhs[c][0] <== public_out * pub_eq[c].out`. -/
   head : acc 0 = init
   /-- `lhs[c][i+1] <== lhs[c][i] + in_term[c][i]` (resp. `rhs`). -/
   step : ∀ i, i < n → acc (i + 1) = acc i + t i
 
-/-- The chain accumulates exactly the sum of its terms. -/
+/-- The chain accumulates the sum of its terms. -/
 theorem accChain_sound {n : ℕ} {init : F} {t acc : ℕ → F} (h : AccChainSat n init t acc) :
     acc n = init + ∑ i ∈ Finset.range n, t i := by
   obtain ⟨h0, hstep⟩ := h
@@ -87,30 +79,29 @@ theorem accChain_sound {n : ℕ} {init : F} {t acc : ℕ → F} (h : AccChainSat
     ring
 
 /-- The full constraint system of `PerAssetValueBalance(N_IN, N_OUT)` —
-`src/lib/balance.circom:49-101` — including every intermediate signal circom declares. -/
+`src/lib/balance.circom:41-92` — including every intermediate signal circom declares. -/
 structure PerAssetValueBalanceSat (nIn nOut : ℕ) (inA inV outA outV : ℕ → F) (pa po : F)
     (pubInv pubEq : ℕ → F) (inInv inEq outInv outEq : ℕ → ℕ → F)
     (inTerm outTerm lhs rhs : ℕ → ℕ → F) : Prop where
-  /-- `:76-78` — `pub_eq[c] = IsEqual(public_asset_id, cand[c])`. -/
+  /-- `:68-70` — `pub_eq[c] = IsEqual(public_asset_id, cand[c])`. -/
   pubEq_sat : ∀ c, c < nIn + nOut + 1 →
     IsEqualSat pa (candAt nIn nOut inA outA pa c) (pubInv c) (pubEq c)
-  /-- `:85-87` — `in_eq[c][i] = IsEqual(in_asset[i], cand[c])`. -/
+  /-- `:76-78` — `in_eq[c][i] = IsEqual(in_asset[i], cand[c])`. -/
   inEq_sat : ∀ c, c < nIn + nOut + 1 → ∀ i, i < nIn →
     IsEqualSat (inA i) (candAt nIn nOut inA outA pa c) (inInv c i) (inEq c i)
-  /-- `:92-94` — `out_eq[c][j] = IsEqual(out_asset[j], cand[c])`. -/
+  /-- `:83-85` — `out_eq[c][j] = IsEqual(out_asset[j], cand[c])`. -/
   outEq_sat : ∀ c, c < nIn + nOut + 1 → ∀ j, j < nOut →
     IsEqualSat (outA j) (candAt nIn nOut inA outA pa c) (outInv c j) (outEq c j)
-  /-- `:88` — `in_term[c][i] <== in_value[i] * in_eq[c][i].out`. -/
+  /-- `:79` — `in_term[c][i] <== in_value[i] * in_eq[c][i].out`. -/
   inTerm_def : ∀ c, c < nIn + nOut + 1 → ∀ i, i < nIn → inTerm c i = inV i * inEq c i
-  /-- `:95` — `out_term[c][j] <== out_value[j] * out_eq[c][j].out`. -/
+  /-- `:86` — `out_term[c][j] <== out_value[j] * out_eq[c][j].out`. -/
   outTerm_def : ∀ c, c < nIn + nOut + 1 → ∀ j, j < nOut → outTerm c j = outV j * outEq c j
-  /-- `:81, 89` — `lhs[c][0] <== 0`, then a running sum of `in_term`. The transparent
-  bucket contributes nothing to the input side. -/
+  /-- `:72, 80` — `lhs[c][0] <== 0`, then a running sum of `in_term`. -/
   lhs_chain : ∀ c, c < nIn + nOut + 1 → AccChainSat nIn 0 (inTerm c) (lhs c)
-  /-- `:82, 96` — `rhs[c][0] <== public_out * pub_eq[c].out`, then a running sum of
+  /-- `:73, 87` — `rhs[c][0] <== public_out * pub_eq[c].out`, then a running sum of
   `out_term`. -/
   rhs_chain : ∀ c, c < nIn + nOut + 1 → AccChainSat nOut (po * pubEq c) (outTerm c) (rhs c)
-  /-- `:99` — `lhs[c][N_IN] === rhs[c][N_OUT]`. -/
+  /-- `:90` — `lhs[c][N_IN] === rhs[c][N_OUT]`. -/
   balanced : ∀ c, c < nIn + nOut + 1 → lhs c nIn = rhs c nOut
 
 /-- Conservation of a single asset value `a`, stated over `F`: what the spent notes carry
@@ -124,7 +115,7 @@ variable {nIn nOut : ℕ} {inA inV outA outV : ℕ → F} {pa po : F}
   {inTerm outTerm lhs rhs : ℕ → ℕ → F}
 
 /-- Collapse the accumulator chains: the `c`-th constraint is the statement given in the
-header comment at `src/lib/balance.circom:32-33`. -/
+header comment at `src/lib/balance.circom:30-31`. -/
 theorem perAssetValueBalance_at_candidate
     (h : PerAssetValueBalanceSat nIn nOut inA inV outA outV pa po
       pubInv pubEq inInv inEq outInv outEq inTerm outTerm lhs rhs)
@@ -184,11 +175,7 @@ theorem perAssetValueBalance_all_assets
         rw [ind, if_neg (hOutA j (Finset.mem_range.mp hj))]; ring)]
     ring
 
-/-! ### Lifting to `ℕ`
-
-The field equality above is an integer equality only if neither side wraps, which the
-64-bit range checks ensure.
--/
+/-! ### Lifting to `ℕ` -/
 
 /-- Conservation of asset `a`, stated over `ℕ`. -/
 def ConservesAtNat (nIn nOut : ℕ) (inA inV outA outV : ℕ → F) (pa po a : F) : Prop :=
@@ -210,10 +197,8 @@ private theorem sum_le (n : ℕ) (v : ℕ → F) (P : ℕ → Prop) [∀ i, Deci
     _ = n * 2 ^ 64 := by simp
 
 /-- The output side of the balance equation is at most `(n + 1)` terms below `2 ^ 64`: the
-`n` output notes and the transparent bucket.
-
-Stated for arbitrary `n`: the slot count enters only through this bound, so
-`perAssetValueBalance_nat` covers every shape at once. -/
+`n` output notes and the transparent bucket. Stated for arbitrary `n`, so
+`perAssetValueBalance_nat` is not tied to one shape. -/
 private theorem side_le (n : ℕ) (v : ℕ → F) (P : ℕ → Prop) [∀ i, Decidable (P i)]
     (pub : F) (Q : Prop) [Decidable Q]
     (hv : ∀ i, i < n → (v i).val < 2 ^ 64) (hpub : pub.val < 2 ^ 64) :
@@ -246,14 +231,12 @@ private theorem cast_side (n : ℕ) (v : ℕ → F) (P : ℕ → Prop) [∀ i, D
   rw [Nat.cast_add, cast_term, cast_sum_terms]
 
 /-- **Per-asset conservation over `ℕ`.** With every value 64-bit range-checked and at most
-seven input and seven output slots, the field equality is an exact integer equality, so no
-wrap-around forgery is possible.
+seven input and seven output slots, the field equality is an integer equality, so it cannot
+be forged by wrapping.
 
-`≤ 7` is not a property of the circuit; `PerAssetValueBalance` is written for arbitrary
-`N_IN` / `N_OUT`. It is the largest slot count for which the sums stay below `p` using only
-`two_pow_67_lt_p`, which rounds `(n + 1) · 2^64` up to `8 · 2^64`. The deployed
-`Transact(11, 4, 6)` is within it. A wider shape needs only a correspondingly wider bound
-in `Lelantos.Model.Field`. -/
+`≤ 7` is a limit of the proof, not of `PerAssetValueBalance`: it is the largest slot count
+for which `two_pow_67_lt_p` bounds `(n + 1) · 2^64`. The deployed `Transact(11, 4, 6)` is
+within it; a wider shape needs a wider bound in `Lelantos.Model.Field`. -/
 theorem perAssetValueBalance_nat
     (h : PerAssetValueBalanceSat nIn nOut inA inV outA outV pa po
       pubInv pubEq inInv inEq outInv outEq inTerm outTerm lhs rhs)
@@ -264,8 +247,7 @@ theorem perAssetValueBalance_nat
     (a : F) : ConservesAtNat nIn nOut inA inV outA outV pa po a := by
   classical
   have hfield := perAssetValueBalance_all_assets h a
-  -- `(n + 1) · 2^64 ≤ 8 · 2^64 = 2^67 < p` for `n ≤ 7`; the widest instantiated shape has
-  -- `nOut = 6`, so seven terms on the output side with the transparent bucket.
+  -- `(n + 1) · 2^64 ≤ 8 · 2^64 = 2^67 < p` for `n ≤ 7`.
   have hbound : ∀ n : ℕ, n ≤ 7 → (n + 1) * 2 ^ 64 < p := by
     intro n hn
     have : (n + 1) * 2 ^ 64 ≤ 2 ^ 67 := by

@@ -3,16 +3,12 @@ import Lelantos
 /-!
 # Environment-wide axiom guard
 
-`Lelantos.Meta.Assumptions` prints the axiom dependencies of the headline theorems, and
-`lean/scripts/check-axioms.sh` diffs that output against `expected/axioms.txt`; that check
-covers only the theorems listed there.
+Checks every declaration in the `Lelantos` namespace against an allow-list at build time:
+adding an axiom, or admitting a proof (which surfaces as `sorryAx`), fails `lake build`.
+`lean/scripts/check-axioms.sh` covers only the theorems `Lelantos.Meta.Assumptions` lists.
 
-This module checks every declaration in the `Lelantos` namespace against an allow-list at
-build time. Adding an axiom, or admitting a proof (which surfaces as `sorryAx`), fails
-`lake build`.
-
-The allow-list is the trusted base. This file defines what is permitted;
-`Lelantos.Meta.Assumptions` documents each entry. Keep the two in sync.
+The allow-list is the trusted base; `Lelantos.Meta.Assumptions` documents each entry. Keep
+the two in sync.
 -/
 
 open Lean
@@ -28,9 +24,8 @@ by `lean/scripts/check-prime.py`. -/
 private def arithmeticAxioms : List Name :=
   [``Lelantos.p_prime]
 
-/-- The complete trusted base. It contains no hash axiom; `Lelantos.poseidon_not_injective`
-shows that an injectivity axiom would be inconsistent. It contains no curve or gadget
-axiom either: neither circuit has any curve arithmetic left to axiomatise. -/
+/-- The complete trusted base. It contains no hash axiom: `Lelantos.poseidon_not_injective`
+shows that an injectivity axiom would be inconsistent. -/
 def allowed : List Name := leanAxioms ++ arithmeticAxioms
 
 /-- Every declaration this development introduces, excluding compiler-generated ones. -/

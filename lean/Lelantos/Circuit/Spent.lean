@@ -6,34 +6,27 @@ import Lelantos.Gadgets.Balance
 
 `SpentNote(DEPTH)` opens a note against the commitment tree and emits its nullifier. The
 model carries every signal circom declares, including the intermediates, so that the
-fidelity harness can compare them one by one against a real witness.
+fidelity harness can compare them against a real witness.
 
-The tree leaf is the note commitment `cm` itself: there is no leaf hash and no value
-commitment. `tree_update_batch.circom` inserts a spend's `out_cm` as it stands and builds a
-deposit's leaf from its public `(asset, value)` by the same `NoteCommitment`, so opening
-`cm` here pins the note to the `(asset, value)` it was inserted with
-(`Lelantos.batch_deposit_spend_binds`).
+The tree leaf is the note commitment `cm`. `tree_update_batch.circom` inserts a spend's
+`out_cm` as it stands and builds a deposit's leaf from its public `(asset, value)` by the
+same `NoteCommitment`, so opening `cm` here pins the note to the `(asset, value)` it was
+inserted with (`Lelantos.batch_deposit_spend_binds`).
 
-`spentNote_sound` extracts what a **non-dummy** slot proves: ownership (the prover knows
-`nsk`), a non-zero asset id, membership of `cm` under the root, and a correctly formed
-nullifier.
+`spentNote_sound` gives what a non-dummy slot proves: ownership (the prover knows `nsk`), a
+non-zero asset id, membership of `cm` under the root, and a correctly formed nullifier.
+When `is_dummy = 1` the Merkle path is unconstrained, `pk` need not derive from `nsk`,
+`asset_id` may be zero, and the slot still emits a prover-chosen `nullifier`.
 
-The dummy branch yields less. When `is_dummy = 1`:
+On every slot, dummy or not, `value` and `asset_id` are 64-bit (`spentNote_valueRange`,
+`spentNote_assetRange`), `cm` is the commitment of the slot's own fields, and the nullifier
+is derived from it. The asset bound is unconditional because the packing inside
+`NoteCommitment` is injective only under both bounds.
 
-* the Merkle path is unconstrained,
-* `pk` need not derive from `nsk`,
-* `asset_id` may be zero,
-* and the slot still emits a prover-chosen `nullifier`.
-
-What holds on **every** slot, dummy or not: `value` and `asset_id` are 64-bit
-(`spentNote_valueRange`, `spentNote_assetRange`), `cm` is the commitment of the slot's own
-fields, and the nullifier is derived from it. The asset bound is unconditional because the
-packing inside `NoteCommitment` is injective only under both bounds.
-
-`DummyZeroValue` (applied by the caller, `src/lib/transact.circom:73`) makes the dummy
+`DummyZeroValue` (applied by the caller, `src/lib/transact.circom:68`) makes the dummy
 branch safe by forcing `value = 0`, so the slot is neutral for value conservation. The
-prover-chosen nullifier is an obligation on the contract's double-spend set, not a
-modelling artefact; see `dummy_nullifier_unconstrained`.
+prover-chosen nullifier is an obligation on the contract's double-spend set; see
+`dummy_nullifier_unconstrained`.
 -/
 
 namespace Lelantos
@@ -73,12 +66,9 @@ structure SpentSlot (depth : ℕ) where
   mpComputed : F
   mpDiff : F
 
-/-- The constraint system of `SpentNote(depth)`, in source order.
-
-One named field per circom constraint, each citing its source line. `FIDELITY.md`'s
-constraint table is checked against this definition row by row; named fields are used
-because positional projections into a nested conjunction retarget silently when a
-constraint is inserted. -/
+/-- The constraint system of `SpentNote(depth)`, in source order: one named field per circom
+constraint, each citing its source line. `FIDELITY.md`'s constraint table is checked
+against this definition row by row. -/
 structure SpentNoteSat {depth : ℕ} (s : SpentSlot depth) : Prop where
   /-- `src/lib/spent.circom:38-39` — `ivk = Poseidon(TAG_IVK, nsk)`. -/
   ivk_def : s.ivk = deriveIvk s.nsk
@@ -121,8 +111,7 @@ structure SpentReal {depth : ℕ} (s : SpentSlot depth) : Prop where
   commitment : s.cm = noteCm s.assetId s.value s.pk s.rho s.rcm
   /-- The nullifier is the one derived from this note. -/
   nf : s.nullifier = nullifierOf (deriveNk s.nsk) s.rho s.cm
-  /-- Every path index is a valid quaternary digit, which lets `merkleMember_inj` turn
-  `member` into a binding statement rather than a bare existential. -/
+  /-- Every path index is a valid quaternary digit, a hypothesis of `merkleMember_inj`. -/
   pathValid : ∀ d, d < depth → (s.pathIndices d).val < 4
 
 /-- Every spent slot range-checks its value, dummy or not. -/
@@ -140,7 +129,7 @@ theorem spentNote_commitment {depth : ℕ} {s : SpentSlot depth} (h : SpentNoteS
     s.cm = noteCm s.assetId s.value s.pk s.rho s.rcm := by
   rw [h.cm_def, h.inner_def, noteCm]
 
-/-- **Soundness of `SpentNote` on a real slot.** -/
+/-- Soundness of `SpentNote` on a real slot. -/
 theorem spentNote_sound {depth : ℕ} {s : SpentSlot depth}
     (h : SpentNoteSat s) (hreal : s.isDummy = 0) : SpentReal s := by
   have hown : s.pk = pkOfNsk s.nsk := by
@@ -171,7 +160,7 @@ theorem spentNote_isDummy_bit {depth : ℕ} {s : SpentSlot depth} (h : SpentNote
   merkleProofOrDummy_bit h.membership
 
 /-- A dummy slot also emits a nullifier, chosen by the prover: `nsk` and `rho` are
-unconstrained in that branch. Stated explicitly as an obligation. -/
+unconstrained in that branch. -/
 theorem dummy_nullifier_unconstrained {depth : ℕ} {s : SpentSlot depth}
     (h : SpentNoteSat s) : s.nullifier = nullifierOf (deriveNk s.nsk) s.rho s.cm := by
   rw [← h.nf_def, h.nk_def]

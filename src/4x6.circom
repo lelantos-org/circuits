@@ -9,12 +9,6 @@ include "lib/transact.circom";
 // unused output slot is a value-0 note that is still inserted, so every spend
 // consumes N_OUT leaves.
 //
-// Six output slots let a withdrawal's change land on the denomination ladder in
-// one spend: publicOut must itself be a denomination, and five change slots
-// cover most decompositions. Inputs are limited to four because an input slot
-// (DEPTH-level Merkle path, key derivation, nullifier) costs several times an
-// output slot; `just budget` has the measured counts.
-//
 // Challenge preimage that PubInputs.sol :: compress hashes into z; must match
 // that overload word for word:
 //     [ 0]      merkle_root                  coefficient
@@ -32,34 +26,27 @@ include "lib/transact.circom";
 //     [37]      out_aux_digest               challenge only (contract recomputes)
 // Total = 10 + N_IN + 4*N_OUT = 38 words hashed.
 //
-// PolyEval evaluates the 13 "coefficient" words [0..12], a leading run, in that
-// order. Total = 3 + N_IN + N_OUT.
+// PolyEval evaluates the 13 "coefficient" words [0..12] (3 + N_IN + N_OUT) in
+// that order. digest is their Poseidon(5) fold (CoeffDigest in
+// lib/poly_eval.circom) and a public output: the contract hashes the calldata
+// value into z and passes it to the verifier without recomputing it. The
+// verifier takes _pubSignals = [y, digest, z].
 //
-// digest is the Poseidon(5) fold of those 13 words (CoeffDigest in
-// lib/poly_eval.circom) and is a public output of this circuit. The prover
-// writes the same value into calldata; the contract hashes it into z and passes
-// it to the verifier as a public signal. It is not evaluated into y, and the
-// contract never recomputes it.
-//
-// The verifier therefore takes _pubSignals = [y, digest, z].
-//
-// The 24 "challenge only" words are not signals of this circuit and are
-// unconstrained here; hashing them into z binds them to the proof.
-// See src/README.md § 2a.
+// The 24 "challenge only" words are not signals of this circuit; hashing them
+// into z binds them to the proof. See src/README.md § 2a.
 //
 // The struct's calldata prefix is 19 words (1 + 4 + 6 + 2 + 1 + 5).
 // PubInputs.compress re-masks the uint64 and address words at offsets hardcoded
 // in assembly; derive them from this table.
 //
-// Budget: 2^17 FFT domain, so setup uses ptau_17. tree_update_batch(11, 8) is
-// the tighter of the two circuits.
+// Budget: 2^17 FFT domain, so setup uses ptau_17.
 //
-// NOTE: the phase-2 setup for this shape is a single-contributor prototype and
-// is not production-safe.
+// The phase-2 setup for this shape has a single contributor and is not
+// production-safe.
 //
-// Consumer-side checks indexed by input or output must cover the whole shape:
-// nullifier distinctness over all six pairs, and the out_cm cross-binding to
-// tree_update_batch over all six outputs.
+// Consumer-side checks must cover the whole shape: nullifier distinctness over
+// all six pairs, and the out_cm cross-binding to tree_update_batch over all six
+// outputs.
 component main {
     public [ z ]
 } = Transact(11, 4, 6);

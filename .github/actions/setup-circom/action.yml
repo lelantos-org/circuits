@@ -17,8 +17,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # Only consulted on the source-build fallback below, but restoring it is
-    # cheap and saves a full crates.io fetch when that path is taken.
+    # Used only by the source-build fallback below.
     - name: Cache cargo registry + git
       uses: actions/cache@v4
       with:
@@ -62,9 +61,8 @@ runs:
       shell: bash
       run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-    # Fails if a cache entry was restored for the wrong version. The cache key
-    # covers the version, but a stale key would otherwise go unnoticed until a
-    # circuit miscompiled.
+    # Fails if the circom on PATH (possibly restored from cache) is not the
+    # requested version.
     - name: Verify circom
       shell: bash
       env:

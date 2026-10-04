@@ -58,18 +58,16 @@ export function writeJson(file: string, value: unknown): string {
 }
 
 /**
- * Curve, field and tag values repeated in every vector file.
- *
- * Published so the SDK can check agreement on them before comparing derived
- * values, since a mismatch here causes downstream mismatches.
+ * Curve, field and tag values repeated in every vector file, so the SDK can
+ * check agreement on them before comparing derived values.
  */
 export function sharedConstants(P: Poseidon, J: Jubjub) {
     const tree = new MerkleTree(P, DEPTH);
     return {
         bn254Fr: s(BN254_FR),
         babyjubSubgroupOrder: s(BABYJUB_SUBGROUP_ORDER),
-        // The circuits use no curve. Base8 and the subgroup order remain for the
-        // FMD clue, which is computed off-circuit and bound through the challenge.
+        // Base8 and the subgroup order are published for the FMD clue, which is
+        // computed off-circuit and bound through the challenge.
         babyjubBase8: pt(J.base8),
         tags: Object.fromEntries(Object.entries(TAGS).map(([k, v]) => [k, s(v)])),
         // depth+1 entries; also hardcoded as EMPTY_SUBTREE in src/lib/common.circom
@@ -84,11 +82,10 @@ export interface Compression {
      * The Fiat-Shamir preimage: every logical public input, in calldata order.
      * `z = keccak256(abiEncodedChallenge) mod r`.
      *
-     * A superset of `coeffs`: the coefficients, then the digest word, then (for
-     * transact) the address words, the intent hash, the FMD clue triples and the
-     * payload digest. Nothing after the coefficients is evaluated. The circuit
-     * has no signal for the transact-only words; hashing binds them because
-     * changing any word changes `z`, which is a public signal.
+     * The coefficients, then the digest word, then (for transact) the address
+     * words, the intent hash, the FMD clue triples and the payload digest.
+     * Nothing after the coefficients is evaluated. The circuit has no signal
+     * for the transact-only words; they bind through `z`, a public signal.
      */
     challenge: string[];
     abiEncodedChallenge: string;
@@ -99,8 +96,7 @@ export interface Compression {
     coeffs: string[];
     /**
      * `CoeffDigest(coeffs)`: the Poseidon(5) fold the circuit outputs as its
-     * second public signal. Calldata carries it as the word right after the
-     * coefficients; it is hashed into `z` and never evaluated into `y`.
+     * second public signal.
      */
     digest: string;
     zDerivation: "fiat-shamir";

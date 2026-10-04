@@ -1,14 +1,12 @@
 // Note-identity defences against faerie-gold notes.
 //
-// Output rho uniqueness: output rho is forced to
-//   rho = Poseidon(TAG_RHO, nullifier[0], out_index),
-// so two outputs of one transaction cannot share a rho.
+// Output rho is forced to Poseidon(TAG_RHO, nullifier[0], out_index), so two
+// outputs of one transaction cannot share a rho.
 //
-// The nullifier binds cm: output rho is publicly derivable from nullifier[0],
-// and the deposit path (tree_update_batch's cms[]) constrains no rho, so rho
-// alone is not a safe nullifier key. Without cm in the preimage, a dust note
-// sent to a victim's pk with a rho the victim already holds produces a
-// colliding nullifier.
+// The nullifier binds cm: the deposit path (tree_update_batch's cms[])
+// constrains no rho, so without cm in the preimage a dust note sent to a
+// victim's pk with a rho the victim already holds produces a colliding
+// nullifier.
 
 import { expect } from "chai";
 
@@ -60,9 +58,8 @@ describe("transact_4x6 / rho and nullifier binding", function () {
     });
 
     it("FAILS when two outputs share a rho, even with cm rebound", async () => {
-        // Recomputing out_cm[1] against the shared rho keeps the commitment
-        // binding satisfied, leaving DeriveRho as the only constraint that can
-        // reject.
+        // out_cm[1] is recomputed against the shared rho, so the commitment
+        // binding holds and only DeriveRho can reject.
         const { tx, circuit } = ctx;
         const outB = tx.note(75n, ALICE_NSK, 11n);
         const input = tx.spend(tx.twoRealInputs([100n, 50n], ALICE_NSK), [tx.note(75n, ALICE_NSK, 9n), outB]);

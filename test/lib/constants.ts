@@ -1,7 +1,5 @@
-// Circuit dimensions and test-wide literals.
-//
-// Every value mirrors a circom declaration; each comment names the declaration
-// site so a circuit change has a single place to land.
+// Circuit dimensions and test-wide literals. Each dimension mirrors the circom
+// declaration its comment names.
 
 import type { Field } from "../helpers";
 
@@ -19,10 +17,7 @@ export const BATCH_DEPTH = DEPTH;
 
 /**
  * Shielded input slots — `N_IN` in `Transact(11, 4, 6)`, `src/4x6.circom`.
- *
- * The circuit takes exactly this many; a shorter witness fails witness
- * calculation with "Not enough values for input signal". `TxBuilder.build`
- * pads with dummies.
+ * The width is fixed; `TxBuilder.build` pads with dummies.
  */
 export const N_IN = 4;
 
@@ -36,27 +31,23 @@ export const ARITY = 4;
  * Max leaves per batch — the second argument to `TreeUpdateBatch` at the bottom
  * of `src/tree_update_batch.circom`.
  *
- * The minimum valid value: COUNT_BITS below requires a power of two, and a
- * spend emits TRANSACT_OUT = 6 leaves that must fit one batch, so the minimum
- * is 8.
+ * The minimum valid value: COUNT_BITS requires a power of two, and a spend's
+ * TRANSACT_OUT = 6 leaves must fit one batch.
  */
 export const MAX_L = 8;
 
 /**
- * Bits `actual_count - 1` decomposes into — `COUNT_BITS` in the same file. The
- * circuit asserts `1 << COUNT_BITS == MAX_L`. Derived there from MAX_L; mirrored
- * here because the tests build witnesses against it directly.
+ * Bits `actual_count - 1` decomposes into — `COUNT_BITS` in
+ * `src/lib/batch_append.circom`, which asserts `1 << COUNT_BITS == MAX_L`.
  */
 export const COUNT_BITS = 3;
 
 // ===== range bounds the circuit enforces =====
 
-/** The asset_id / value bound; tamper tests set a field to exactly this to trip Num2Bits(64). */
+/** The asset_id / value bound: the smallest value Num2Bits(64) rejects. */
 export const TWO_64 = 1n << 64n;
 
 // ===== named actors =====
-//
-// Named so that "same owner" and "different owner" are visible at the call site.
 
 /** Default spending key for the note owner under test. */
 export const ALICE_NSK: Field = 11n;
@@ -68,8 +59,6 @@ export const BOB_NSK: Field = 22n;
 export const MALLORY_NSK: Field = 12n;
 
 // ===== mocha timeouts =====
-//
-// Three tiers, chosen by what the suite does.
 
 /** No circuit compile: reference-implementation and file-parsing suites. */
 export const TIMEOUT_FAST = 60_000;

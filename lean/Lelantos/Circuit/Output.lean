@@ -6,7 +6,7 @@ import Lelantos.Gadgets.Note
 
 Unlike `SpentNote`: no Merkle proof, no key chain, no dummy branch. `pk` is the recipient's
 key and is unconstrained; the circuit proves nothing about who can later spend the note
-(`src/README.md § 1, "Out of scope"` excludes spend authorization for v1).
+(`src/README.md § 1, "Out of scope"`).
 
 It proves:
 
@@ -15,9 +15,9 @@ It proves:
   id 0 means "no asset";
 * the public `cm` is the commitment of the slot's own five note fields.
 
-`cm` is the leaf `tree_update_batch.circom` inserts for this slot. There is no value
-commitment: the only thing an output publishes is `cm`, and what hides `(asset, value)`
-inside it is `rcm` alone, since an output's `rho` is publicly derivable.
+`cm` is the leaf `tree_update_batch.circom` inserts for this slot and the only thing an
+output publishes. `rcm` alone hides `(asset, value)` inside it, since an output's `rho` is
+publicly derivable.
 -/
 
 namespace Lelantos
@@ -38,8 +38,8 @@ structure OutputSlot where
   assetInv : F
   assetIsZero : F
 
-/-- The constraint system of `OutputNote()`, in source order. Fields are named, as in
-`SpentNoteSat`, so the fidelity table can be checked against them row by row. -/
+/-- The constraint system of `OutputNote()`, in source order, one named field per constraint
+as in `SpentNoteSat`. -/
 structure OutputNoteSat (o : OutputSlot) : Prop where
   /-- `src/lib/output.circom:24-25` — `rng_value`: the value is 64-bit. -/
   value_range : RangeCheck64Sat o.value o.valueBits

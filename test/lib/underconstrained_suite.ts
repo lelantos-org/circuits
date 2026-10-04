@@ -1,14 +1,7 @@
-// Shared scaffolding for the R1CS second-witness suites.
-//
-// `test/fuzz/underconstrained.fuzz.test.ts` (4x6) and
-// `underconstrained_batch.fuzz.test.ts` run the same search over different
-// circuits. Per-circuit parts stay in each suite: which honest witnesses to
-// sweep, how to project a published witness into circom inputs, and which gadget
-// census the detector must see.
-//
-// This module holds the shared parts: loading the two builds, assembling the
-// group sources, and the verdict applied to a finding list, so a change to the
-// verdict (a new severity, a different vacuity guard) applies to both suites.
+// Shared scaffolding for the R1CS second-witness suites: loading the two
+// builds, assembling the group sources, and the verdict applied to a finding
+// list. Each suite supplies its honest witnesses, its projection into circom
+// inputs, and its gadget census.
 
 import { expect } from "chai";
 
@@ -47,8 +40,7 @@ export interface SearchContext {
  * `compileConstraintsOnly` for why a result there carries over to the optimized
  * system a proof binds.
  *
- * The two compiles are separate circom processes writing to separate
- * directories, so they run together.
+ * The two compiles write to separate directories, so they run concurrently.
  */
 export async function loadSearchContext(circuitPath: string): Promise<SearchContext> {
     const [artifacts, o0] = await Promise.all([
@@ -68,13 +60,9 @@ export async function loadSearchContext(circuitPath: string): Promise<SearchCont
 /**
  * Run both witness-level searches over one honest witness and assert the result.
  *
- * Takes the witness vector rather than a bundle, so each suite keeps its own
- * projection into circom inputs.
- *
- * Every finding is re-checked against the whole system by `confirm` before it is
- * judged. The algebra is exact, so a refutation indicates a bug in the search
- * rather than the circuit. It fails the test instead of being dropped from the
- * finding list, since a search that reports nothing is indistinguishable from a
+ * Every finding is first re-checked against the whole system by `confirm`. A
+ * refutation indicates a bug in the search, so it fails the test rather than
+ * being dropped: a search that reports nothing is indistinguishable from a
  * circuit with nothing to report.
  */
 export function assertNoSecondWitness(
@@ -84,8 +72,6 @@ export function assertNoSecondWitness(
 ): Finding[] {
     const { view, symbols, groups } = ctx;
 
-    // Both searches assume `t = 0` is a root of every constraint they examine,
-    // which holds only for a satisfying witness.
     expect(view.firstViolation(witness)).to.equal(
         -1,
         `${label}: the honest witness must satisfy the R1CS before it can be mutated`,
@@ -122,18 +108,15 @@ export function assertNoSecondWitness(
 export interface SearchSuite<T> {
     /** Populated by `before`; reading it earlier throws, see `pendingCtx`. */
     readonly ctx: SearchContext;
-    /** The honest witness vector for `subject`. */
     witnessFor(subject: T): Promise<bigint[]>;
     /** `assertNoSecondWitness` over `subject`'s honest witness. */
     assertNoSecond(label: string, subject: T): Promise<Finding[]>;
 }
 
 /**
- * Register the `before` hook that loads `circuitPath` for the search, and the
- * structural tests, for one suite.
- *
- * `toInput` projects a subject (a transact bundle, a batch witness) to the circom
- * input, so each suite keeps its own witness shape. `minMultiGroups` is passed to
+ * Register the `before` hook that loads `circuitPath`, and the structural
+ * tests, for one suite. `toInput` projects a subject (a transact bundle, a batch
+ * witness) to the circom input; `minMultiGroups` is passed to
  * `registerStructuralTests`.
  */
 export function useSearchSuite<T>(
@@ -170,15 +153,10 @@ export function logBitGroupCensus(ctx: SearchContext): Map<number, number> {
 /**
  * The three witness-independent structural checks, declared for one suite.
  *
- * They depend only on `ctx`, so both fuzz suites share them. The census test is
- * per-suite: the gadgets a circuit contains differ, and pinning them detects a
- * detector that matches nothing.
- *
- * `ctx` is passed as a thunk because `loadSearchContext` runs in `before`, after
- * the `it`s are declared.
- *
- * `minMultiGroups` is the floor for the group search having anything to walk;
- * derive it per circuit rather than copying a number across shapes.
+ * `ctx` is a thunk because `loadSearchContext` runs in `before`, after the
+ * `it`s are declared. `minMultiGroups` is the per-circuit count the
+ * multi-signal groups must exceed for the group search to have anything to
+ * walk.
  */
 export function registerStructuralTests(ctx: () => SearchContext, minMultiGroups: number): void {
     it("no bit decomposition is wide enough to alias mod p", () => {

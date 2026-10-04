@@ -3,14 +3,13 @@ import Lelantos
 /-!
 # The trusted base
 
-Everything this development assumes. The authoritative list is the `#print axioms` output,
-checked against `lean/expected/axioms.txt` by `lean/scripts/check-axioms.sh` in CI.
+Everything this development assumes. The authoritative list is the `#print axioms` output
+for the theorems below, checked against `lean/expected/axioms.txt` by
+`lean/scripts/check-axioms.sh` in CI. Each depends on `p_prime` and Lean's own axioms, or on
+less. `Lelantos.Meta.AxiomGuard` checks every declaration in the namespace at build time and
+rejects any axiom outside the trusted base.
 
-That check covers the theorems named below. `Lelantos.Meta.AxiomGuard` walks every
-declaration in the namespace at build time and rejects any axiom outside the trusted base,
-including axioms reached only through theorems not listed here.
-
-Run `lake env lean Lelantos/Meta/Assumptions.lean` to print the current dependency sets.
+Run `lake env lean Lelantos/Meta/Assumptions.lean` to print the dependency sets.
 
 ## Arithmetic
 
@@ -18,25 +17,20 @@ Run `lake env lean Lelantos/Meta/Assumptions.lean` to print the current dependen
 |---|---|---|
 | `p_prime` | `p` is 254 bits; Mathlib's `norm_num` primality extension is trial-division based and there is no Pocklington tactic | `python3 lean/scripts/check-prime.py` |
 
-The script also checks every size bound (`2^64`, `2^66`, `2^67`, `2^128 < p`) that the
-proofs consume. Those are theorems here, decided by `norm_num`; the script repeats them so
-the constant is cross-checked outside Lean.
+The script also checks the size bounds the proofs consume (`2^64`, `2^66`, `2^67`,
+`2^128 < p`). Those are theorems here, by `norm_num`; the script cross-checks the constant
+outside Lean.
 
 ## Cryptographic
 
-None. Neither circuit contains curve arithmetic, so there is no group law, no
-scalar-multiplication gadget and no generator to axiomatise. The only cryptographic object
-is Poseidon, and it is not an axiom either — see below.
+None. The only cryptographic object is Poseidon, and it is not an axiom (see below).
+`propext`, `Classical.choice` and `Quot.sound` are Lean's own.
 
-`propext`, `Classical.choice` and `Quot.sound` are Lean's own; they are not assumptions
-about the circuit.
-
-## Poseidon is not in that table
+## Poseidon
 
 There is no hash axiom. `Function.Injective poseidon` is refutable
-(`Lelantos.poseidon_not_injective`), so assuming it makes the development inconsistent and
-every theorem, `transact_sound` included, vacuous. An axiom asserting
-`Function.Injective poseidon` must be removed, not added to the expectation.
+(`Lelantos.poseidon_not_injective`), so an axiom asserting it would make every theorem
+vacuous; it must be removed, not added to the expectation.
 
 Collision resistance is an explicit hypothesis `¬ PoseidonCollision` on the theorems that
 need it, and `Lelantos.poseidon_collision` proves that hypothesis unsatisfiable. So
@@ -44,14 +38,13 @@ need it, and `Lelantos.poseidon_collision` proves that hypothesis unsatisfiable.
 `txCoeffs_determined_by_digest`, `transact_calldata_binding`,
 `batchCoeffs_determined_by_digest`, `batch_calldata_binding`,
 `batch_deposit_opening_unique`, `batch_new_root_determined` and `Lelantos.TxBinding` are
-assumed rather than proved: they carry no axiom because they
-carry the assumption in their statement. A non-vacuous treatment needs a concrete-security
-formulation (explicit adversary, advantage bound) and is out of scope; `lean/README.md`
-lists it under what is not proved.
+assumed rather than proved: they carry the assumption in their statement and no axiom. A
+non-vacuous treatment needs a concrete-security formulation (explicit adversary, advantage
+bound) and is out of scope (`lean/README.md`).
 
 `transact_sound`, conservation, the range checks and `PolyEval` are independent of it.
 
-## What the binding of calldata assumes, and what is in no statement
+## Calldata binding
 
 Both circuits output `(y, digest, z)`. The contract reads the digest word `d` from calldata,
 derives `z = keccak(coefficients, d, challenge-only words) mod r`, computes `y` over the
@@ -59,55 +52,35 @@ calldata coefficients, and verifies against `(y, d, z)`. That a proof verifies o
 calldata its witness describes is a commit-then-challenge Fiat-Shamir argument with two
 assumptions:
 
-* **Poseidon(5) is collision resistant.** This is the † hypothesis, `¬ PoseidonCollision`,
-  carried in the statement of `digest_inj`, `transact_calldata_binding`,
-  `txCoeffs_determined_by_digest`, `batch_calldata_binding` and
-  `batchCoeffs_determined_by_digest`. It makes the digest a commitment to one coefficient
-  vector.
-* **keccak256 behaves as a random oracle.** This is in no statement here. Nothing in this
+* **Poseidon(5) is collision resistant**: the † hypothesis `¬ PoseidonCollision`, which
+  makes the digest a commitment to one coefficient vector.
+* **keccak256 behaves as a random oracle.** This is in no statement here; nothing in this
   development models keccak256 or a prover.
 
 Proved: the digest is the `CoeffDigest` of the coefficient vector (`transact_digest_public`,
-`batch_digest_public`, unconditional); the digest binds the vector (the † results above);
+`batch_digest_public`, unconditional); the digest binds the vector (the † results);
 distinct vectors agree on at most `N − 1` challenges (`polyEval_binding`,
 `transact_pi_binding`, `batch_pi_binding`, unconditional), 12 for the transact layout and
 35 for the batch layout.
 
-Not formalised: the forking / random-oracle step that turns those two facts into "no forged
-calldata verifies except with negligible probability". It is the standard Fiat-Shamir step
-and it is prose, in `lean/README.md` and in the "Why the compression binds" section of
+Not formalised: the forking / random-oracle step that joins those two facts. It is prose,
+in `lean/README.md` and in the "Why the compression binds" section of
 `Lelantos.Circuit.Transact`.
 
 ## Obligations, not assumptions
 
 `Lelantos.ContractObligations` records what the transact circuit cannot enforce and the
-contract must: nullifier freshness, distinctness of the nullifiers *within* one
-transaction, the three conditions the compression needs (the calldata digest word is passed
-to the verifier unmodified as the `digest` public signal; it is in the keccak preimage of
-`z`; every coefficient is in the keccak preimage of `z`), the `chain_id` /
-`recipient_address` checks, and the aux-digest recomputation.
-`Lelantos.BatchContractObligations` is the same ledger for `tree_update_batch.circom`: the
-same three conditions, plus the live root, the committed leaf count, the payload's leaf
-count, the per-slot `is_deposit` flag and the escrow record behind each leaf. No theorem
-here assumes any field of either; they are listed to separate the circuit's guarantees from
-the system's.
+contract must: nullifier freshness and distinctness within one transaction, the three
+compression conditions (the calldata digest word reaches the verifier unmodified as the
+`digest` public signal; it and every coefficient are in the keccak preimage of `z`), the
+`chain_id` / `recipient_address` checks, and the aux-digest recomputation.
+`Lelantos.BatchContractObligations` does the same for `tree_update_batch.circom`: the three
+conditions, the live root, the committed and payload leaf counts, the per-slot `is_deposit`
+flag and the escrow record behind each leaf. No theorem here assumes any field of either.
 
-Most fields are stubs (`True`, naming a check without stating it) because what they range
-over — a nullifier set, an EVM `block.chainid`, a keccak preimage, the live accumulator, an
-escrow digest — has no counterpart in this development. Three are stated in full:
-`digest_passed_unmodified` on both structures, which relates the witness's public digest to
-the calldata word, and `nullifiers_distinct`, which relates two fields of the same witness.
-A stub is a claim made outside Lean; a stated field is an assumption, not a result.
-
-## Notable non-dependencies
-
-Every theorem listed below depends on `p_prime` and Lean's own axioms, or on less. That
-includes `transact_sound`, which used to reach the curve gadget axioms through the value
-commitments it described; there are none now.
-
-`polyEval_forge`, which describes what a coefficient chosen after the challenge can do,
-reduces to `p_prime` alone: it is one linear equation. `polyEval_binding`,
-`transact_digest_public` and `batch_digest_public` do too.
+Most fields are stubs (`True`, naming a check without stating it). Three are stated in
+full: `digest_passed_unmodified` on both structures and `nullifiers_distinct`. A stub is a
+claim made outside Lean; a stated field is an assumption, not a result.
 -/
 
 -- `src/4x6.circom`: soundness, conservation, the compression.
@@ -172,8 +145,7 @@ reduces to `p_prime` alone: it is one linear equation. `polyEval_binding`,
 #print axioms Lelantos.transfer_naming_asset_rejected
 #print axioms Lelantos.withdraw_asset_zero_rejected
 #print axioms Lelantos.wrong_digest_rejected
--- `src/tree_update_batch.circom`. Everything rests on `p_prime` alone; the † results carry
--- their hash assumption in the statement.
+-- `src/tree_update_batch.circom`.
 #print axioms Lelantos.batch_count_range
 #print axioms Lelantos.batch_active_spec
 #print axioms Lelantos.batch_padding_zero

@@ -30,8 +30,8 @@ runs:
     - name: Install just
       uses: extractions/setup-just@v2
 
-    # No version passed on purpose: the pin lives in setup-circom and nowhere
-    # else. An empty input would override that default rather than fall back to it.
+    # No version is passed: the pin lives in setup-circom, and an empty input
+    # would override that default.
     - name: Setup circom
       if: inputs.circom != 'false'
       uses: ./.github/actions/setup-circom

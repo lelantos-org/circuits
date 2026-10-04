@@ -1,33 +1,23 @@
 // Negative test generation against the constraint system rather than the
-// witness calculator.
-//
-// `test/transact/tamper.test.ts` is the input-level counterpart: change one
-// field of the circom input and require witness generation to fail.
-// `calculateWitness` runs the template body, so any input it accepts becomes a
-// self-consistent witness. A signal the template computes but never constrains
-// is therefore not observable at the input level, yet a malicious prover
-// controls it, because a Groth16 proof binds only the R1CS.
+// witness calculator. A signal the template computes but never constrains is
+// not observable at the input level, yet a malicious prover controls it,
+// because a Groth16 proof binds only the R1CS.
 //
 // This suite starts from an honest witness and edits the witness vector,
-// checking satisfaction with `lib/r1cs.ts` rather than the wasm. Three searches
-// run:
+// checking satisfaction with `lib/r1cs.ts`. Three searches run:
 //
-//   * `sweepSingleSignal` decides exactly, for each of the ~70k witness
-//     entries, whether a second value is admissible on its own.
+//   * `sweepSingleSignal` decides, for each witness entry, whether a second
+//     value is admissible on its own.
 //   * `sweepGroups` covers signals that must move together (a pair moving in
 //     step, a hint and the value it feeds) by walking the null space of the
-//     Jacobian restricted to each gadget and each constraint. The single-signal
-//     sweep misses these directions because each signal is individually pinned
-//     by the others.
+//     Jacobian restricted to each gadget and each constraint.
 //   * `findBitGroups` rules out the two bit-decomposition bugs (aliasing, free
 //     digits) structurally, over every instance in the circuit.
 //
-// Together they cover overflow/aliasing, missing equality constraints,
-// unconstrained signals, range-check width and paired-signal freedom. They do
-// not cover every underconstraint: the group search holds everything outside a
-// group fixed, so freedom spanning unrelated components is not found, and
-// null-space directions are straight lines, so freedom along a curved variety
-// is not found either. `just picus` decides the general case.
+// Not covered: freedom spanning unrelated components (the group search holds
+// everything outside a group fixed) and freedom along a curved variety
+// (null-space directions are straight lines). `just picus` decides the general
+// case.
 
 import * as fc from "fast-check";
 import { expect } from "chai";
@@ -80,8 +70,7 @@ describe("underconstrained_4x6 [fuzz]", function () {
     });
 
     // An explainer that accepted everything would make every witness-level test
-    // below pass vacuously. This takes findings the explainer accepts, falsifies
-    // only the precondition each rests on, and requires the explainer to refuse.
+    // below pass vacuously.
     it("an explanation is refused once its precondition stops holding", async () => {
         const { view, symbols } = suite.ctx;
         const w = await suite.witnessFor(tx.fullShape());
@@ -109,10 +98,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
 
     // ===== witness-level: both sweeps, over a spread of honest witnesses =====
     //
-    // Which signals are free depends on the witness, not only the circuit: an
-    // `IsZero` hint is free exactly when its input is zero, and a zero or
-    // boundary value can leave an otherwise-pinned signal free. The scenarios
-    // below therefore span the shapes and extremes the circuit admits.
+    // Which signals are free depends on the witness: an `IsZero` hint is free
+    // when its input is zero, and a zero or boundary value can leave an
+    // otherwise-pinned signal free.
 
     it("the fully-occupied shape has no second witness", async () => {
         const findings = await assertNoSecond("fullShape", tx.fullShape());
@@ -124,9 +112,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
         await assertNoSecond("balanced", tx.balanced());
     });
 
-    // One real input and the rest dummy. Not an all-dummy bundle: `Transact`
-    // asserts `all_dummy.out === 0` (src/lib/transact.circom), so an all-dummy
-    // bundle has no honest witness.
+    // One real input and the rest dummy: `Transact` asserts
+    // `all_dummy.out === 0` (src/lib/transact.circom), so an all-dummy bundle
+    // has no honest witness.
     it("the withdraw shape has no second witness", async () => {
         await assertNoSecond("withdraw", tx.spend(
             tx.oneRealOneDummy(1000n, ALICE_NSK),
@@ -135,9 +123,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
         ));
     });
 
-    // A whole note withdrawn: every output is zero-valued, so the public bucket
-    // is the only non-zero term on the right of its candidate row, and
-    // `pub_out_z`, the IsZero behind the bucket constraint, sits at out = 0.
+    // Every output is zero-valued, so the public bucket is the only non-zero
+    // term on the right of its candidate row, and `pub_out_z`, the IsZero
+    // behind the bucket constraint, sits at out = 0.
     it("a shape withdrawing a whole note has no second witness", async () => {
         await assertNoSecond("withdrawAll", tx.spend(
             tx.oneRealOneDummy(1000n, ALICE_NSK),
@@ -146,9 +134,8 @@ describe("underconstrained_4x6 [fuzz]", function () {
         ));
     });
 
-    // Two assets. `PerAssetValueBalance` runs its comparisons per (slot, asset)
-    // pair, so a second asset changes which of them hold and which `IsZero`
-    // hints are free, exercising a different subset of the circuit.
+    // `PerAssetValueBalance` runs its comparisons per (slot, asset) pair, so a
+    // second asset changes which of them hold and which `IsZero` hints are free.
     it("a two-asset shape has no second witness", async () => {
         await assertNoSecond("twoAssets", tx.spend(
             tx.plant([tx.note(100n, ALICE_NSK, 1n, ASSET), tx.note(50n, ALICE_NSK, 2n, ASSET_B)], ALICE_NSK),
@@ -156,18 +143,14 @@ describe("underconstrained_4x6 [fuzz]", function () {
         ));
     });
 
-    // Four assets across every slot, so all eleven candidate rows of
-    // `PerAssetValueBalance` carry a different sum and its ~110 `IsEqual`
-    // comparators are exercised in both directions. In the single- and
-    // two-asset shapes above most of those comparisons are trivially equal or
-    // trivially zero, which is exactly when an `IsZero` hint can be free.
+    // Four assets across every slot, so the `IsEqual` comparators of
+    // `PerAssetValueBalance` are exercised in both directions.
     it("a four-asset shape has no second witness", async () => {
         await assertNoSecond("fourAssets", tx.fullShapeMultiAsset());
     });
 
-    // Range ceilings, where a Num2Bits sits one bit from rejecting: a value and
-    // an asset id at 2^64 - 1. A decomposition with every digit set exercises
-    // constraints the mid-range witnesses never reach.
+    // A value and an asset id at 2^64 - 1: a decomposition with every digit set
+    // exercises constraints the mid-range witnesses do not reach.
     it("a shape at the value and asset-id ceilings has no second witness", async () => {
         const asset = MAX_VALUE;
         await assertNoSecond("ceilings", tx.spend(
@@ -176,7 +159,6 @@ describe("underconstrained_4x6 [fuzz]", function () {
         ));
     });
 
-    // All values zero: a real input of value 0 spending to outputs of value 0.
     // Zero makes products vanish, and a vanishing product can leave a
     // constraint not restricting the signal it pins.
     it("an all-zero-value shape has no second witness", async () => {

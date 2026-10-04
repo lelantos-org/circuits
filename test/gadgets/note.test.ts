@@ -1,18 +1,12 @@
 // Unit tests for `lib/note.circom`: the key hierarchy, the note commitment,
 // output-rho derivation and the nullifier.
 //
-// Two things are pinned here that the full-circuit suites cannot reach.
+// Each compiled derivation is compared against `ref/`, so a TAG_* value edited
+// in only one of `lib/tags.circom` and the reference fails here.
 //
-// First, the domain-separation tags. `lib/tags.circom` carries the TAG_* table
-// and a comment requiring it to stay in sync with the SDK; the only automated
-// check was that vectors built from `ref/tags.ts` verify. Each case below
-// compares a compiled derivation against `ref/`, so a tag edited on one side
-// alone fails here rather than at a consumer.
-//
-// Second, the range obligations. `NoteCommitment` packs asset_id and value into
-// one field element and range-checks neither; the packing is only injective
-// because `SpentNote`, `OutputNote` and `TreeUpdateBatch` apply RangeCheck64 to
-// both first. The aliasing case below shows what the packing does without them.
+// `NoteCommitment` packs asset_id and value into one field element and
+// range-checks neither: the packing is injective only because `SpentNote`,
+// `OutputNote` and `TreeUpdateBatch` apply RangeCheck64 to both.
 
 import { expect } from "chai";
 
@@ -75,10 +69,9 @@ describe("note derivations (keys, commitment, rho, nullifier)", function () {
         }
     });
 
-    // TAG_IVK, TAG_NK and TAG_PK are 4, 9 and 3. If two were equal, or a call
-    // site read the wrong one, the derivations above would still agree with a
-    // reference that shared the mistake — but two of these three values would
-    // coincide, which is what this checks.
+    // If two of TAG_IVK, TAG_NK and TAG_PK were equal, the derivations above
+    // would still agree with a reference sharing the mistake, but two of these
+    // values would coincide.
     it("separates the three derivations by tag, not by arity", async () => {
         for (const nsk of NSKS) {
             const [ivk, nk] = [await ivkOf(nsk), await nkOf(nsk)];
@@ -171,10 +164,8 @@ describe("note derivations (keys, commitment, rho, nullifier)", function () {
         }
     });
 
-    // TAG_CM and TAG_INNER lead their preimages. Arity alone separates most of
-    // the sites, but cm shares arity 3 with DeriveRho and inner shares arity 4
-    // with the nullifier, so those two pairs rest on the tag. With the same
-    // trailing inputs each pair must still differ.
+    // cm shares arity 3 with DeriveRho and inner shares arity 4 with the
+    // nullifier, so those two pairs are separated only by tag.
     it("separates cm from rho, and inner from the nullifier, by tag", async () => {
         const [a, b, c] = [0x111n, 0x222n, 0x333n];
         expect(await out("cm", { asset_id: "0", value: a.toString(), inner: b.toString() }))
@@ -183,14 +174,8 @@ describe("note derivations (keys, commitment, rho, nullifier)", function () {
             .to.not.equal(await out("nf", { nk: a.toString(), rho: b.toString(), cm: c.toString() }));
     });
 
-    // packed_av = asset_id·2^64 + value is injective only for value < 2^64.
-    // The gadget range-checks neither field, so out of range the packing
-    // aliases: (asset, 2^64) and (asset + 1, 0) hash identically. `SpentNote`,
-    // `OutputNote` and `TreeUpdateBatch` apply RangeCheck64 to both fields
-    // beside this template; `gadgets/note_slots.test.ts` and
-    // `batch/deposit_binding.test.ts` show the out-of-range reading rejected
-    // there. Recorded here so the obligation is visible at the gadget, and so a
-    // future caller cannot assume the packing self-checks.
+    // packed_av = asset_id·2^64 + value is injective only for value < 2^64:
+    // (asset, 2^64) and (asset + 1, 0) hash identically.
     it("aliases across the 2^64 boundary without the caller's RangeCheck64", async () => {
         const overflowed = await out("cm", cmInput(7n, POW_2_64, 0x1234n));
         const carried = await out("cm", cmInput(8n, 0n, 0x1234n));
@@ -248,9 +233,8 @@ describe("note derivations (keys, commitment, rho, nullifier)", function () {
             .to.not.equal(await out("nf", nfInput(bob, 5n, 0xabcn)));
     });
 
-    // Nothing in this gadget is range-checked: it is a hash, and the ownership
-    // and membership constraints that make the output meaningful live in
-    // `SpentNote`. Pinned so a reader does not mistake the gadget for the check.
+    // The gadget range-checks nothing; ownership and membership are constrained
+    // in `SpentNote`.
     it("hashes any field elements it is given", async () => {
         await expectAccepts(ctx.circuits.nf, nfInput(1n << 200n, 1n << 201n, 1n << 202n));
     });

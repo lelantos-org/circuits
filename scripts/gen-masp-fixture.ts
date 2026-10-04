@@ -1,29 +1,22 @@
-// MASP-level proof fixture for the contracts repo.
-//
-// The published vectors under `vectors/` cannot drive the pool's entry points:
-// their recipient, payer, relayer and chain id are zero and their aux digest is
-// a stand-in, so `MASP` refuses the request before any proof is checked. This
-// builds one small history the pool can replay and proves each step of it:
+// MASP-level proof fixture for the contracts repo: one small history the pool
+// can replay, with a proof for each step.
 //
 //   flush      one deposit (principal + zero-value fee note) flushed from the
 //              empty tree, with a `tree_update_batch` proof
 //   transfer   a spend of that deposit's note, with a `4x6` proof and the
 //              `tree_update_batch` proof of the six leaves it inserts
-//   withdraw   another spend of the same note from the same tree state, with
-//              a non-zero public output
-//
-// `transfer` and `withdraw` are alternatives: both consume the deposit's
-// nullifier and both extend the tree the flush left.
+//   withdraw   an alternative spend of the same note from the same tree state,
+//              with a non-zero public output
 //
 // The witnesses are deterministic. Groth16 proving is not, so a rerun writes
-// different, equally valid proofs over the same public signals.
+// different proofs over the same public signals.
 //
 // Before writing, every proof is verified against the verification key and its
 // public signals are compared with the `[y, digest, z]` computed here the way
 // `PubInputs.sol` computes them, and each verification key is compared with the
 // Solidity verifier the contracts vendor.
 //
-//   just masp-fixture                     prototype keys, sibling ../contracts
+//   just masp-fixture                     default keys, sibling ../contracts
 //   node scripts/gen-masp-fixture.ts --keys <dir> [--wasm <dir>]
 //        [--contracts <dir>] [--out <file>]
 
@@ -64,9 +57,7 @@ import { ROOT } from "./vectors/common.js";
 // ===== the request the pool is asked to accept =====
 //
 // Mirrored by the contracts' tests: `TestConstants.sol` for the asset id and
-// the addresses, `foundry.toml` for the chain id. None of these is a circuit
-// signal except the asset id; the rest bind through the challenge alone, and
-// the pool checks them against `block.chainid` and `msg.sender`.
+// the addresses, `foundry.toml` for the chain id.
 
 const CHAIN_ID = 31337n;
 /** `TestConstants.ASSET_ID`. */
@@ -130,8 +121,7 @@ function artifacts(name: string, verifierSol: string): Artifacts {
 
 /**
  * The verification key must be the one the Solidity verifier encodes, or the
- * proofs written here verify off-chain and are rejected by the pool. Same
- * comparison as contracts' `gen_proof_fixture.sh`.
+ * proofs written here verify off-chain and are rejected by the pool.
  */
 function assertVkeyMatchesVerifier(a: Artifacts): void {
     const sol = fs.readFileSync(a.verifierSol, "utf8");
@@ -183,8 +173,8 @@ interface Aux {
  * `PubInputs.auxDigest`: `keccak256(abi.encode(Output[])) mod r`, the payloads
  * encoded as a dynamic array of `(uint256, uint256, uint256, uint256, bytes)`.
  *
- * The contract recomputes this word from calldata and hashes it last into the
- * transact challenge, so the proof is over this exact encoding.
+ * The contract recomputes this word from calldata and hashes it into the
+ * transact challenge, so the encoding must match.
  */
 function auxDigest(aux: Aux[]): Field {
     const tuples = aux.map((o) => {
@@ -340,9 +330,8 @@ async function main() {
     };
 
     /**
-     * A spend of the deposit's note against the flushed tree: the transact
-     * proof for a request the pool accepts, and the tree-update proof of the
-     * leaves it inserts.
+     * A spend of the deposit's note against the flushed tree: its transact
+     * proof and the tree-update proof of the leaves it inserts.
      */
     async function spend(what: string, outputs: Note[], publicOut: bigint) {
         const tree = flushedTree();

@@ -27,15 +27,11 @@ jobs:
       - name: Run tests
         run: just test-unit
 
-      # Regenerates vectors/ and diffs against the committed files, so a circuit
-      # or layout change without `just vectors` fails before stale vectors reach
-      # the SDK.
+      # Fails when a circuit or layout change is not accompanied by `just vectors`.
       - name: Check golden vectors are up to date
         run: just vectors-check
 
-      # `contracts/` keeps its own copy of the batch and transact vectors,
-      # because forge cannot read across repositories; this fails when the copies
-      # differ. It skips when ../contracts is not checked out, as on this runner,
-      # and takes effect in a CI that checks out both repositories.
+      # Compares the vector copies committed in ../contracts. Skips when that
+      # repository is not checked out, as on this runner.
       - name: Check consumer vector copies are up to date
         run: just vectors-consumers-check

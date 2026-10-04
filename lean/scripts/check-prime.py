@@ -3,18 +3,12 @@
 
 `Lelantos.p_prime` is an axiom because Mathlib's `norm_num` primality extension uses
 trial division and cannot certify a 254-bit number. This script checks it externally
-and cross-checks the size bounds the proofs consume.
+by a Lucas certificate and cross-checks the size bounds the proofs consume.
 
-A Lucas certificate is checked: the full factorization of `p - 1` must multiply out,
-and a base `a` of multiplicative order exactly `p - 1` is exhibited. This proves `p`
-prime given the primality of the factors, which are certified by trial division when
-small enough and by Miller-Rabin otherwise; the report states the method for each.
-
-The factorization is recorded rather than computed, because trial division of `p - 1` to
-a practical bound leaves a 173-bit composite cofactor. Every recorded factor is
-re-verified on each run, and any certification failure sets a non-zero exit status.
-
-Neither circuit contains curve arithmetic, so there is no subgroup order to check.
+The factorization of `p - 1` is recorded, not computed. Each factor is certified prime
+on every run, by trial division when small enough and by Miller-Rabin otherwise; the
+report states the method for each. Any certification failure sets a non-zero exit
+status.
 
 Run:  python3 lean/scripts/check-prime.py
 """
@@ -88,7 +82,7 @@ def certify_factor(q: int) -> tuple[bool, str]:
 
 
 def lucas_certificate(n: int, factors: list[int]) -> tuple[bool, str]:
-    """Lucas primality test. If the *complete* factorization of `n - 1` is known and some
+    """Lucas primality test. If the complete factorization of `n - 1` is known and some
     base `a` satisfies
 
         a^(n-1) = 1 (mod n)   and   a^((n-1)/q) != 1 (mod n) for every prime q | n-1

@@ -1,11 +1,6 @@
-// Self-test for the underconstrained-signal detectors.
-//
-// `test/fuzz/underconstrained.fuzz.test.ts` reports that `4x6` has no second
-// witness and no bad bit decomposition. A detector that matches nothing produces
-// the same clean report, so each check here runs against a circuit with exactly
-// the defect it targets and must report it. Bit-group matching, for example,
-// must handle circom emitting the weighted sum with negative coefficients, or
-// both checks built on it pass vacuously.
+// Self-test for the underconstrained-signal detectors. A detector that matches
+// nothing produces a clean report, so each check here runs against a circuit
+// with the defect it targets and must report it.
 //
 // The fixtures in `test/fixtures/test_leak_*.circom` are unsound by construction;
 // nothing under `src/` includes them.
@@ -66,7 +61,6 @@ describe("underconstrained generator self-test", function () {
         // The alternate value satisfies the whole system.
         expect(confirm(view, w, onOut[0])).to.equal(-1);
 
-        // An unconstrained public output is never a known-benign hint.
         expect(explain(onOut[0], w, symbols)).to.equal(
             null,
             "no explanation may account for an unconstrained output",
@@ -74,8 +68,7 @@ describe("underconstrained generator self-test", function () {
     });
 
     // Each signal of the pair is pinned while the other holds still, so the unit
-    // sweep must find nothing and the freedom exists only along the direction
-    // where both move. This isolates what the group search adds.
+    // sweep must find nothing; the freedom exists only where both move.
     it("finds a pair of signals that only move together", async () => {
         const { view, symbols, w } = await sweepable("test_leak_paired_signals.circom", { in: "7", x: "5" });
 
@@ -118,8 +111,7 @@ describe("underconstrained generator self-test", function () {
         expect(widest.unconstrainedBits).to.deep.equal([5]);
     });
 
-    // Negative control for the four cases above: the checks report nothing on a
-    // sound circuit.
+    // Negative control for the cases above.
     it("stays quiet on a sound circuit", async () => {
         const bits = await bitGroupsOf("test_merkle_d2.circom");
 

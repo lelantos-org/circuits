@@ -1,27 +1,16 @@
 // R1CS-level access to a compiled circuit.
 //
-// The rest of the suite works through `circom_tester`, which runs only the
-// witness calculator: it takes an input object, computes every intermediate from
-// the template body, and reports `Assert Failed` when a template assert fails.
-// The tamper suites use it; it cannot detect underconstrained signals.
-//
-// A circom template defines two artifacts: the witness generator (`<--`, the
-// assignment order, `assert`) and the constraint system (`===`, `<==`, the
-// R1CS). A proof binds the verifier only to the constraint system. A signal the
-// generator computes but the R1CS does not pin can be chosen freely by a
-// malicious prover, and mutating the input object cannot reveal it, because
-// every input the generator accepts yields a consistent witness by construction.
-//
-// Detecting such signals requires bypassing the generator: take an honest
-// witness vector, change it directly, and check it against the R1CS rather than
-// the template. This module provides the R1CS side; `underconstrained.ts` is
-// the search.
+// `circom_tester` runs only the witness generator (`<--`, the assignment order,
+// `assert`), but a proof binds the verifier only to the constraint system
+// (`===`, `<==`). A signal the generator computes but the R1CS does not pin can
+// be chosen freely by a malicious prover, and mutating the input object cannot
+// reveal it. Detecting one means changing an honest witness vector directly and
+// checking it against the R1CS. This module provides the R1CS side;
+// `underconstrained.ts` is the search.
 //
 // Field elements are plain `bigint` in normal (non-Montgomery) form, as
 // `readR1cs` yields for coefficients and the wasm calculator yields for witness
-// entries. `ffjavascript`'s `F1Field` is not used: the sweep in
-// `underconstrained.ts` runs millions of multiplications and the wrapper's
-// dispatch overhead dominates.
+// entries.
 
 import * as fs from "fs";
 import * as readline from "readline";
@@ -42,13 +31,7 @@ export const fadd = (a: bigint, b: bigint): bigint => mod(a + b);
 export const fsub = (a: bigint, b: bigint): bigint => mod(a - b);
 export const fmul = (a: bigint, b: bigint): bigint => mod(a * b);
 
-/**
- * Multiplicative inverse by the extended Euclidean algorithm.
- *
- * Throws on zero: every caller divides by a quantity it has established is
- * non-zero, so a zero argument is a caller bug, and returning 0 would produce a
- * wrong root.
- */
+/** Multiplicative inverse by the extended Euclidean algorithm. Throws on zero. */
 export function finv(a: bigint): bigint {
     const x = mod(a);
     if (x === 0n) throw new Error("finv: no inverse for 0");
@@ -77,10 +60,9 @@ export type Constraint = [LinearCombination, LinearCombination, LinearCombinatio
  * The witness vector's regions, in the order circom lays them out:
  * `[1, ...outputs, ...public inputs, ...private inputs, ...intermediates]`.
  *
- * The split determines severity. A second witness that differs only in an
- * intermediate proves the same public statement: malleability, not a break. One
- * that differs in an output or a public input proves a different statement
- * under the same proof: a soundness break.
+ * A second witness that differs only in an intermediate proves the same public
+ * statement (malleability). One that differs in an output or a public input
+ * proves a different statement under the same proof (a soundness break).
  */
 export type Region = "constant" | "output" | "publicInput" | "privateInput" | "intermediate";
 
@@ -102,10 +84,9 @@ export interface R1csView {
 /**
  * Read a `.r1cs` and index it.
  *
- * The occurrence index makes a full sweep affordable. Changing one witness entry
- * can only affect constraints that mention it, so re-checking a single-signal
- * mutation costs `deg(signal)` constraint evaluations rather than all ~70k.
- * Summed over every signal, that is one pass over the non-zeros.
+ * Changing one witness entry can only affect constraints that mention it, so
+ * with the occurrence index re-checking a single-signal mutation costs
+ * `deg(signal)` constraint evaluations.
  */
 export async function loadR1cs(r1csPath: string): Promise<R1csView> {
     const r1cs = await readR1cs(r1csPath, {
@@ -177,13 +158,7 @@ export async function loadR1cs(r1csPath: string): Promise<R1csView> {
 
 // ===== symbols =====
 
-/**
- * The `.sym` file, indexed both ways.
- *
- * Findings are produced by index and read by name; the explanations in
- * `explain.ts` go the other way, from a signal's name to a sibling's name to
- * that sibling's value. Both lookups are frequent, so the table provides both.
- */
+/** The `.sym` file, indexed both ways. */
 export interface SymbolTable {
     /** Signal name for a witness index; `(no symbol)` when the label was folded away. */
     nameOf(index: number): string;
@@ -203,12 +178,7 @@ export const NO_SYMBOL = "(no symbol)";
  * label.
  *
  * `varIdx` is -1 for a label the optimizer removed; such labels own no witness
- * entry and are dropped. Among the rest, circom emits at most one name per index
- * for these circuits; if there are more, the first wins, since a finding needs
- * one greppable name rather than an alias set.
- *
- * Streamed line by line: the file is ~11 MB for `4x6`, and reading it whole
- * costs more than the sweep it annotates.
+ * entry and are dropped. If an index has several names, the first wins.
  */
 export async function loadSymbols(symPath: string): Promise<SymbolTable> {
     const byIndex = new Map<number, string>();
@@ -240,10 +210,8 @@ export async function loadSymbols(symPath: string): Promise<SymbolTable> {
  * Collapse array indices in a signal name: `main.vbal.in_eq[0][2].isz.inv` ->
  * `main.vbal.in_eq[*][*].isz.inv`.
  *
- * Findings come in per-slot families, and a report keyed on the family rather
- * than the slot stays stable across witnesses: which slots trip depends on the
- * values (an `IsZero` hint is free exactly when its input is zero), while the
- * family does not.
+ * Which slots of a family trip depends on the witness values; the family does
+ * not, so a report keyed on it is stable across witnesses.
  */
 export function signalFamily(name: string): string {
     return name.replace(/\[\d+\]/g, "[*]");

@@ -2,25 +2,17 @@
 //
 // `BatchAppend` (`lib/batch_append.circom`) rebuilds `old_root` from
 // `frontier_in`, so a relayer cannot pair a real `oldRoot` with a forged
-// frontier. `gadgets/batch_append.test.ts` covers the gadget at depths 2 and 4 over
-// every start; this file drives the full `tree_update_batch` circuit at the
+// frontier. This file drives the full `tree_update_batch` circuit at the
 // production DEPTH over random:
 //   - edge-digit `start_index` patterns (digits ∈ {0, 3}: minimal or maximal
 //     slot fill at each level);
-//   - active-leaf counts k ∈ [1, MAX_L], odd counts included, so every padding
-//     shape is covered alongside the rebuild;
+//   - active-leaf counts k ∈ [1, MAX_L], so every padding shape is covered;
 //   - tamper coordinates (level, slot) over the filled siblings.
 //
 // Property: any perturbation of a filled frontier slot rejects the witness.
-// The contract layer (`MASP._verifyProofs`) consumes a proof of this same
-// circuit, so a rejection here means `verifyProof` also rejects and a tampered
-// batch cannot corrupt the authoritative root.
 //
-// Each fast-check trial builds two production-depth batch witnesses. The
-// prefilled tree behind them reaches ~4^DEPTH leaves, so `buildHonest` uses
-// `MerkleTree.fillBlocks` to build it from a few hash chains; a distinct-leaf
-// fill costs ~40s per trial and exceeds the suite timeout. Run count follows the
-// shared `FUZZ` env (`light` / `medium` / `heavy`).
+// The prefilled tree reaches ~4^DEPTH leaves, so `buildHonest` uses
+// `MerkleTree.fillBlocks` to build it from a few hash chains.
 
 import * as fc from "fast-check";
 
@@ -31,13 +23,8 @@ import { DEPTH, MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
 import { fcParamsFor } from "./arbitraries";
 import { CAPACITY, expectBatchRejects, useBatchCircuit } from "../batch/setup";
 
-// Run count comes from `fcParamsFor("FRONTIER")` at the call site below.
-// `FRONTIER` scales to 0.25x NUM_RUNS in arbitraries.ts; override with
-// `FUZZ_RUNS_FRONTIER=N`.
-
-/// Compose a `start_index` whose quaternary digits are all in {0, 3}, the edge
-/// slot positions at each level. The result is at most 4^DEPTH - 1, so it fits
-/// the circuit's Num2Bits(2·DEPTH).
+/// The `start_index` with the given quaternary digits. At most 4^DEPTH - 1, so
+/// it fits the circuit's Num2Bits(2·DEPTH).
 function startIndexFromEdgeDigits(digits: number[]): number {
     let n = 0;
     for (let lvl = digits.length - 1; lvl >= 0; lvl--) n = n * 4 + digits[lvl];
@@ -58,10 +45,9 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
     const ctx = useBatchCircuit();
 
     it(`any filled-frontier perturbation rejects (random {0,3}-digit start_index, 1..${MAX_L} leaves)`, async () => {
-        // Compose digits and k together so k always fits the remaining capacity,
-        // avoiding a discard when the draw would overflow. At least one digit
-        // must be 3 for `tamperableLevels` to be non-empty; an all-zero draw has
-        // its top level set to 3, still a valid edge-digit pattern.
+        // Digits and k are drawn together so k fits the remaining capacity. At
+        // least one digit must be 3 for `tamperableLevels` to be non-empty, so
+        // an all-zero draw has its top level set to 3.
         const arbDigitsK = fc.array(fc.constantFrom(0, 3), { minLength: DEPTH, maxLength: DEPTH })
             .chain(rawDigits => {
                 const digits = rawDigits.some(d => d === 3) ? rawDigits : (() => {
@@ -71,11 +57,9 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
                 })();
                 const startIndex = startIndexFromEdgeDigits(digits);
                 // The circuit range-checks start_index + k only for active slots
-                // (k < actual_count), so the batch fits exactly when the last
-                // active index stays inside the tree. An all-3 draw puts
-                // startIndex at 4^DEPTH - 1, where the only legal count is 1;
-                // bounding by MAX_L alone would produce an over-capacity batch
-                // and fail the honest-witness assertion.
+                // (k < actual_count), so the batch fits when the last active
+                // index stays inside the tree. An all-3 draw puts startIndex at
+                // 4^DEPTH - 1, where the only legal count is 1.
                 const headroom = Math.min(MAX_L, CAPACITY - startIndex);
                 return fc.integer({ min: 1, max: headroom }).map(k => ({ digits, k }));
             });
@@ -89,10 +73,8 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
             arbTamperLevel,
             // Which of the 3 filled slots at the chosen level to perturb.
             fc.integer({ min: 0, max: 2 }),
-            // isDeposit per active leaf (leaf built from the public amount vs
-            // the word inserted as it stands). Per-leaf rather than per-batch:
-            // every constraint is per-slot with no reference to a neighbour, so
-            // any interleaving of deposit and spend leaves is satisfiable.
+            // isDeposit per leaf. Every constraint is per-slot, so any
+            // interleaving of deposit and spend leaves is satisfiable.
             fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
             async ({ digits, k, level }, slotIdx, depositFlags) => {
                 const startIndex = startIndexFromEdgeDigits(digits);
@@ -104,10 +86,6 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
                 // assertion below is vacuous.
                 await expectAccepts(ctx.circuit, treeUpdateBatchInputJson(honest));
 
-                // At digit == 3 every slot 0..2 holds a filled sibling
-                // (MerkleTree.frontier zeros only `k >= currentSlot`). A bump of
-                // 1 stays inside BN254 Fr, since Poseidon outputs are bounded
-                // well below R/2.
                 const tampered: BatchWitness = {
                     ...honest,
                     frontier: honest.frontier.map(lvl => lvl.slice()),
@@ -115,10 +93,8 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
                 tampered.frontier[level][slotIdx] = tampered.frontier[level][slotIdx] + 1n;
 
                 // No Fiat-Shamir rebind: the frontier is private, so it is in
-                // neither the challenge preimage nor the evaluated prefix (see
-                // `treeUpdateBatchChallenge` and `treeUpdateBatchCoeffs`), and the
-                // only possible failure is `old_root === append.old_root` rather
-                // than a (z, y) mismatch.
+                // neither the challenge preimage nor the evaluated prefix, and
+                // the only possible failure is `old_root === append.old_root`.
                 await expectBatchRejects(
                     ctx.circuit,
                     tampered,
@@ -126,9 +102,8 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
                 );
             },
         ), fcParamsFor("FRONTIER", { examples: [
-            // Boundary digit patterns with tampers at the extremes. The third
-            // element must match the arbitrary above: examples run before any
-            // random draw, so a wrongly shaped example fails first.
+            // Boundary digit patterns with tampers at the extremes. Each example
+            // must match the shape of the arbitraries above.
             [{ digits: Array<number>(DEPTH).fill(3).map((_, i) => i === DEPTH - 1 ? 0 : 3), k: 1, level: 0 }, 0, Array<0 | 1>(MAX_L).fill(1)],
             [{ digits: [...Array<number>(DEPTH - 1).fill(0), 3], k: 3, level: DEPTH - 1 }, 2, Array<0 | 1>(MAX_L).fill(0)],
         ] }));

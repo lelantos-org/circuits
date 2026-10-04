@@ -12,37 +12,34 @@ current node, three siblings, and the one-hot selector produced by `PathIndexSel
     c2 <== s2*cur + (s0+s1)*sib1 + s3*sib2;
     c3 <== s3*cur + (1-s3)*sib2;
 
-`merkleLevel4_sound` shows this arithmetic is the insertion of `cur` at position
-`path_index` into the sibling list (`slots` below) in each of the four cases. If the
-selector were not one-hot the same arithmetic could duplicate `cur` into two slots or drop
-a sibling, so `pathIndexSelectors_sound` is a prerequisite.
+`merkleLevel4_sound`: this arithmetic inserts `cur` at position `path_index` into the
+sibling list (`slots`), given a one-hot selector (`pathIndexSelectors_sound`).
 
 `merkleProofOrDummy_sound`: a slot with `is_dummy = 0` proves membership of its leaf under
 `root`. A slot with `is_dummy = 1` proves nothing, since the path is unconstrained; this is
-sound only because `DummyZeroValue` forces such a slot to carry value `0`, which is an
-obligation on the rest of the system.
+sound only because `DummyZeroValue`, outside this template, forces such a slot to carry
+value `0`.
 -/
 
 namespace Lelantos
 
-/-- Insert `cur` at position `t` into the three siblings, preserving sibling order.
-This is what the slot arithmetic in `MerkleLevel4` computes. -/
+/-- Insert `cur` at position `t` into the three siblings, preserving sibling order. -/
 def slots (t : ℕ) (cur : F) (sib : ℕ → F) : ℕ → F := fun k =>
   if k = t then cur else if k < t then sib k else sib (k - 1)
 
-/-- The constraint system of `MerkleLevel4` — `src/lib/merkle.circom:19-75`. -/
+/-- The constraint system of `MerkleLevel4` — `src/lib/merkle.circom:19-71`. -/
 structure MerkleLevel4Sat (cur : F) (sib : ℕ → F) (idx : F) (b s c : ℕ → F) (out : F) : Prop where
   /-- `:26-27` — the one-hot selector for this level's path index. -/
   selectors : PathIndexSelectorsSat idx b s
-  /-- `:35-39` — `c0 = s0·cur + (1-s0)·sib[0]`. -/
+  /-- `:34-38` — `c0 = s0·cur + (1-s0)·sib[0]`. -/
   c0_def : c 0 = s 0 * cur + (1 - s 0) * sib 0
-  /-- `:42-48` — `c1 = s1·cur + s0·sib[0] + (s2+s3)·sib[1]`. -/
+  /-- `:40-46` — `c1 = s1·cur + s0·sib[0] + (s2+s3)·sib[1]`. -/
   c1_def : c 1 = s 1 * cur + s 0 * sib 0 + (s 2 + s 3) * sib 1
-  /-- `:51-57` — `c2 = s2·cur + (s0+s1)·sib[1] + s3·sib[2]`. -/
+  /-- `:48-54` — `c2 = s2·cur + (s0+s1)·sib[1] + s3·sib[2]`. -/
   c2_def : c 2 = s 2 * cur + (s 0 + s 1) * sib 1 + s 3 * sib 2
-  /-- `:60-64` — `c3 = s3·cur + (1-s3)·sib[2]`. -/
+  /-- `:56-60` — `c3 = s3·cur + (1-s3)·sib[2]`. -/
   c3_def : c 3 = s 3 * cur + (1 - s 3) * sib 2
-  /-- `:66-74` — `out = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
+  /-- `:62-70` — `out = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
   out_def : out = merkleNode c
 
 /-- **Soundness of `MerkleLevel4`.** The slot arithmetic is insertion of `cur` at
@@ -58,8 +55,8 @@ theorem merkleLevel4_sound {cur idx out : F} {sib b s c : ℕ → F}
   have h2 := hone 2 (by norm_num)
   have h3 := hone 3 (by norm_num)
   clear hone hsel
-  -- One case per value of `path_index`. In each, the selector is one-hot, so the four slot
-  -- equations collapse to the corresponding row of the fill table above.
+  -- One case per value of `path_index`: the one-hot selector collapses the four slot
+  -- equations to the corresponding row of the fill table above.
   have key : ∀ k, k < 4 → c k = slots idx.val cur sib k := by
     intro k hk
     interval_cases hidx : idx.val <;> norm_num at h0 h1 h2 h3 <;>
@@ -70,16 +67,16 @@ theorem merkleLevel4_sound {cur idx out : F} {sib b s c : ℕ → F}
   rw [hout, merkleNode, merkleNode, key 0 (by norm_num), key 1 (by norm_num),
     key 2 (by norm_num), key 3 (by norm_num)]
 
-/-- The constraint system of `MerkleRoot(depth)` — `src/lib/merkle.circom:78-99`.
+/-- The constraint system of `MerkleRoot(depth)` — `src/lib/merkle.circom:74-95`.
 `cur` is the chain of intermediate nodes, `pe` / `pi` the path elements and indices. -/
 structure MerkleRootSat (depth : ℕ) (leaf : F) (pe : ℕ → ℕ → F) (pi : ℕ → F)
     (b s c : ℕ → ℕ → F) (cur : ℕ → F) (root : F) : Prop where
-  /-- `:86` — the chain starts at the leaf. -/
+  /-- `:82` — the chain starts at the leaf. -/
   base : cur 0 = leaf
-  /-- `:88-96` — one `MerkleLevel4` per level. -/
+  /-- `:84-92` — one `MerkleLevel4` per level. -/
   level : ∀ d, d < depth →
     MerkleLevel4Sat (cur d) (pe d) (pi d) (b d) (s d) (c d) (cur (d + 1))
-  /-- `:98` — the root is the top of the chain. -/
+  /-- `:94` — the root is the top of the chain. -/
   top : root = cur depth
 
 /-- A leaf sits under a root along a given path: the abstract hash chain, with no
@@ -99,7 +96,7 @@ theorem merkleRoot_sound {depth : ℕ} {leaf root : F} {pe : ℕ → ℕ → F} 
   ⟨⟨curChain, h.base, fun d hd => (merkleLevel4_sound (h.level d hd)).2, h.top⟩,
     fun d hd => (merkleLevel4_sound (h.level d hd)).1⟩
 
-/-- The constraint system of `MerkleProofOrDummy(depth)` — `src/lib/merkle.circom:102-123`:
+/-- The constraint system of `MerkleProofOrDummy(depth)` — `src/lib/merkle.circom:98-119`:
 
     is_dummy * (is_dummy - 1) === 0;
     diff <== MerkleRoot(...).root - root;
@@ -107,19 +104,16 @@ theorem merkleRoot_sound {depth : ℕ} {leaf root : F} {pe : ℕ → ℕ → F} 
 -/
 structure MerkleProofOrDummySat (depth : ℕ) (leaf : F) (pe : ℕ → ℕ → F) (pi : ℕ → F)
     (root isDummy diff computed : F) (b s c : ℕ → ℕ → F) (curChain : ℕ → F) : Prop where
-  /-- `:109` — the dummy flag is boolean. -/
+  /-- `:105` — the dummy flag is boolean. -/
   dummy_bit : IsBit isDummy
-  /-- `:111-118` — the recomputed root. -/
+  /-- `:107-114` — the recomputed root. -/
   recomputed : MerkleRootSat depth leaf pe pi b s c curChain computed
-  /-- `:121` — `diff <== mr.root - root`. -/
+  /-- `:117` — `diff <== mr.root - root`. -/
   diff_def : diff = computed - root
-  /-- `:122` — the difference is forced to zero for real slots only. -/
+  /-- `:118` — the difference is forced to zero for real slots only. -/
   matches_root : (1 - isDummy) * diff = 0
 
-/-- **Soundness of `MerkleProofOrDummy`.** A non-dummy slot proves membership.
-
-The dummy branch is absent from the conclusion: when `is_dummy = 1` nothing about the path
-is constrained, so no membership statement holds. -/
+/-- **Soundness of `MerkleProofOrDummy`.** A non-dummy slot proves membership. -/
 theorem merkleProofOrDummy_sound {depth : ℕ} {leaf root isDummy diff computed : F}
     {pe : ℕ → ℕ → F} {pi : ℕ → F} {b s c : ℕ → ℕ → F} {curChain : ℕ → F}
     (h : MerkleProofOrDummySat depth leaf pe pi root isDummy diff computed b s c curChain)
@@ -133,10 +127,9 @@ theorem merkleProofOrDummy_sound {depth : ℕ} {leaf root isDummy diff computed 
 
 /-! ## Binding
 
-`MerkleMember` alone only states that a hash chain exists, which the witness supplies.
-Membership is binding when the root determines the chain, which requires Poseidon
-collision resistance. That is `merkleMember_inj`, on which the meaning of
-`spentNote_sound`'s `member` field depends.
+`MerkleMember` states only that a hash chain exists. `merkleMember_inj` shows the root
+determines the chain, assuming Poseidon collision resistance; the meaning of
+`spentNote_sound`'s `member` field depends on it.
 -/
 
 /-- Inserting at a fixed position is injective: matching all four slots forces the same
@@ -155,10 +148,7 @@ theorem slots_inj {t : ℕ} (ht : t < 4) {cur cur' : F} {sib sib' : ℕ → F}
     interval_cases k <;> assumption
 
 /-- **Merkle membership is binding.** Two membership proofs at the same position under the
-same root have the same leaf and the same siblings, absent a Poseidon collision.
-
-This strengthens `MerkleMember` from "a chain exists" to "the root commits to this leaf at
-this position". -/
+same root have the same leaf and the same siblings, absent a Poseidon collision. -/
 theorem merkleMember_inj (hnc : ¬ PoseidonCollision)
     {depth : ℕ} {leaf leaf' root : F} {pe pe' : ℕ → ℕ → F} {pi : ℕ → F}
     (hidx : ∀ d, d < depth → (pi d).val < 4)

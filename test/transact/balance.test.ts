@@ -1,8 +1,5 @@
-// Value conservation and dummy / padding slot semantics.
-//
-// The circuit balances per asset id, as integers: for every id present,
-// Σ in_value must equal Σ out_value plus public_out where the public bucket
-// names that id. Each case is a shape that must balance or one that must not.
+// Value conservation and dummy / padding slot semantics. Per asset id,
+// Σ in_value = Σ out_value, plus public_out for the id the public bucket names.
 
 import { expect } from "chai";
 
@@ -36,9 +33,8 @@ describe("transact_4x6 / value balance", function () {
 
     // ===== the transparent bucket =====
     //
-    // `public_out == 0` forces `public_asset_id == 0`: a transaction that
-    // withdraws nothing names no asset, so a shielded transfer does not publish
-    // the id it moves.
+    // `public_out == 0` forces `public_asset_id == 0`, so a shielded transfer
+    // does not publish the id it moves.
 
     it("a transfer names no public asset", async () => {
         const { tx, circuit } = ctx;
@@ -52,8 +48,7 @@ describe("transact_4x6 / value balance", function () {
     });
 
     it("FAILS when a transfer names the asset it moves", async () => {
-        // Balanced: public_out is 0, so the named asset's candidate row is
-        // untouched. Only the bucket constraint rejects.
+        // Balanced, and public_out is 0, so only the bucket constraint rejects.
         const { tx, circuit } = ctx;
         await expectWitnessFails(circuit, tx.spend(
             tx.twoRealInputs([100n, 50n], ALICE_NSK),
@@ -72,8 +67,8 @@ describe("transact_4x6 / value balance", function () {
     });
 
     it("FAILS on a withdrawal under asset id 0", async () => {
-        // The converse of the bucket constraint, which needs no constraint of its
-        // own: no real note carries id 0, so nothing funds a withdrawal there.
+        // Needs no constraint of its own: no real note carries id 0, so nothing
+        // funds the withdrawal.
         const { tx, circuit } = ctx;
         await expectWitnessFails(circuit, tx.spend(
             tx.oneRealOneDummy(500n, ALICE_NSK),
@@ -94,9 +89,6 @@ describe("transact_4x6 / value balance", function () {
     it("FAILS on an all-dummy transaction", async () => {
         // With every slot dummy, every Merkle check is skipped and nothing but
         // the coefficient digest reads `merkle_root`.
-        //
-        // Shielding goes through the deposit escrow, so an all-dummy transact
-        // has nothing to spend and is a no-op; rejecting it removes no valid use.
         const { tx, circuit } = ctx;
         await expectWitnessFails(
             circuit,
@@ -118,10 +110,9 @@ describe("transact_4x6 / value balance", function () {
     });
 
     it("FAILS when dummy input has nonzero value", async () => {
-        // The dummy declares 50 of the spent asset and is re-sealed, so its
-        // nullifier is consistent and the outputs balance against 100 + 50.
-        // DummyZeroValue is the only constraint left to reject: without it a
-        // dummy, which proves no membership, would mint.
+        // The dummy is re-sealed and the outputs balance against 100 + 50, so
+        // only DummyZeroValue rejects: a dummy proves no membership, so a
+        // nonzero value would mint.
         const { tx, circuit } = ctx;
         const scenario = tx.oneRealOneDummy(100n, ALICE_NSK);
         const dummy = scenario.inputs[1];
@@ -137,7 +128,6 @@ describe("transact_4x6 / value balance", function () {
 
     it("FAILS on wrong nsk for given pk", async () => {
         // The note is in the tree; only the claimed spending key is wrong.
-        // pk = DerivePk(nsk) is recomputed in-circuit.
         const { tx, circuit } = ctx;
         const tree = tx.newTree();
         const n = tx.note(100n, ALICE_NSK, 1n);
@@ -165,10 +155,9 @@ describe("transact_4x6 / value balance", function () {
 
     // ===== dummy and padding slot semantics =====
     //
-    // A dummy INPUT bypasses the key and Merkle checks and may carry arbitrary
-    // fields; value = 0 keeps it balance-neutral. A padding OUTPUT is a real
-    // value-0 note, so its commitment is still constrained, and asset_id = 0 is
-    // rejected to prevent minting a ghost note.
+    // A dummy input bypasses the key and Merkle checks and may carry arbitrary
+    // fields; value = 0 keeps it balance-neutral. A padding output is a real
+    // value-0 note: its commitment is constrained and asset_id = 0 is rejected.
 
     it("dummy input with garbage non-zero pk/rho/rcm still accepted (key + Merkle bypassed)", async () => {
         const { tx, circuit } = ctx;
@@ -188,8 +177,6 @@ describe("transact_4x6 / value balance", function () {
     });
 
     it("dummy with arbitrary asset_id accepted (value=0 ⇒ no balance contribution)", async () => {
-        // asset feeds packed_av inside cm; at value 0 its candidate row reads
-        // 0 == 0.
         const { tx, circuit } = ctx;
         const scenario = tx.oneRealOneDummy(100n, ALICE_NSK);
         const dummy = scenario.inputs[1];
@@ -205,8 +192,6 @@ describe("transact_4x6 / value balance", function () {
 
     it("padding output: value=0 note with a different asset accepted", async () => {
         const { tx, circuit } = ctx;
-        // Real value-0 note with a real cm. asset_id must be non-zero; at value 0
-        // the slot is balance-neutral.
         const padding: Note = { asset: 999n, value: 0n, pk: 0n, rho: 0n, rcm: 0n };
         await expectAccepts(circuit, tx.spend(
             tx.oneRealOneDummy(100n, ALICE_NSK),
@@ -269,8 +254,6 @@ describe("transact_4x6 / value balance", function () {
     });
 
     it("FAILS on cross-asset rejection (in=A,A out=B,B same scalar sums)", async () => {
-        // Conservation is per asset id, so matching scalar totals across
-        // different assets must not pass.
         const { tx, circuit } = ctx;
         await expectWitnessFails(circuit, tx.spend(
             tx.twoRealInputs([100n, 50n], ALICE_NSK, ASSET),

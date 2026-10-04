@@ -1,19 +1,10 @@
 // Unit tests for the per-slot bundles: `OutputNote` (lib/output.circom) and
-// `SpentNote` (lib/spent.circom).
+// `SpentNote` (lib/spent.circom), the latter at DEPTH = 2.
 //
-// `transact_4x6` instantiates these N_OUT and N_IN times and adds conservation
-// on top, so a rejection there is attributable to a slot only by elimination,
-// and every case pays for a production-depth tree and a full-circuit witness.
-// Driven directly at DEPTH = 2 a case is a sixteen-leaf tree and a small
-// witness, which is what makes the dummy-bypass branches — the `(1 - is_dummy)`
-// factors that the full-circuit suites can only reach through a padded
-// bundle — worth enumerating.
-//
-// Several cases below assert that a slot ACCEPTS something: the dummy branch
-// drops the pk, membership and asset checks, and nothing in `SpentNote` forces
-// a dummy's value to zero. Those are the obligations `Transact` discharges with
-// `DummyZeroValue` and `all_dummy`, recorded here so a reader of the gadget
-// does not assume the slot is self-contained.
+// A dummy `SpentNote` drops the pk, membership and asset checks and does not
+// force its value to zero. `Transact` discharges those obligations with
+// `DummyZeroValue` and `all_dummy`; without the former a dummy could carry
+// value into the conservation sum while bypassing membership.
 
 import { expect } from "chai";
 
@@ -52,19 +43,16 @@ interface NoteFields {
 const NOTE: NoteFields = { asset: 7n, value: 1000n, rho: 5n, rcm: 6n };
 
 /**
- * `cm` over a packed word the reference refuses to build, for the range-check
- * cases: the commitment is recomputed over the out-of-range field, so the hash
- * equality still holds and the range check is the only thing left to reject.
+ * `cm` over a packed word the reference refuses to build. The hash equality
+ * holds over the out-of-range field, so only the range check can reject.
  */
 function cmOverPacked(P: Poseidon, packed: Field, n: NoteFields, pk: Field): Field {
     return P.hash([TAG_CM, packed, buildInner(P, { pk, rho: n.rho, rcm: n.rcm })]);
 }
 
 /**
- * The signals both templates name identically, as circom reads them.
- *
- * `pk` is taken rather than derived: a spend proves ownership of the committed
- * pk, so several cases below declare one that no `nsk` produces.
+ * The signals both templates name identically, as circom reads them. `pk` is
+ * taken rather than derived, so a case can declare one that no `nsk` produces.
  */
 function noteFieldsJson(n: NoteFields, pk: Field) {
     return {
@@ -136,10 +124,6 @@ describe("OutputNote (one output slot)", function () {
     });
 
     it("FAILS when value reaches 2^64", async () => {
-        // cm is recomputed over the out-of-range value, so the commitment
-        // equality still holds and RangeCheck64 is the only thing left to
-        // reject: `buildNoteCommitment` refuses the value, being bounded like
-        // the circuit, so the packing is done here.
         const { P } = ctx;
         const pk = derivePk(P, ALICE_NSK);
         const input = honest();
@@ -151,8 +135,7 @@ describe("OutputNote (one output slot)", function () {
     });
 
     it("FAILS when asset_id reaches 2^64", async () => {
-        // The same construction on the other operand of the packing. The asset
-        // bound is what keeps (asset, value) -> packed injective from above.
+        // The asset bound keeps (asset, value) -> packed injective from above.
         const { P } = ctx;
         const pk = derivePk(P, ALICE_NSK);
         const input = honest();
@@ -256,9 +239,7 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
 
     // The leaf is cm, so a spend that restates the note's asset or value opens a
     // commitment that is not in the tree. The nullifier is recomputed over the
-    // restated cm in each case, so membership is the only constraint left to
-    // reject: this is the binding that stops a spend from claiming more, or
-    // another asset, than the leaf was inserted for.
+    // restated cm, so membership is the only constraint left to reject.
     for (const [field, restated] of [
         ["value", { ...NOTE, value: NOTE.value + 1n }],
         ["asset", { ...NOTE, asset: NOTE.asset + 1n }],
@@ -320,9 +301,9 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
         });
     });
 
-    // A dummy still emits a real nullifier — that is what makes padding
-    // indistinguishable on chain, and the contract inserts every one of them
-    // into the spent set (src/README.md § 10.10).
+    // A dummy emits a real nullifier, which makes padding indistinguishable on
+    // chain; the contract inserts each one into the spent set
+    // (src/README.md § 10.10).
     it("still binds the nullifier for a dummy slot", async () => {
         const input = honest();
         input.is_dummy = "1";
@@ -367,10 +348,6 @@ describe("SpentNote (one input slot, DEPTH = 2)", function () {
         });
     });
 
-    // The slot does not force a dummy's value to zero: `DummyZeroValue` in
-    // `Transact` does (`transact/balance.test.ts` covers the rejection there).
-    // Without that caller-side constraint a dummy could carry value into the
-    // conservation sum while bypassing membership.
     it("does not itself force a dummy's value to zero", async () => {
         const input = honest();
         input.is_dummy = "1";

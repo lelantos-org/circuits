@@ -1,23 +1,19 @@
 // Fuzzy Message Detection — FMD2, lelantos.fmd.v4 (Poseidon + Legendre symbol).
-//
-// bit = 1 iff the Poseidon output is a quadratic residue in F_r. Tunable
-// false-positive rate p = 2^-gamma; default gamma = 5 => 1/32.
+// False-positive rate p = 2^-gamma; default gamma = 5.
 //
 //   detection key  dk = (x_1..x_gamma)
 //   flag key       fk = (X_1..X_gamma), X_i = B·x_i
-//
-// Both halves are expanded from one root scalar by the SDK (`sdk/src/fmd`);
-// this module covers only the flagging and testing the circuit vectors need.
 //
 // Sender flags for fk:
 //   r <- Z_q*, R = B·r, S_i = r·X_i
 //   bit_i = legendre_bit(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
 //   c_i   = bit_i XOR 1
 //
+// bit_i = 1 iff the Poseidon output is a quadratic residue in F_r.
+//
 // `out_clue_Rx`, `out_clue_Ry` and `out_clue_bits` carry no in-circuit
-// constraints; PolyEval is their only binding. A wrong Legendre symbol or
-// bit-packing order therefore produces witnesses the circuit accepts, and is
-// detectable only through the published vectors.
+// constraints, so an error here is detectable only through the published
+// vectors.
 
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR, type Field, type Point } from "./field.js";
 import { packBits, unpackBits } from "./bytes.js";
@@ -109,19 +105,16 @@ export interface ClueWitness {
     clueBits: Field;
     clueRx: Field;
     clueRy: Field;
-    /** The scalar behind R. The circuit ignores it; the vectors record it. */
+    /** The scalar behind R; the vectors record it. */
     r: Field;
     /** The full clue, for wire-format checks. */
     clue: FmdClue;
 }
 
 /**
- * Deterministic clue source for tests and the vector generator.
- *
- * The clue signals carry no in-circuit constraints, so any well-formed
- * Baby-Jubjub R with correctly derived bits satisfies the circuit. The values are
- * published in `vectors/`, so they must be reproducible: the detection key uses
- * a fixed generator and `r` is counter-driven.
+ * Deterministic clue source for tests and the vector generator. The values are
+ * published in `vectors/`, so they must be reproducible: the detection key is
+ * fixed and `r` is counter-driven.
  */
 export function deterministicClueGen(P: Poseidon, J: Jubjub, gamma = FMD_DEFAULT_GAMMA) {
     const dk = fmdGenDetectionKey(() => 1n, gamma);
@@ -136,8 +129,6 @@ export function deterministicClueGen(P: Poseidon, J: Jubjub, gamma = FMD_DEFAULT
             const r = (counter * 1234567n + 89n) % BABYJUB_SUBGROUP_ORDER;
             const rSafe = r === 0n ? 1n : r;
             const clue = fmdFlag(J, P, fk, rSafe);
-            // `clue.bits` is a packed byte array (ceil(gamma/8) bytes), read back
-            // little-endian into the single field element the slot holds.
             let clueBits = 0n;
             for (let i = 0; i < clue.bits.length; i++) {
                 clueBits |= BigInt(clue.bits[i]) << BigInt(8 * i);
@@ -148,8 +139,7 @@ export function deterministicClueGen(P: Poseidon, J: Jubjub, gamma = FMD_DEFAULT
     };
 }
 
-// Legendre-symbol bit of Poseidon([TAG_FMD_BIT, R.x, R.y, i, S.x, S.y]).
-// Six-input layout, matching the clue-bit derivation; bit = 1 iff QR.
+// bit_i of the file header.
 function sharedBit(P: Poseidon, R: Point, i: number, shared: Point): number {
     const h = P.hash([TAG_FMD_BIT, R[0], R[1], BigInt(i), shared[0], shared[1]]);
     const sym = legendreSymbol(h, BN254_FR);

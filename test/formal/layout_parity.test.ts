@@ -12,25 +12,16 @@ import { layoutDigest } from "../../scripts/vectors/common";
 // (src/lib/poly_eval.circom), `PubInputs.sol :: compress(Transact, aux)`,
 // `test/ref/compress.ts :: flatten`, and `Lelantos.piSlot`
 // (lean/Lelantos/Circuit/Layout.lean). A transposition between any two makes
-// proof verification fail with no diagnostic. PolyEval binding is stated over
-// this layout, so a wrong Lean layout makes `transact_sound`'s compression
-// clause vacuous.
+// proof verification fail with no diagnostic, and a wrong Lean layout makes
+// `transact_sound`'s compression clause vacuous.
 //
 // `lean/expected/layout-4x6.txt` is generated from the Lean definition by
-// `lean/scripts/dump-layout.sh`, which also guards it against drift on the Lean
-// side. This test checks that file against `ref/compress.ts`.
-//
-// `ref/compress.ts :: flatten` is also what `scripts/gen-vectors.ts` uses to
-// produce `vectors/`, which the SDK consumes. The final case below pins the
-// published vector's layout to the same Lean file, giving the chain:
+// `lean/scripts/dump-layout.sh`. This test checks that file against
+// `ref/compress.ts` and against the published vector, which the SDK consumes:
 //
 //   Lelantos.piSlot -> layout-4x6.txt -> ref/flatten -> vectors/*.json -> SDK
 //
-// A Lean layout change therefore fails here, before a vector can be published.
-//
-// The circuit-to-ref link is covered by the PolyEval binding cases in
-// test/transact/binding.test.ts, and by gen-vectors.ts refusing to write when
-// the compiled circuit's `y` disagrees with the reference Horner evaluation.
+// The circuit-to-ref link is covered in test/transact/binding.test.ts.
 
 const LAYOUT_FILE = "lean/expected/layout-4x6.txt";
 
@@ -45,25 +36,17 @@ const COEFF_COUNT = 3 + N_IN + N_OUT;
 // words the circuit has no signal for, the clue triples and the aux digest.
 // The digest is compared by the verifier as a public signal of its own; the
 // rest are bound through `z` alone. None is evaluated into `y`, so all are
-// outside the Lean layout by construction (see `TRANSACT_COEFFS` in
-// PubInputs.sol and `coeffs` in ref/compress.ts).
+// outside the Lean layout.
 const CHALLENGE_WORDS = 10 + N_IN + 4 * N_OUT;
 
 // Distinct sentinel per logical field, so a transposition shows up as a
-// mismatch.
-//
-// Generated from the Lean layout's slot names. The transcription under test is
-// `SENTINEL_INPUT` below, which assigns each sentinel to a field by name;
+// mismatch. `SENTINEL_INPUT` assigns each sentinel to a field by name;
 // `flatten` must reproduce Lean's order from it.
 const S = sentinels(readLines(LAYOUT_FILE), 1000, "layout_parity");
 
 /**
- * Sentinels for the fields that are hashed but not evaluated.
- *
- * Separate from `S.map`, which is derived from the Lean layout; these are the
- * names the Lean layout must not contain. Listed explicitly rather than
- * generated, so moving one into the coefficient vector fails the superset case
- * below.
+ * Sentinels for the fields that are hashed but not evaluated: the names the
+ * Lean layout must not contain.
  */
 const CHALLENGE_ONLY = sentinels(
     [
@@ -78,9 +61,7 @@ const CHALLENGE_ONLY = sentinels(
             Array.from({ length: N_OUT }, (_, i) => `${f} ${i}`),
         ),
     ],
-    // A second family in one test, hence a distinct `base`: these must not
-    // collide with the coefficient sentinels, or a word moving between the two
-    // vectors would go undetected.
+    // A distinct `base`: these must not collide with the coefficient sentinels.
     9000,
     "layout_parity challenge-only",
 );
@@ -91,10 +72,8 @@ const SENTINEL_INPUT = {
     out_cm: S.scalars("outCm", N_OUT),
     public_asset_id: S.at("publicAssetId"),
     public_out: S.at("publicOut"),
-    // Hashed, never evaluated: a sentinel from the other map. This suite pins
-    // where the digest word sits, not its value.
+    // The rest are hashed, never evaluated: sentinels from the other map.
     digest: CHALLENGE_ONLY.at("digest"),
-    // Hashed, never evaluated — hence sentinels from the other map.
     recipient_address: CHALLENGE_ONLY.at("recipient"),
     chain_id: CHALLENGE_ONLY.at("chainId"),
     payer_address: CHALLENGE_ONLY.at("payer"),
@@ -120,8 +99,8 @@ describe("formal model / public-input layout parity", () => {
     it("the challenge preimage is a strict superset of the coefficients", () => {
         // The fields the circuit has no signal for must be hashed and not
         // evaluated. Omitting them from the preimage lets a relayer rewrite the
-        // recipient; including them in the coefficients puts words after the
-        // digest that nothing in the circuit computes.
+        // recipient; as coefficients they are words nothing in the circuit
+        // computes.
         const c = refCoeffs(SENTINEL_INPUT);
         const pre = flatten(SENTINEL_INPUT);
         expect(c.length).to.equal(COEFF_COUNT);
@@ -144,9 +123,9 @@ describe("formal model / public-input layout parity", () => {
 
     it("the digest word is hashed right after the coefficients and is not one of them", () => {
         // Hashed, so the commitment is fixed before `z`; not evaluated, because
-        // the verifier compares it as a public signal of its own. Directly
-        // after the coefficients, because that is where `PubInputs.Transact`
-        // carries it and the contract hashes the struct in order.
+        // the verifier compares it as a public signal of its own. Its position
+        // is where `PubInputs.Transact` carries it: the contract hashes the
+        // struct in order.
         const layout = leanLayout();
         expect(layout, "the Lean coefficient layout must not name the digest").to.not.include("digest");
 
@@ -180,8 +159,8 @@ describe("formal model / public-input layout parity", () => {
         });
     });
 
-    // Carries the ordering across the package boundary; otherwise a published
-    // vector could drift from the Lean model and the SDK would follow the drift.
+    // Otherwise a published vector could drift from the Lean model and the SDK
+    // would follow the drift.
     for (const shape of SHIPPED_SHAPES) {
         it(`the published ${shape} vector carries the Lean layout verbatim`, () => {
             const layout = readLines(`lean/expected/layout-${shape}.txt`);

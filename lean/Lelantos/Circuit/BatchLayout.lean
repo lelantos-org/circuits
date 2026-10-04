@@ -3,26 +3,18 @@ import Lelantos.Circuit.BatchWitness
 /-!
 # The `BatchCompress` public-input layout
 
-`BatchCompress(MAX_L)` (`src/lib/poly_eval.circom:199-250`) evaluates the batch's public
+`BatchCompress(MAX_L)` (`src/lib/poly_eval.circom:164-215`) evaluates the batch's public
 inputs into `y` with the same Horner chain `TransactCompressN` uses, and folds the same
 words into `digest` with the same `CoeffDigest`, so `polyEval_sound`, `polyEval_binding`,
-`coeffDigest_sound` and `digest_inj` cover both. This module pins the order, and its dump is
-the Lean anchor for `test/formal/batch_layout_parity.test.ts`.
+`coeffDigest_sound` and `digest_inj` cover both. This module pins the order, as
+`Lelantos.Circuit.Layout` does for transact. The layout is hand-transcribed; its dump
+(`lean/scripts/dump-layout.sh`) is the Lean anchor for
+`test/formal/batch_layout_parity.test.ts`.
 
-All `4 + 4·MAX_L` batch words are coefficients. Transact evaluates 13 of its 38 challenge
-words: one more is the digest, and the remaining 24 are not signals of `4x6.circom` and
-are bound through the challenge alone. The batch has no challenge-only words: every word
-is a signal of the circuit, so every word is evaluated and digested. Its challenge preimage
-is 37 words at `MAX_L = 8`, the 36 coefficients and the digest word.
-
-The digest is not in this layout. It is a public output computed over these coefficients,
-and is not evaluated into `y`. `new_root` is not used as the commitment, although every
-active word reaches it: it is not injective in the coefficients, since a zero leaf is the
-empty leaf and a run with a trailing zero leaf has the same roots as a shorter run.
-
-Split from the constraint system for the same reason `Lelantos.Circuit.Layout` is: the
-layout is hand-transcribed and dumped by `lean/scripts/dump-layout.sh`, and reviewing it
-needs the signal names, not the proofs.
+All `4 + 4·MAX_L` batch words are coefficients: every word is a signal of the circuit, and
+none is bound through the challenge alone. The challenge preimage is 37 words at
+`MAX_L = 8`, the 36 coefficients and the digest word. The digest is a public output
+computed over the coefficients; it is not in this layout and is not evaluated into `y`.
 -/
 
 namespace Lelantos
@@ -41,14 +33,14 @@ inductive BatchPISlot where
 deriving Repr, DecidableEq, Inhabited
 
 /-- Number of `BatchCompress` coefficients: `4 + 4·MAX_L`
-(`src/lib/poly_eval.circom:200`). At `MAX_L = 8` this is 36. -/
+(`src/lib/poly_eval.circom:165`). At `MAX_L = 8` this is 36. -/
 def batchPiCount (maxL : ℕ) : ℕ := 4 + 4 * maxL
 
 example : batchPiCount 8 = 36 := by norm_num [batchPiCount]
 
 /-- The layout of the `coeffs` assignments: the four scalar words, at
-`src/lib/poly_eval.circom:216-219`, then the four per-slot arrays, at
-`src/lib/poly_eval.circom:221-236`, in the order `cms`, `leaf_asset`, `leaf_public_in`,
+`src/lib/poly_eval.circom:181-184`, then the four per-slot arrays, at
+`src/lib/poly_eval.circom:186-201`, in the order `cms`, `leaf_asset`, `leaf_public_in`,
 `is_deposit`. Single source of truth, as `piSlot` is for the transact shapes. -/
 def batchPiSlot (maxL : ℕ) (i : ℕ) : BatchPISlot :=
   let oCms := 4
@@ -76,7 +68,7 @@ def batchSlotValue {depth maxL : ℕ} (w : BatchSignals depth maxL) : BatchPISlo
   | .isDeposit k => w.isDeposit k
 
 /-- The coefficient vector of the batch circuit: the `coeffs` signal array, which feeds
-both `CoeffDigest` and `PolyEval` (`src/lib/poly_eval.circom:238-247`), so the two cannot
+both `CoeffDigest` and `PolyEval` (`src/lib/poly_eval.circom:203-212`), so the two cannot
 disagree on order. -/
 def batchCoeffs {depth maxL : ℕ} (w : BatchSignals depth maxL) (i : ℕ) : F :=
   batchSlotValue w (batchPiSlot maxL i)

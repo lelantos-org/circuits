@@ -3,12 +3,9 @@
 
 `FIDELITY.md` states that every `===` and `<==` in the transitive closure of
 `src/4x6.circom` and `src/tree_update_batch.circom`, excluding circomlib, appears in
-its tables, with stated exceptions. This script verifies that claim.
-`check-citations.py` checks that each citation resolves; this checks the converse,
-that the citations together reach every constraint-emitting line. An uncited
-constraint may be absent from the model (the "model omits" direction of
-`FIDELITY.md`'s table). Omissions are sound for `transact_sound`, so they are
-recorded rather than forbidden, but every one must be known.
+its tables, with stated exceptions. This script verifies that claim. An uncited
+constraint may be absent from the model; omissions are sound for `transact_sound`, so
+they are recorded rather than forbidden.
 
 ## Coverage classes
 
@@ -16,17 +13,15 @@ A constraint line is **transcribed** when a citation of at most `NARROW` (20) li
 contains it. Citations of that width name one constraint or one contiguous wiring
 block abstracted by a single model field (e.g. `:176-187`, the `pe.<x> <== …` lines
 behind `TransactSat.compress`). Wider citations name a template
-(`merkle.circom:19-72`, `batch_append.circom:107-249`); the model field describes the
-template as a whole and is not evidence for any individual line.
+(`merkle.circom:19-72`, `batch_append.circom:107-249`) and are not evidence for any
+individual line.
 
 The **residue** is every uncited line plus every line reached only by a template-wide
-citation. It is pinned in `expected/coverage.txt` and diffed, as `check-axioms.sh`
-pins the trusted base, so a new untranscribed constraint appears in review to be
-cited or accepted.
+citation. It is pinned in `expected/coverage.txt` and diffed, so a new untranscribed
+constraint appears in review to be cited or accepted.
 
-One part of the circuit is intentionally not covered at all: `EmptySubtreeHashes` is a
-free parameter in Lean. The generated expectation file records it instead of a
-hand-maintained allowlist.
+`EmptySubtreeHashes` is intentionally not covered: it is a free parameter in Lean. The
+expectation file records it.
 
 Run:  python3 lean/scripts/check-coverage.py             # check, from lean/
       python3 lean/scripts/check-coverage.py --update    # accept a new residue
@@ -59,7 +54,7 @@ INCLUDE = re.compile(r'^\s*include\s+"(?P<path>[^"]+)"')
 # its mirror `-->`) and is not counted.
 CONSTRAINT = re.compile(r"===|<==")
 
-# A citation wider than this names a template, not a constraint. See the module docstring.
+# A citation wider than this names a template, not a constraint.
 NARROW = 20
 
 
@@ -116,9 +111,8 @@ def spans_by_width() -> tuple[dict[str, list[tuple[int, int]]],
 def residue() -> tuple[list[str], dict[str, tuple[int, int]]]:
     """The tagged residue lines and per-file (transcribed, total) counts.
 
-    `POINTER` marks a constraint reached only by a template-wide citation. `UNCITED`
-    marks a constraint no citation in `lean/` reaches: either a model field lacks its
-    citation, or the circuit has a constraint the model does not represent.
+    `POINTER` marks a constraint reached only by a template-wide citation; `UNCITED`
+    marks one no citation in `lean/` reaches.
     """
     narrow, wide = spans_by_width()
     lines: list[str] = []

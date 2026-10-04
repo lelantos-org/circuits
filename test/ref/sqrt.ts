@@ -1,7 +1,4 @@
 // Legendre symbols in BN254 Fr, used by the FMD clue-bit derivation.
-//
-// `modPow` uses repeated squaring; direct exponentiation would produce an
-// unbounded intermediate.
 
 import { mod } from "./field.js";
 

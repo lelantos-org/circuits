@@ -1,5 +1,5 @@
-// Domain-separation tags, transcribed from src/lib/tags.circom, which is the
-// source of truth. Values must equal the `TAG_*()` functions there.
+// Domain-separation tags. Values must equal the `TAG_*()` functions in
+// src/lib/tags.circom, the source of truth.
 //
 // | Tag         | Value | Use                                                |
 // |-------------|-------|----------------------------------------------------|
@@ -9,17 +9,16 @@
 // | TAG_IVK     | 4     | ivk  = Poseidon(TAG_IVK, nsk)                       |
 // | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)                 |
 // | TAG_DK      | 6     | dk   = Poseidon(TAG_DK, ivk)         (off-circuit)  |
-// | (retired)   | 7     | was TAG_ASSET; never reuse                          |
+// | (unused)    | 7     | reserved; do not use                                |
 // | TAG_FMD_BIT | 8     | FMD bit derivation, Poseidon(6)      (off-circuit)  |
 // | TAG_NK      | 9     | nk   = Poseidon(TAG_NK, nsk)                        |
-// | (retired)   | 10    | was TAG_LEAF; never reuse                           |
+// | (unused)    | 10    | reserved; do not use                                |
 // | TAG_RHO     | 11    | rho  = Poseidon(TAG_RHO, nullifier[0], out_index)   |
 // | TAG_INNER   | 14    | inner = Poseidon(TAG_INNER, pk, rho, rcm)           |
 // | TAG_DIGEST  | 15    | first block of the coefficient digest, Poseidon(5)  |
 //
 // 12 (TAG_SUB_TOKEN) and 13 (TAG_FMD_EXPAND) are off-circuit and absent from
-// `TAGS`, which mirrors the in-circuit `TAG_*()` functions one-for-one.
-// `TAG_FMD_EXPAND` is exported for the FMD reference implementation.
+// `TAGS`, which mirrors the circom `TAG_*()` functions one-for-one.
 
 export const TAG_CM = 1n;
 export const TAG_NF = 2n;

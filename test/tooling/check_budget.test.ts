@@ -11,14 +11,13 @@ import * as snarkjs from "snarkjs";
 
 const SCRIPT = path.join(CIRCUITS, "scripts", "check-budget.mjs");
 
-// Coverage for the constraint-budget gate, which keeps a per-slot gadget change
-// from pushing a circuit out of its FFT domain: 2^17 for 4x6, 2^16 for
-// tree_update_batch.
+// Coverage for the constraint-budget gate, which keeps each circuit inside its
+// FFT domain.
 //
 // Each case builds a throwaway root laid out the way the script expects
 // (<root>/scripts, <root>/build, <root>/src, <root>/budget.json) and runs the
-// real script against it. The root lives under build/ rather than /tmp so that
-// Node's upward module resolution still finds circuits/node_modules for snarkjs.
+// real script against it. The root lives under build/ so that Node's upward
+// module resolution finds circuits/node_modules for snarkjs.
 describe("check-budget.mjs", function () {
     this.timeout(TIMEOUT_CIRCUIT);
 
@@ -29,9 +28,8 @@ describe("check-budget.mjs", function () {
     /** nConstraints + nPubInputs + nOutputs — what snarkjs sizes the domain from. */
     let sizedSignals: number;
 
-    // Compiles a throwaway circuit rather than reading a production artifact:
-    // the test job never runs the production compile, so depending on one would
-    // make these cases skip in CI.
+    // Compiles a throwaway circuit: the test job does not run the production
+    // compile.
     before(async function () {
         fs.rmSync(SCRATCH, { recursive: true, force: true });
         fs.mkdirSync(SCRATCH, { recursive: true });
@@ -69,8 +67,7 @@ describe("check-budget.mjs", function () {
 
     /**
      * Lay out a fake circuits root. `sourceOffsetMs` shifts the .circom mtime
-     * relative to the r1cs, which is what the staleness check reads: positive
-     * means sources are newer, i.e. the artifact is stale.
+     * relative to the r1cs: positive means the artifact is stale.
      */
     function scaffold(budget: unknown, opts: { sourceOffsetMs?: number; withR1cs?: boolean; testFixture?: boolean } = {}) {
         const { sourceOffsetMs = -1000, withR1cs = true, testFixture = false } = opts;
@@ -130,7 +127,6 @@ describe("check-budget.mjs", function () {
         expect(code).to.equal(1);
     });
 
-    // The primary failure mode the gate guards against.
     it("FAILS when the circuit exceeds its FFT domain", () => {
         scaffold(budgetWith(actualConstraints, 1));
         const { code, out } = run();
@@ -139,8 +135,8 @@ describe("check-budget.mjs", function () {
     });
 
     // snarkjs sizes the FFT from nConstraints + nPubInputs + nOutputs and
-    // requires that sum to be at most domain - 1, so the gate counts public
-    // signals as well. This case and the next pin both sides of that boundary.
+    // requires that sum to be at most domain - 1. This case and the next pin
+    // both sides of that boundary.
     it("counts public signals against the FFT domain", () => {
         scaffold(budgetWith(actualConstraints, sizedSignals));
         const tight = run();

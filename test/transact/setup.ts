@@ -1,10 +1,5 @@
-// Shared wiring for the transact suites: the same builder and the same compiled
-// circuit. `loadCircuit` memoizes, so all suites together cost one compile.
-//
-// This is `lib/harness.ts :: useCircuit` plus the two things only transact
-// needs: the `TxBuilder`, and `projectingTester` applied at load — see that
-// function's docblock in `lib/transact.ts` for why it belongs there and not at
-// each call site.
+// Shared wiring for the transact suites: `lib/harness.ts :: useCircuit` plus a
+// `TxBuilder`, with `projectingTester` (`lib/transact.ts`) applied at load.
 
 import { srcPath } from "../lib/circuit";
 import { pendingCtx, useCircuit, type CircuitCtx } from "../lib/harness";
@@ -23,9 +18,7 @@ export interface TransactCtx extends CircuitCtx {
 
 /**
  * Register the `before` hook and return the context object it populates.
- *
- * Returns a stable object rather than the values themselves, so callers
- * destructure at test time (`const { circuit, tx } = ctx`).
+ * Callers destructure at test time (`const { circuit, tx } = ctx`).
  */
 export function useTransactCircuit(): TransactCtx {
     const ctx = useCircuit(CIRCUIT, projectingTester) as TransactCtx;

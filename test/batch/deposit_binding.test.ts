@@ -1,17 +1,12 @@
-// The per-leaf deposit binding.
-//
-// On a deposit slot the circuit builds the leaf itself,
+// The per-leaf deposit binding. On a deposit slot the circuit builds
 //
 //     leaf = Poseidon(TAG_CM, leaf_asset · 2^64 + leaf_public_in, cms[k])
 //
-// with `cms[k]` the depositor's `inner = Poseidon(TAG_INNER, pk, rho, rcm)`.
-// That is the note commitment SpentNote recomputes, so the leaf can be spent
-// only as `leaf_public_in` units of `leaf_asset`. The binding is the hash plus
-// the two 64-bit range checks that make the packing injective.
+// with `cms[k]` the depositor's `inner = Poseidon(TAG_INNER, pk, rho, rcm)`:
+// the note commitment SpentNote recomputes.
 //
-// Most rejections here set the tampered leaf on the witness before the tree is
-// built, so `new_root` agrees with it and the constraint under test is the only
-// one left to reject. Each has an accepted control beside it.
+// Most rejections set the tampered leaf before the tree is built, so `new_root`
+// agrees with it and only the constraint under test can reject.
 
 import { expect } from "chai";
 import { TAG_CM, buildInner, commit, commitWithInner, type Field } from "../helpers";
@@ -31,10 +26,7 @@ describe("tree_update_batch / deposit binding", function () {
         return buildInner(ctx.P, OWNER);
     }
 
-    /**
-     * A deposit slot declaring `(asset, value)` whose tree leaf is whatever
-     * `leaf` says. Honest when `leaf` is the commitment over the declared pair.
-     */
+    /** A deposit slot declaring `(asset, value)` whose tree leaf is `leaf`. */
     function declared(asset: Field, value: Field, leaf: Field): LeafWitness {
         return { word: inner(), leaf, leafAsset: asset, leafPublicIn: value, isDeposit: 1 };
     }
@@ -47,10 +39,8 @@ describe("tree_update_batch / deposit binding", function () {
     // ===== what an honest deposit inserts =====
 
     it("a deposit leaf is the commitment of the note it declares", async () => {
-        // The cross-circuit pin: the transact circuit opens a spent note as
-        // `commit(asset, value, pk, rho, rcm)` and proves that value is a leaf.
-        // The leaf this circuit builds from the public amount and `inner` must be
-        // that same value, or a deposited note could never be spent.
+        // The leaf must equal the `commit(asset, value, pk, rho, rcm)` the
+        // transact circuit opens, or a deposited note could never be spent.
         const { batch, circuit, P } = ctx;
         const leaf = batch.leafWith({ asset: 7n, val: 150n, ...OWNER, isDeposit: 1 });
         expect(leaf.leaf).to.equal(commit(P, { asset: 7n, value: 150n, ...OWNER }));
@@ -93,8 +83,6 @@ describe("tree_update_batch / deposit binding", function () {
         ["cms (the depositor's inner)", (l: LeafWitness): LeafWitness => ({ ...l, word: l.word + 1n })],
     ] as const) {
         it(`FAILS when ${field} disagrees with the inserted leaf`, async () => {
-            // Splitting a deposit across leaves is not expressible either: each
-            // deposit leaf declares its own amount and is exactly that note.
             const { batch, circuit } = ctx;
             const honest = batch.leafWith({ asset: 7n, val: 100n, ...OWNER, isDeposit: 1 });
             await expectBatchRejects(
@@ -107,12 +95,10 @@ describe("tree_update_batch / deposit binding", function () {
 
     // ===== packing injectivity: the two range checks =====
     //
-    // `asset · 2^64 + value` is injective only while both are below 2^64.
-    // Without the value bound, (7, 2^64) packs to the same word as (8, 0): a
-    // deposit paying 2^64 units of asset 7 on paper would commit a leaf that is
-    // also a zero-value note of asset 8, and the reverse reading is the attack.
-    // Each rejection uses the leaf the circuit would compute for the out-of-range
-    // pair, so the hash and `new_root` agree and only the range check can reject.
+    // `asset · 2^64 + value` is injective only while both are below 2^64:
+    // (7, 2^64) packs to the same word as (8, 0). Each rejection uses the leaf
+    // the circuit would compute for the out-of-range pair, so the hash and
+    // `new_root` agree and only the range check can reject.
 
     it("accepts the in-range reading (asset 8, value 0) of the colliding leaf", async () => {
         const { batch, circuit, P } = ctx;
@@ -153,8 +139,7 @@ describe("tree_update_batch / deposit binding", function () {
     // ===== no value under asset id 0 (step 5) =====
     //
     // SpentNote refuses id 0 on a real note, so a valued leaf there would be
-    // committed and unspendable. The hash pins the asset at every value, so a
-    // zero-value leaf may name any id: nothing is left free by allowing it.
+    // committed and unspendable. A zero-value leaf may name any id.
 
     it("FAILS on a valued deposit leaf at asset 0, leaf consistent", async () => {
         const { batch, circuit } = ctx;
@@ -167,7 +152,7 @@ describe("tree_update_batch / deposit binding", function () {
 
     it("a zero-value fee note is accepted at asset 0", async () => {
         // Liveness: a zero-fee deposit mints a zero-value fee note under id 0,
-        // which `_validateDeposit` permits ("The fee note's value may be zero").
+        // which `_validateDeposit` permits.
         const { batch, circuit } = ctx;
         const leaves = [
             batch.leaf({ val: 1000n, isDeposit: 1, asset: 7n, pk: 0xf01n }),
@@ -177,8 +162,6 @@ describe("tree_update_batch / deposit binding", function () {
     });
 
     it("a zero-value deposit leaf is accepted at a non-zero asset", async () => {
-        // The asset is an input of the leaf hash whatever the value, so there is
-        // nothing to canonicalise: this is an ordinary zero-value note.
         const { batch, circuit } = ctx;
         const leaves = [
             batch.leaf({ val: 1000n, isDeposit: 1, asset: 7n, pk: 0xf03n }),
@@ -188,8 +171,7 @@ describe("tree_update_batch / deposit binding", function () {
     });
 
     it("FAILS when a zero-value leaf's asset is relabelled after the tree is built", async () => {
-        // The complement of the case above: the asset is free to choose, not
-        // free to change. Relabelling it moves the leaf and so `new_root`.
+        // Relabelling the asset moves the leaf and so `new_root`.
         const { batch, circuit } = ctx;
         const w = batch.honest(0, [
             batch.leaf({ val: 1000n, isDeposit: 1, asset: 7n, pk: 0xf03n }),
@@ -203,8 +185,7 @@ describe("tree_update_batch / deposit binding", function () {
     // ===== is_deposit selects how the word becomes a leaf =====
     //
     // The circuit constrains `is_deposit` only to be boolean; which value a slot
-    // carries is a contract obligation (header, item 4). These pin what the
-    // circuit does under each value, including the two mistakes that verify.
+    // carries is a contract obligation (header, item 4).
 
     it("FAILS when a deposit slot's leaf is the raw word", async () => {
         const { batch, circuit } = ctx;
@@ -227,9 +208,9 @@ describe("tree_update_batch / deposit binding", function () {
     });
 
     it("is_deposit set on a spend's cm verifies, and inserts a leaf that is not that cm", async () => {
-        // Why the contract must pin is_deposit = 0 on a spend batch. The witness
-        // is satisfiable, but the leaf is the hash of out_cm under (0, 0): it has
-        // no opening, so the spend's outputs would be burned.
+        // Why the contract must pin is_deposit = 0 on a spend batch: the leaf is
+        // the hash of out_cm under (0, 0), which has no opening, so the spend's
+        // outputs would be burned.
         const { batch, circuit, P } = ctx;
         const spend = batch.leafWith({ asset: 7n, val: 100n, ...OWNER, isDeposit: 0 });
         const burned: LeafWitness = {
@@ -244,12 +225,9 @@ describe("tree_update_batch / deposit binding", function () {
     });
 
     it("is_deposit cleared on a deposit's word verifies, and inserts that word unbound", async () => {
-        // Why the contract must pin is_deposit = 1 on a deposit batch. With the
-        // flag clear nothing ties the leaf to an amount: the word is the leaf,
-        // and a word that is itself a commitment is a note of whatever value it
-        // was built for. `divergent.test.ts` shows the flag cannot be cleared
-        // behind the contract's back; this shows what it would mean if the
-        // contract cleared it itself.
+        // Why the contract must pin is_deposit = 1 on a deposit batch: with the
+        // flag clear the word is the leaf, and a word that is itself a commitment
+        // is a note of whatever value it was built for.
         const { batch, circuit, P } = ctx;
         const minted: LeafWitness = {
             word: commitWithInner(P, 7n, 1n << 63n, inner()),
@@ -269,9 +247,8 @@ describe("tree_update_batch / deposit binding", function () {
     });
 
     it("a deposit leaf at an odd slot needs no relation to its neighbour", async () => {
-        // The circuit is layout-agnostic: no constraint ties slot k to slot k-1.
-        // A cross-asset pair of valued leaves passes here and is rejected
-        // on-chain by the escrow digest in MASP._drainDeposit.
+        // No constraint ties slot k to slot k-1. A cross-asset pair of valued
+        // leaves is rejected on-chain by the escrow digest in MASP._drainDeposit.
         const { batch, circuit } = ctx;
         const leaves = [
             batch.leaf({ val: 100n, isDeposit: 1, asset: 7n, pk: 0xf05n }),

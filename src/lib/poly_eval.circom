@@ -8,25 +8,13 @@ include "tags.circom";
 // Compresses N logical public inputs into the public signals (y, z), in that
 // order. Coefficient ordering must match contracts/src/lib/PubInputs.sol.
 //
-// `z` is a circuit input derived from prover-authored calldata, so the prover
-// reads it before choosing a witness. On its own the evaluation therefore binds
-// nothing: PolyEval is affine in each coefficient with slope z^k, an
-// unconstrained coefficient is one linear equation in one unknown, and several
-// coefficients a prover can each move independently make forging y a modular
-// k-sum, far below a search of the field.
-//
-// What makes it bind is a commitment to the coefficients that is fixed BEFORE
-// the challenge. Both consumers (TransactCompressN, BatchCompress) output a
-// CoeffDigest of their coefficient signals as a second public signal. The
-// contract takes that word from calldata and hashes it into z, so by the time z
-// exists the witness coefficients are committed, and the Schwartz-Zippel bound
-// applies: two different vectors of N coefficients agree at a random z with
-// probability at most (N - 1)/r.
+// `z` is derived from prover-authored calldata, so the prover reads it before
+// choosing a witness and the evaluation alone binds nothing. Both consumers
+// (TransactCompressN, BatchCompress) also output a CoeffDigest of their
+// coefficients, which the contract hashes into z; see TransactCompressN.
 //
 // z != 0 is enforced here. At z = 0 the Horner chain reduces to y === coeffs[0]
-// and the remaining N-1 coefficients do not affect y. The consumer derives z as
-// keccak256(challenge) mod r, which is 0 only with negligible probability; the
-// circuit rejects z = 0 independently of that derivation.
+// and the remaining N-1 coefficients do not affect y.
 template PolyEval(N) {
     signal input coeffs[N];
     signal input z;
@@ -50,13 +38,8 @@ template PolyEval(N) {
 //   h_{b+1} = Poseidon(h_b,        in[4b+4 .. 4b+7])
 //
 // The last block is zero-padded. M is a template parameter, so the padding is
-// not ambiguous. The arity is the Merkle node's, so every consumer already has
-// the permutation; the leading TAG_DIGEST separates block 0 from a node
-// (TAG_MERKLE), and a later block leads with a hash output.
-//
-// Binding is collision resistance of Poseidon(5): a fixed-length chain of a
-// collision-resistant compression function. Two different inputs with the same
-// digest give a collision in some block.
+// not ambiguous. TAG_DIGEST separates block 0 from a Merkle node (TAG_MERKLE).
+// Binding reduces to collision resistance of Poseidon(5).
 template CoeffDigest(M) {
     assert(M >= 1);
     var BLOCKS = (M + 3) \ 4;
@@ -98,40 +81,27 @@ template CoeffDigest(M) {
 // coefficients in the same order. The instantiating circuit exposes both as
 // public signals.
 //
-// Why it binds. The contract reads the digest word d from calldata, derives
+// Binding. The contract reads the digest word d from calldata, derives
 // z = keccak(coefficients, d, challenge-only words), computes y over the
-// calldata coefficients, and verifies against (y, d, z). The proof then shows a
-// witness with CoeffDigest(w) == d and Σ w_k·z^k == y.
+// calldata coefficients c, and verifies against (y, d, z). The proof shows a
+// witness w with CoeffDigest(w) == d and Σ w_k·z^k == y. d is in the preimage
+// of z, so under collision resistance of Poseidon(5) w is fixed before z. If
+// w != c, two distinct polynomials of degree < N agree at a random z with
+// probability at most (N - 1)/r, taking keccak256 as a random oracle.
 //
-//   * d is in the preimage of z, and under collision resistance the prover
-//     knows one coefficient vector w with that digest. So w is fixed before z.
-//   * The calldata coefficients c are in the preimage too. If w != c, the two
-//     are distinct polynomials of degree < N fixed before a random z, and agree
-//     there with probability at most (N - 1)/r.
-//
-// That is commit-then-challenge Fiat-Shamir. It assumes Poseidon(5) is
-// collision resistant and keccak256 behaves as a random oracle, and nothing
-// about which witness parameters a prover can move.
-//
-// Three conditions on the consumer, each of which the argument needs:
+// Conditions on the consumer:
 //   * d is passed to the verifier as the digest public signal, unmodified;
-//   * d is in the keccak preimage of z. Left out, the prover can choose the
-//     witness, and so d, after seeing z;
-//   * every coefficient is in the keccak preimage of z.
-// d is NOT a coefficient: it is not evaluated into y.
+//   * d and every coefficient are in the keccak preimage of z.
+// d is not a coefficient: it is not evaluated into y.
 //
-// Each coefficient is also pinned by a constraint outside this template: the
-// root and nullifiers by SpentNote, the commitments by OutputNote, the two
-// public scalars by RangeCheck64 and PerAssetValueBalance. That is what makes
-// each word mean something; the digest is what ties the proof to the calldata.
-// A new coefficient is wired in through `prefix`, so the digest absorbs it.
+// Each coefficient is also constrained outside this template: the root and
+// nullifiers by SpentNote, the commitments by OutputNote, the two public
+// scalars by RangeCheck64 and PerAssetValueBalance.
 //
 // recipient_address, chain_id, payer_address, relayer_address, intent_hash,
 // out_aux_digest and the 3·N_OUT FMD clue fields are not signals of the
-// circuit and are therefore not coefficients. PubInputs.sol includes them in
-// the keccak preimage of z, so altering any of them changes z, and the proof,
-// made for another z, fails. The digest does not absorb them: there is no
-// witness copy of them to disagree with calldata.
+// circuit and are therefore not coefficients. PubInputs.sol binds them by
+// including them in the keccak preimage of z.
 template TransactCompressN(N_IN, N_OUT) {
     var N = 3 + N_IN + N_OUT;
 
@@ -180,22 +150,17 @@ template TransactCompressN(N_IN, N_OUT) {
 // (y, digest, z). Layout must match PubInputs.sol :: compress(TreeUpdateBatch).
 //
 // Every array is indexed by leaf slot. Every word is a signal of
-// TreeUpdateBatch, so every word is a coefficient: hashing a signal into z
-// without evaluating it binds nothing, since the prover reads z first and can
-// choose a witness that disagrees with the calldata it was hashed from.
+// TreeUpdateBatch, so every word is a coefficient: a signal hashed into z
+// without being evaluated is not bound to calldata.
 //
 // digest is the CoeffDigest of all the coefficients, in layout order, and is a
-// public signal. The binding argument is TransactCompressN's: the contract
-// hashes the calldata digest word into z and passes it to the verifier, so the
-// witness coefficients are committed before the challenge.
-//
-// new_root is not used as that commitment, although every active word reaches
-// it. It is not injective in the coefficients: a zero leaf is the empty leaf,
-// so a run with a trailing zero leaf and a shorter run have the same roots.
+// public signal; binding is as in TransactCompressN. new_root cannot serve as
+// that commitment: a zero leaf is the empty leaf, so a run with a trailing zero
+// leaf and a shorter run have the same roots.
 //
 // The two uint64 blocks (leaf_asset, leaf_public_in) are adjacent and the uint8
 // block (is_deposit) follows them, so PubInputs.compress re-masks the sub-word
-// members with two contiguous loops over the copied calldata.
+// members with two contiguous loops.
 template BatchCompress(MAX_L) {
     var N = 4 + 4 * MAX_L;
 

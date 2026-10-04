@@ -6,39 +6,27 @@ import { circuitSignals, type TransactWitnessBundle } from "../ref/witness";
 import { readOutput } from "../lib/expect";
 import { TIMEOUT_HEAVY } from "../lib/constants";
 
-// Groth16 public-signal order for the transact and batch shapes.
+// Groth16 public-signal order for the transact and batch shapes, asserted
+// against the compiled circuits.
 //
 // The exported Solidity verifier takes `_pubSignals` as a flat `uint[3]`, so a
-// transposition is not a type error: the field elements arrive in the wrong
-// order and every proof fails to verify, indistinguishably from a bad zkey or a
-// stale ceremony.
+// transposition is not a type error: every proof fails to verify.
 //
 // circom orders the main component's signals as:
 //
 //   witness[0]                = the constant 1
-//   witness[1 .. nOutputs]    = main's OUTPUT signals, declaration order
-//   witness[.. + nPubInputs]  = main's PUBLIC INPUT signals, declaration order
+//   witness[1 .. nOutputs]    = main's output signals, declaration order
+//   witness[.. + nPubInputs]  = main's public input signals, declaration order
 //
 // `Transact` declares `signal output y`, then `signal output digest`, and
 // receives `z` via `component main { public [z] }`, so the order is
-// `[y, digest, z]`. `PubInputs.sol` must return the three in that order: its
-// own `y`, the digest word as calldata carries it, and `z`.
-//
-// Asserted against the compiled circuit, so adding an output to `Transact` or
-// making another input public fails here rather than at on-chain verification.
-//
-// `TreeUpdateBatch` gets the same checks: it declares the same two outputs in
-// the same order and takes `z` the same way. It needs no signal projection: its
-// published witness is the circom input object, which carries no digest (the
-// digest is an output, not an input) and no challenge-only word.
+// `[y, digest, z]`, which `PubInputs.sol` must return. `TreeUpdateBatch`
+// declares the same two outputs in the same order and takes `z` the same way.
 
-// Every shape whose public-signal order is pinned here.
-//
 // `4x6` has `nIn != nOut`, so it catches an ordering that only holds when the
 // two arities agree. `project` maps a published witness to the circom input:
-// transact's vector carries the challenge-only fields, which are logical public
-// inputs but not signals, so the calculator rejects them; the batch declares
-// every word it publishes and needs no projection.
+// transact's vector carries the challenge-only fields, which are not signals,
+// so the calculator rejects them.
 interface Shape {
     label: string;
     circuit: string;
@@ -61,8 +49,6 @@ const SHAPES: Shape[] = [
 ];
 
 interface PublishedVector {
-    // Parsed straight out of the published JSON, so it is typed as the circom
-    // input shape rather than re-declared here.
     witness: CircuitInput;
     compression: { z: string; y: string; digest: string };
     circuitOutput: { y: string; digest: string };
@@ -93,7 +79,6 @@ describe("groth16 public-signal order", function () {
                 expect(witness[0]).to.equal(1n);
             });
 
-            // The order assertions: y, then the digest, then z.
             it("witness[1] is `y`, the first public signal", () => {
                 expect(readOutput(witness, 0).toString()).to.equal(vector.circuitOutput.y);
                 expect(readOutput(witness, 0).toString()).to.equal(vector.compression.y);
@@ -116,8 +101,7 @@ describe("groth16 public-signal order", function () {
             });
 
             it("the exported verifier consumes exactly these three, in this order", () => {
-                // _pubSignals = [y, digest, z], written out as the reference for
-                // other consumers.
+                // _pubSignals = [y, digest, z].
                 const pubSignals = [0, 1, 2].map(i => readOutput(witness, i));
                 expect(pubSignals.map(String)).to.deep.equal([
                     vector.compression.y,

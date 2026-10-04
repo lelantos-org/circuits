@@ -1,23 +1,16 @@
 // Pre-publish artifact check for @lelantos-org/circuits.
 //
-// Asserts every published artifact exists, falls within a size band, and, for
-// a vkey, parses as the expected JSON shape. Covers the package `files`
-// whitelist plus the artifacts published only as GitHub release assets
-// (tree_update_batch); `just package` builds both.
+// Asserts each build artifact in the package `files` whitelist (the 4x6 wasm,
+// zkey and vkey) exists, falls within a size band and, for the vkey, parses as
+// the expected JSON shape; and that each vector listed in `vectors/index.json`
+// matches its pinned SHA-256 and layout digest.
 //
-// The trusted-setup contribution (`snarkjs zkey contribute`) is
-// non-deterministic: snarkjs mixes fresh `crypto.randomBytes(64)` into the
-// entropy source before applying the user-supplied entropy (see snarkjs
-// `getRandomRng`), so zkey and vkey SHA-256 digests differ on every rebuild and
-// are not pinned.
+// zkey and vkey digests are not pinned: `snarkjs zkey contribute` mixes fresh
+// randomness into the supplied entropy (snarkjs `getRandomRng`), so they differ
+// on every rebuild.
 //
-// Instead, the check prints per-artifact SHA-256 to stdout (one `name=sha` line
-// each) plus a `circuits-shas` line that GitHub Actions pipes into
-// `$GITHUB_STEP_SUMMARY` and the release notes. It fails only on a missing
-// file, an out-of-range size, or a malformed vkey.
-//
-// stdout is a machine interface: `.github/workflows/publish.yml` greps
-// `^<name>=` and `^circuits-shas=`. Keep those two line shapes stable.
+// Prints one `name=sha` line per artifact and a single `circuits-shas` JSON
+// line; exits non-zero on any failure.
 
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -36,14 +29,12 @@ interface ArtifactCheck {
     json?: (value: unknown) => boolean;
 }
 
-/// Size bands detect truncated artifacts without pinning a byte count, since
-/// each setup run changes the zkey size slightly. zkey size follows the FFT
-/// domain and wire count, so the bands must be re-measured when circuit size
-/// changes.
+/// Size bands detect truncated artifacts without pinning a byte count. zkey
+/// size follows the FFT domain and wire count, so the bands must be re-measured
+/// when circuit size changes.
 const FILES: ArtifactCheck[] = [
-    /// 4x6 = `Transact(11, 4, 6)`, the only published transact shape, on ptau-17
-    /// at 69,291 constraints (52.9% of the 2^17 domain). Measured: the wasm is
-    /// about 3.9 MB and the zkey about 33 MB.
+    /// 4x6 = `Transact(11, 4, 6)` on ptau-17. Measured: the wasm is about
+    /// 3.9 MB and the zkey about 33 MB.
     {
         name: "4x6.wasm",
         path: resolve(BUILD, "4x6.wasm"),
@@ -65,18 +56,14 @@ const FILES: ArtifactCheck[] = [
     },
 ];
 
-/** Shared vkey shape assertion for every published verification key. */
 function isGroth16Vkey(v: unknown): boolean {
     return isRecord(v) && v.protocol === "groth16" && v.curve === "bn128";
 }
 
-/// The golden vectors are byte-deterministic (`scripts/gen-vectors.ts` uses no
-/// randomness, timestamps or absolute paths; `just vectors-check` verifies this),
-/// so each is pinned to the exact SHA-256 recorded in `vectors/index.json`. A
-/// mismatch indicates hand-edited vectors or an uncommitted regeneration.
+/// The golden vectors are byte-deterministic, so each is pinned to the SHA-256
+/// recorded in `vectors/index.json`.
 const VECTORS = resolve(ROOT, "vectors");
 
-/** Narrowing helper for values parsed from JSON. */
 function isRecord(v: unknown): v is Record<string, unknown> {
     return typeof v === "object" && v !== null;
 }
@@ -126,8 +113,6 @@ for (const [name, sha] of Object.entries(computed)) {
     console.log(`${name}=${sha}`);
 }
 
-// Single-line JSON for downstream tooling (GH Actions step output,
-// release-body templating, signing tooling).
 console.log(
     `circuits-shas=${JSON.stringify({
         version: await pkgVersion(),

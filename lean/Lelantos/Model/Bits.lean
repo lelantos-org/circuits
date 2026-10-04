@@ -12,19 +12,15 @@ circomlib's `Num2Bits(n)` (`node_modules/circomlib/circuits/bitify.circom:24-39`
     out[i] * (out[i] - 1) === 0;     // booleanity
     lc1 === in;                      // lc1 = Σ out[i] · 2^i
 
-Only the two `===` lines constrain the witness, and only those are modelled: a `<--`
-assignment carries no soundness weight, so `Num2BitsSat` holds of every satisfying
-assignment regardless of how the prover produced the bits.
+Only the two `===` lines constrain the witness, and only those are modelled.
 
-`num2Bits_sound` is the result the rest of the development consumes. When `2 ^ n ≤ p` the
-decomposition is alias-free, so `v.val < 2 ^ n` holds over `ℕ` rather than modulo `p`;
-every no-wrap argument downstream rests on it.
+`num2Bits_sound`: when `2 ^ n ≤ p`, `v.val < 2 ^ n` holds over `ℕ` rather than modulo `p`.
+Every no-wrap argument downstream rests on it.
 
 ## Modelling convention for arrays
 
-circom arrays are 0-indexed and read only below their declared length. Signal arrays are
-therefore modelled as total functions `ℕ → F`, with every constraint guarded by `i < n`.
-Values at indices `≥ n` are unconstrained and never observed.
+Signal arrays are modelled as total functions `ℕ → F`, with every constraint guarded by
+`i < n`. Values at indices `≥ n` are unconstrained and never observed.
 -/
 
 namespace Lelantos
@@ -85,10 +81,8 @@ theorem cast_bitsNat {n : ℕ} {bs : ℕ → F} (h : ∀ i, i < n → IsBit (bs 
 
 /-! ## Reading a bit back out
 
-`bitsNat` sends a bit vector to the natural it denotes. `bitNat_eq_digit` is the inverse
-direction: the decomposition is unique, so bit `i` of that natural is the bit the assignment
-supplied. `num2Bits_sound` pins only the sum, so statements about one bit (or, in
-`Gadgets.BatchAppend`, about one quaternary digit) depend on this.
+`num2Bits_sound` pins only the sum. `bitNat_eq_digit` recovers each bit from it; statements
+about one bit (or, in `Gadgets.BatchAppend`, about one quaternary digit) depend on this.
 -/
 
 /-- Splitting a decomposition at position `i`: the low `i` bits, plus the rest shifted. -/
@@ -104,7 +98,7 @@ theorem bitsNat_add (bs : ℕ → F) (i m : ℕ) :
     ring
 
 /-- **The decomposition is unique.** Bit `i` of the natural the bits denote is the bit at
-index `i`, so `num2Bits_sound` pins every bit individually and not merely their sum. -/
+index `i`. -/
 theorem bitNat_eq_digit {bs : ℕ → F} {n i : ℕ} (hi : i < n) :
     bitsNat bs n / 2 ^ i % 2 = bitNat (bs i) := by
   obtain ⟨m, rfl⟩ : ∃ m, n = i + (m + 1) := ⟨n - i - 1, by omega⟩
@@ -127,9 +121,9 @@ theorem bitNat_eq_digit {bs : ℕ → F} {n i : ℕ} (hi : i < n) :
 
 /-! ## Quaternary digits
 
-The quaternary tree reads its path one *digit* at a time, and the circuits produce that
-digit by pairing bits `2d` and `2d + 1` of a `Num2Bits` output — the pair
-`idx_bits.out[2 * d]`, `idx_bits.out[2 * d + 1]` that `src/lib/batch_append.circom:153-157`
+The quaternary tree reads its path one digit at a time; the circuits produce that digit by
+pairing bits `2d` and `2d + 1` of a `Num2Bits` output — the pair
+`idx_bits.out[2 * d]`, `idx_bits.out[2 * d + 1]` that `src/lib/batch_append.circom:149-153`
 turns into a one-hot digit selector, the same shape as `src/lib/common.circom:21`. -/
 
 /-- Digit `d` of `m` in base 4. -/
@@ -185,10 +179,9 @@ theorem num2Bits_sound {n : ℕ} {v : F} {bs : ℕ → F}
 
 /-! ## A canonical satisfying assignment
 
-Every result consuming `Num2BitsSat` is conditional on a satisfying assignment. These
-exhibit the canonical witness for an arbitrary natural below `2 ^ n`, which the
-completeness proofs use to instantiate `LessThan`, the quaternary-insert chain and the
-batch circuit at concrete indices.
+The canonical witness for an arbitrary natural below `2 ^ n`. The completeness proofs use
+it to instantiate `LessThan`, the quaternary-insert chain and the batch circuit at concrete
+indices.
 -/
 
 /-- Bit `i` of `m` as a field element — the little-endian decomposition `Num2Bits` emits,
@@ -222,8 +215,7 @@ theorem natBits_recompose (m n : ℕ) :
     ring
 
 /-- **`Num2Bits(n)` is satisfiable at every value it admits.** The counterpart to
-`num2Bits_sound`: that reads a decomposition off a satisfying assignment, this exhibits one.
--/
+`num2Bits_sound`. -/
 theorem num2Bits_witness {n m : ℕ} (h : m < 2 ^ n) :
     Num2BitsSat n ((m : ℕ) : F) (natBits m) where
   bits i _ := natBits_isBit m i

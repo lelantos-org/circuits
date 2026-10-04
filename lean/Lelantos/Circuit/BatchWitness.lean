@@ -4,15 +4,10 @@ import Lelantos.Gadgets.PolyEval
 /-!
 # The `TreeUpdateBatch` signal set
 
-The signals of `TreeUpdateBatch(DEPTH, MAX_L)`: the three public signals `(y, digest, z)`,
-the public statement (both roots, the position, the leaves' fields), the private frontier,
-and the intermediates of the leaf construction, the tree, the asset guard and the
-compression. What the circuit constrains over them is `Lelantos.Circuit.TreeUpdateBatch`;
-the order in which they are evaluated into `y` and folded into `digest` is
-`Lelantos.Circuit.BatchLayout`.
-
-The append gadget's own signals are `BatchAppendSignals` (`Gadgets/BatchAppend.lean`),
-reached through the `append` field.
+The signals of `TreeUpdateBatch(DEPTH, MAX_L)`. What the circuit constrains over them is
+`Lelantos.Circuit.TreeUpdateBatch`; the order in which they are evaluated into `y` and
+folded into `digest` is `Lelantos.Circuit.BatchLayout`. The append gadget's signals are
+`BatchAppendSignals` (`Gadgets/BatchAppend.lean`), reached through the `append` field.
 
 `cms[k]` is read by `is_deposit[k]`: on a spend slot it is the note commitment a transact
 proof bound as `out_cm`, and it is the leaf; on a deposit slot it is the depositor's
@@ -25,12 +20,12 @@ namespace Lelantos
 functions, read only below their declared length, per the convention in `Model.Bits`. -/
 structure BatchSignals (depth maxL : ℕ) where
   -- The public signals, `(y, digest, z)` in the verifier's order
-  -- (`src/tree_update_batch.circom:104-106`). `digest` is the `CoeffDigest` of the
+  -- (`src/tree_update_batch.circom:78-80`). `digest` is the `CoeffDigest` of the
   -- coefficient vector; it is not a coefficient and is not evaluated into `y`.
   z : F
   y : F
   digest : F
-  -- Logical public inputs (`:109-116`).
+  -- Logical public inputs (`:83-90`).
   oldRoot : F
   newRoot : F
   startIndex : F
@@ -39,17 +34,17 @@ structure BatchSignals (depth maxL : ℕ) where
   leafAsset : ℕ → F
   leafPublicIn : ℕ → F
   isDeposit : ℕ → F
-  -- Private input (`:119`).
+  -- Private input (`:93`).
   frontierIn : ℕ → ℕ → F
-  -- The leaf (`:137-156`): two range checks, the deposit commitment, the mux.
+  -- The leaf (`:107-126`): two range checks, the deposit commitment, the mux.
   assetBits : ℕ → ℕ → F
   pubInBits : ℕ → ℕ → F
   depCm : ℕ → F
   depDelta : ℕ → F
   leaves : ℕ → F
-  -- The tree (`:161-171`).
+  -- The tree (`:131-141`).
   append : BatchAppendSignals
-  -- The asset guard (`:191-196`).
+  -- The asset guard (`:158-163`).
   assetInv : ℕ → F
   assetIsZero : ℕ → F
   -- `CoeffDigest` inside `BatchCompress`: the block outputs.

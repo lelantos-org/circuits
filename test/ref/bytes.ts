@@ -1,7 +1,5 @@
-// Field <-> byte conversion and bit packing.
-//
-// Bit order is significant: the FMD clue bits are LSB-first within each byte
-// on the wire. `toBeBytes32` is big-endian for ABI encoding only.
+// Field <-> byte conversion and bit packing. FMD clue bits are LSB-first within
+// each byte on the wire.
 
 import type { Field } from "./field.js";
 
@@ -30,12 +28,12 @@ export function toBeBytes32(x: Field): Uint8Array {
     return out;
 }
 
-/** Read bit `i` (LSB-first) from a packed byte array. Returns 0 or 1. */
+/** Bit `i` of a packed byte array, LSB-first within each byte. */
 export function bitAt(packed: Uint8Array, i: number): number {
     return (packed[i >> 3] >> (i & 7)) & 1;
 }
 
-/** Pack `bits` (each 0 or 1) LSB-first into `ceil(bits.length / 8)` bytes. */
+/** Packs LSB-first within each byte. */
 export function packBits(bits: number[] | Uint8Array): Uint8Array {
     const out = new Uint8Array(Math.ceil(bits.length / 8));
     for (let i = 0; i < bits.length; i++) {
@@ -44,7 +42,6 @@ export function packBits(bits: number[] | Uint8Array): Uint8Array {
     return out;
 }
 
-/** Unpack the first `count` bits (LSB-first) from a packed byte array. */
 export function unpackBits(packed: Uint8Array, count: number): number[] {
     const out: number[] = new Array(count);
     for (let i = 0; i < count; i++) out[i] = bitAt(packed, i);

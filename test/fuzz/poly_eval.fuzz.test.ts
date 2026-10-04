@@ -1,13 +1,9 @@
-// Property-based coverage for `lib/poly_eval.circom`.
-//
-// The unit test [test/gadgets/poly_eval.test.ts](../gadgets/poly_eval.test.ts) pins a set
-// of deterministic seeds. This file adds random coefficients and `z` values
-// across BN254 Fr, plus the algebraic identities (linearity, z=1) that tie the
-// gadget to its Horner-form specification, and the z = 0 rejection.
+// Property-based coverage for `lib/poly_eval.circom`: random coefficients and
+// `z` values across BN254 Fr, the algebraic identities (linearity, z=1) that
+// tie the gadget to its Horner-form specification, and the z = 0 rejection.
 //
 // The wrapper exposes `TestPolyEval26` (N=26). The contract-side
-// `SnarkCompression` implements the same Horner schedule, so a divergence here
-// breaks the on-chain to in-circuit binding.
+// `SnarkCompression` implements the same Horner schedule.
 
 import { expect } from "chai";
 import * as fc from "fast-check";
@@ -24,12 +20,10 @@ const WRAPPER = fixturePath("test_poly_eval.circom");
 const N = 26;
 const fcParams = fcParamsFor("POLYEVAL");
 
-// Coefficient array arbitrary — N entries clamped to [0, R).
 const arbCoeffs = fc.array(arbField(R - 1n), { minLength: N, maxLength: N });
-// z != 0. The gadget rejects zero (`z_nz.out === 0` in lib/poly_eval.circom)
-// because at z = 0 the Horner chain reduces to y === coeffs[0] and the other N-1
-// coefficients do not affect the public signals. The positive properties
-// exclude it; the rejection is covered by "FAILS at z = 0".
+// z != 0. The gadget rejects zero (`z_nz.out === 0` in lib/poly_eval.circom):
+// at z = 0 the Horner chain reduces to y === coeffs[0] and the other N-1
+// coefficients do not affect the public signals.
 const arbZ = fc.bigInt(1n, R - 1n);
 // Permutation property needs z ∉ {0, 1} (those are sum-/index-invariant).
 const arbZForPermutation = fc.bigInt(2n, R - 1n);
@@ -69,7 +63,6 @@ describe("PolyEval [fuzz, N=26]", function () {
             const yb = hornerEval(b, z);
             const ys = hornerEval(sum, z);
             expect(ys).to.equal(mod(ya + yb, R));
-            // Cross-check vs circuit for the summed polynomial.
             await expectY(sum, z, ys);
         }), fcParams);
     });
@@ -102,8 +95,7 @@ describe("PolyEval [fuzz, N=26]", function () {
     });
 
     it("permutation alters y (Schwartz–Zippel sanity)", async () => {
-        // (c0, cN-1) is drawn as a distinct pair so the swap is observable
-        // without .filter or an early return; the other N-2 slots are uniform.
+        // (c0, cN-1) is drawn as a distinct pair so the swap is observable.
         const arbCoeffsDistinctEnds = fc.tuple(
             arbDistinctBigInt(0n, R - 1n),
             fc.array(arbField(R - 1n), { minLength: N - 2, maxLength: N - 2 }),

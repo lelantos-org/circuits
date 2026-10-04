@@ -1,8 +1,5 @@
-// Repository paths and the committed files the suites read: vectors, Lean
-// layout dumps, circom sources.
-//
-// Every suite resolves against the package root rather than its own directory,
-// so moving a spec file does not change what it reads.
+// Repository paths and the committed files the suites read. Paths resolve
+// against the package root, not the spec file's directory.
 
 import * as fs from "fs";
 import * as path from "path";
@@ -20,8 +17,7 @@ export function readText(rel: string): string {
     return fs.readFileSync(repoPath(rel), "utf8");
 }
 
-// The files parsed here are hand-maintained or generated JSON whose schema the
-// caller asserts, so the result is typed by the caller rather than validated.
+// Not validated: the caller asserts the schema.
 export function readJson<T = any>(rel: string): T {
     return JSON.parse(readText(rel)) as T;
 }

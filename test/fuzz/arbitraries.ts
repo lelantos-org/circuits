@@ -22,20 +22,13 @@ export const NUM_RUNS =
 
 // ===== replayability =====
 //
-// By default fast-check seeds from the clock, so a failing run cannot be
-// regenerated, and the seed it prints appears only in CI logs that expire.
+// The seed is pinned by `FUZZ_SEED`, otherwise drawn once per process and
+// printed to stderr. Every suite shares it, so `FUZZ_SEED=... just test-fuzz`
+// reproduces the whole run.
 //
-// The seed is therefore chosen here: pinned when `FUZZ_SEED` is set, otherwise
-// drawn once per process and printed to stderr. Every suite shares the value,
-// so a single `FUZZ_SEED=... just test-fuzz` reproduces the whole run.
-// `.github/workflows/fuzz.yml` sets it and writes the replay line into the job
-// summary, which outlives the log.
-//
-// `FUZZ_PATH` replays a single shrunk counterexample: pass the `path` from a
-// fast-check report with its seed to go directly to that case. A path is
-// meaningful only for the property that produced it, and this sets it for every
-// property in the process, so combine it with a mocha `--grep` that isolates
-// the failing test:
+// `FUZZ_PATH` replays one shrunk counterexample: the `path` from a fast-check
+// report, together with its seed. It applies to every property in the process,
+// so isolate the failing test with a mocha `--grep`:
 //
 //   FUZZ_SEED=<seed> FUZZ_PATH=<path> npm run test:fuzz -- --grep "<test name>"
 
@@ -54,8 +47,7 @@ export const FUZZ_SEED = readSeed();
 /** Set only when replaying; `undefined` lets fast-check run the full sequence. */
 const FUZZ_PATH = process.env.FUZZ_PATH || undefined;
 
-// Printed once per process, on stderr so a reporter that buffers stdout does
-// not hide it. Printed on passing runs too, so they are repeatable.
+// On stderr, so a reporter that buffers stdout does not hide it.
 console.error(
     `[fuzz] FUZZ=${FUZZ} FUZZ_SEED=${FUZZ_SEED}` +
         (FUZZ_PATH ? ` FUZZ_PATH=${FUZZ_PATH}` : "") +
@@ -67,13 +59,12 @@ export const fcParams = { numRuns: NUM_RUNS, seed: FUZZ_SEED, path: FUZZ_PATH };
 // 64-bit value used by transact circuit (range-checked via Num2Bits(64)).
 export const MAX_VALUE = (1n << 64n) - 1n;
 
-// BN254 scalar field modulus — used by every gadget that constrains a Field.
+// BN254 scalar field modulus.
 export const R = BN254_FR;
 
-// Canonical-positive modulo, re-exported from the reference implementation.
+// Canonical-positive modulo.
 export { mod } from "../helpers";
 
-// Random bigint in [0, max] from a fast-check uint sequence (deterministic seed).
 export const arbField = (max: bigint = MAX_VALUE): fc.Arbitrary<bigint> =>
     fc.bigInt(0n, max);
 
@@ -81,8 +72,7 @@ export const arbField = (max: bigint = MAX_VALUE): fc.Arbitrary<bigint> =>
 export const arbNsk = (): fc.Arbitrary<bigint> =>
     fc.bigInt(1n, (1n << 200n));
 
-// Pair of values (v1, v2) and split point s such that v1+v2 fits in 64 bits.
-// Returns (v1, v2, o1, o2) with o1+o2 == v1+v2 and each < 2^64.
+// (v1, v2, o1, o2) with o1 + o2 == v1 + v2 < 2^64.
 export const arbBalancedSplit = (): fc.Arbitrary<{ v1: bigint; v2: bigint; o1: bigint; o2: bigint }> =>
     fc.tuple(
         fc.bigInt(0n, MAX_VALUE / 2n),
@@ -120,11 +110,9 @@ const SUITE_SCALE: Record<string, number> = {
     TRANSACT_VARIANTS: 0.5,
     // Overflow path runs SDK + circuit per trial; cap tighter.
     TRANSACT_OVERFLOW: 0.25,
-    // Each trial builds a witness and then sweeps all ~70k of its entries,
-    // re-checking the full system once per finding.
+    // Each trial builds a witness and sweeps every entry of it.
     UNDERCONSTRAINED: 0.25,
-    // Same search over the larger batch R1CS, ~8.5s per trial. Unlisted suites
-    // default to scale 1.
+    // Same search over the larger batch R1CS.
     UNDERCONSTRAINED_BATCH: 0.25,
 };
 
@@ -145,11 +133,7 @@ export interface FcParams<E> {
     examples?: E[];
 }
 
-/**
- * Per-suite fast-check parameters. Every suite carries the same `FUZZ_SEED`, so
- * one env var reproduces a whole run; `runsFor` still scales the trial count
- * per suite.
- */
+/** Per-suite fast-check parameters: shared seed and path, run count from `runsFor`. */
 export function fcParamsFor<E = unknown>(
     suite: string,
     extra?: { examples?: E[] },
@@ -161,18 +145,16 @@ export function fcParamsFor<E = unknown>(
 
 // ===== per-asset balance shapes =====
 //
-// `PerAssetValueBalance(N_IN, N_OUT)` sweeps N_IN + N_OUT + 1 candidate assets,
-// so its behaviour depends on how assets are spread across slots rather than on
-// the values alone. The transact-level arbitraries above are single-asset (a
-// witness there costs a tree, four authentication paths and a 70k-constraint
-// circuit); these draw the gadget's inputs directly, which is cheap enough to
-// vary the asset layout itself.
+// Direct inputs for `PerAssetValueBalance(N_IN, N_OUT)`. The gadget sweeps
+// N_IN + N_OUT + 1 candidate assets, so its behaviour depends on how assets are
+// spread across slots; these vary the asset layout, where the transact-level
+// arbitraries above are single-asset.
 
 /** A 64-bit asset id. Never 0: the circuits reject `asset_id == 0` on real slots. */
 export const arbAssetId = (): fc.Arbitrary<bigint> =>
     fc.oneof(
-        // Small ids, as a registry would assign them, so collisions between
-        // slots are common and duplicate candidate rows get exercised.
+        // Small ids, so slots collide often and duplicate candidate rows are
+        // exercised.
         { arbitrary: fc.bigInt(1n, 8n), weight: 3 },
         { arbitrary: fc.bigInt(1n, MAX_VALUE), weight: 1 },
     );
@@ -191,13 +173,13 @@ export interface AssetBalanceShape {
 
 /**
  * A per-asset balanced shape: every asset's inputs equal its outputs plus the
- * transparent bucket, exactly as the gadget requires.
+ * transparent bucket.
  *
- * Output slots `j < N_IN` take input slot `j`'s asset, so no input asset can be
- * left without an output slot to be spent into; the remaining output slots
- * repeat one of those assets. `publicMode` picks between an empty bucket under
- * an arbitrary id (the gadget itself places no rule on an empty bucket's id;
- * `Transact` does) and a withdrawal from an asset the notes carry.
+ * Output slots `j < N_IN` take input slot `j`'s asset, so every input asset has
+ * an output slot; the remaining output slots repeat one of those assets.
+ * `publicMode` picks between an empty bucket under an arbitrary id (the gadget
+ * places no rule on an empty bucket's id; `Transact` does) and a withdrawal
+ * from an asset the notes carry.
  */
 export const arbBalancedAssetShape = (
     nIn: number,
@@ -227,7 +209,7 @@ export const arbBalancedAssetShape = (
         let publicAssetId = orphan;
         let publicOut = 0n;
         if (publicMode === 1) {
-            // Withdrawal, capped at what that asset actually holds.
+            // Withdrawal, capped at that asset's total.
             publicAssetId = inAsset[0];
             const held = totals.get(publicAssetId) ?? 0n;
             publicOut = held === 0n ? 0n : publicAmount % (held + 1n);

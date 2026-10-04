@@ -109,8 +109,7 @@ describe("quaternary merkle tree", function () {
         const expected = tree.root();
 
         // Index 1 has selfPos=1 at level 0, so the level-0 siblings are
-        // [slot0, slot2, slot3]. Swapping siblings[0] and siblings[2] exchanges
-        // slot0 and slot3 and must produce a different root.
+        // [slot0, slot2, slot3]; the swap exchanges slot0 and slot3.
         const { pathElements, pathIndices } = tree.proof(1);
         const swapped: Field[][] = pathElements.map((lvl: Field[]) => lvl.slice());
         [swapped[0][0], swapped[0][2]] = [swapped[0][2], swapped[0][0]];
@@ -132,13 +131,11 @@ describe("quaternary merkle tree", function () {
 });
 
 // EMPTY_SUBTREE(d) in lib/common.circom is a hardcoded table because circom does
-// not constant-fold Poseidon. These tests parse the constants from the circom
-// source and recompute the chain, so a wrong table entry fails CI.
+// not constant-fold Poseidon. The constants are parsed from the circom source.
 describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
     this.timeout(TIMEOUT_FAST);
 
     // Genesis root for DEPTH = 11, the value CommitmentTree.EMPTY_ROOT carries.
-    // Asserted against the circuit's own table below, so the two cannot drift.
     const CONTRACT_EMPTY_ROOT =
         0x1cf92e62b512433b35f0064d537576b0184cad5fa7ab64201cd8084ee2dc171fn;
     const TABLE_DEPTH = 11;
@@ -172,8 +169,7 @@ describe("EMPTY_SUBTREE constant table (lib/common.circom)", function () {
 
     it("EMPTY_SUBTREE(TABLE_DEPTH) equals CommitmentTree.EMPTY_ROOT", () => {
         // Cross-repo pin: a depth change applied to only one of the circuit
-        // table or the contract's genesis root fails here rather than as a root
-        // mismatch on the first insert.
+        // table and the contract's genesis root fails here.
         expect(table[TABLE_DEPTH]).to.equal(CONTRACT_EMPTY_ROOT);
     });
 });

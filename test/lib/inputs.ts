@@ -1,8 +1,6 @@
-// Plain-JSON input shapers shared by the spec and fuzz suites.
-//
-// These translate the camelCase witness the tests build into the snake_case
-// signal names circom reads. The key set is part of the contract with the
-// circuit.
+// Plain-JSON input shapers shared by the spec and fuzz suites: they translate
+// the camelCase witness the tests build into the snake_case signal names circom
+// reads.
 
 import { batchCoeffs, batchDigest, flattenBatch, type Field } from "../helpers";
 
@@ -28,8 +26,7 @@ export function merkleInputJson(leaf: Field, pathElements: Field[][], pathIndice
 
 /**
  * The logical public inputs of a TreeUpdateBatch: its coefficients and the
- * calldata digest word. Separate from the rest because `z` is derived from
- * them, so they must be shapeable before `z` exists.
+ * calldata digest word. `z` is derived from them.
  */
 export interface TreeUpdateBatchPublicArgs {
     oldRoot: Field;
@@ -54,11 +51,9 @@ export interface TreeUpdateBatchArgs extends TreeUpdateBatchPublicArgs {
     z: Field;
 }
 
-// Consumed three times: `treeUpdateBatchInputJson` spreads the result into the
-// object handed to the circuit, `treeUpdateBatchChallenge` flattens it into the
-// preimage and `treeUpdateBatchCoeffs` into the coefficient vector. All three
-// therefore always describe the same witness. The digest word is absent: it is
-// not an input signal.
+// Shared by the circuit input, the challenge preimage and the coefficient
+// vector, so all three describe the same witness. The digest word is absent: it
+// is not an input signal.
 function publicJson(a: Omit<TreeUpdateBatchPublicArgs, "digest">) {
     return {
         old_root: a.oldRoot.toString(),
@@ -75,9 +70,8 @@ function publicJson(a: Omit<TreeUpdateBatchPublicArgs, "digest">) {
 /**
  * The circom input object for TreeUpdateBatch.
  *
- * Key order is contractual: circom resolves signals by name, but this object is
- * serialized into `vectors/` and the SDK pins each file by SHA-256. Reordering
- * these keys breaks the published contract even though the witness is identical.
+ * Key order is contractual: this object is serialized into `vectors/` and the
+ * SDK pins each file by SHA-256.
  */
 export function treeUpdateBatchInputJson(a: TreeUpdateBatchArgs) {
     return {
@@ -89,10 +83,8 @@ export function treeUpdateBatchInputJson(a: TreeUpdateBatchArgs) {
 
 /**
  * Challenge preimage for a batch witness: the 4 + 4·MAX_L coefficients, then
- * the digest word, hashed into `z`.
- *
- * The layout is defined in `ref/compress.ts :: flattenBatch`, which is also
- * what `scripts/gen-vectors.ts` publishes vectors from.
+ * the digest word, hashed into `z`. The layout is defined in
+ * `ref/compress.ts :: flattenBatch`.
  */
 export function treeUpdateBatchChallenge(a: TreeUpdateBatchPublicArgs): Field[] {
     return flattenBatch({ ...publicJson(a), digest: a.digest });
@@ -105,19 +97,13 @@ export function treeUpdateBatchDigest(a: Omit<TreeUpdateBatchPublicArgs, "digest
 
 /**
  * PolyEval coefficients for a batch witness: 4 + 4·MAX_L words, the preimage
- * without its digest word. `ref/compress.ts :: batchCoeffs` explains why every
- * word is evaluated.
+ * without its digest word.
  */
 export function treeUpdateBatchCoeffs(a: TreeUpdateBatchPublicArgs): Field[] {
     return batchCoeffs(publicJson(a));
 }
 
-/**
- * Input for the `PerAssetValueBalance(N_IN, N_OUT)` fixture.
- *
- * The gadget takes plain field elements: no note and no tree. Shaped here rather than in the spec file because
- * `fuzz/balance.fuzz.test.ts` draws the same object.
- */
+/** Input for the `PerAssetValueBalance(N_IN, N_OUT)` fixture: plain field elements. */
 export interface PerAssetBalanceArgs {
     inAsset: Field[];
     inValue: Field[];

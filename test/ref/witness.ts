@@ -1,8 +1,5 @@
-// Transact circuit witness construction.
-//
-// Values are emitted as decimal strings. circom resolves signals positionally,
-// so the key set is part of the interface: an extra key is as significant as a
-// missing one.
+// Transact circuit witness construction. Values are emitted as decimal strings;
+// the key set is part of the interface.
 
 import type { Field } from "./field.js";
 import type { Poseidon } from "./poseidon.js";
@@ -16,15 +13,13 @@ export interface ClueInputs {
     clueRy: Field;
 }
 
-// Declared as type aliases rather than interfaces so they carry an implicit
-// index signature, and so satisfy `CircuitInput` in lib/circuit.ts without a cast.
+// Type aliases rather than interfaces: the implicit index signature satisfies
+// `CircuitInput` in lib/circuit.ts without a cast.
 
 /**
- * The public slots that are circuit signals: `TransactCompressN`'s coefficients
- * up to the digest, in `PubInputs.compress(Transact)` order.
- *
- * The digest itself is the next coefficient but not an input signal: the
- * circuit computes it from these. See `TransactBinding.digest`.
+ * The public slots that are circuit input signals: `TransactCompressN`'s
+ * coefficients, in `PubInputs.compress(Transact)` order. The circuit computes
+ * the digest from these.
  */
 export type CircomCoeffInputs = {
     merkle_root: string;
@@ -35,21 +30,13 @@ export type CircomCoeffInputs = {
 };
 
 /**
- * Logical public inputs that are **not** circuit input signals.
+ * Logical public inputs that are not circuit input signals.
  *
- * `digest` is the calldata copy of the coefficient digest. The circuit takes no
- * such input: it recomputes the digest from the coefficient signals and
- * evaluates its own. `flatten` and `coeffs` read this field, so a calldata
- * view can carry a digest the witness does not produce.
- *
- * The circuit constrains none of the others, so as PolyEval coefficients they
- * would be free variables a prover could use to solve `y = Σ c_k z^k`. They are
- * bound by being hashed into the Fiat-Shamir challenge: changing one changes
- * `z`, hence `y`, and the proof fails. `flatten` includes them and `coeffs`
- * does not.
- *
- * `toCircomInput` carries all of these alongside the witness and
- * `circuitSignals` drops them before witness calculation.
+ * `digest` is the calldata copy of the coefficient digest; the circuit
+ * recomputes its own from the coefficient signals. The circuit constrains none
+ * of the others: they are bound by being hashed into the Fiat-Shamir challenge
+ * (`flatten` includes them, `coeffs` does not). `circuitSignals` drops all of
+ * these before witness calculation.
  */
 export type TransactBinding = {
     digest: string;
@@ -93,19 +80,13 @@ export type CircomTransactInput = CircomCoeffInputs & {
 
 /**
  * Builder output: the circuit's witness plus the binding fields that only reach
- * the challenge. One object, because consumers need both (`flatten` to derive
- * `z`, the witness calculator to prove), and keeping them together prevents
- * hashing one transaction while proving another.
+ * the challenge.
  */
 export type TransactWitnessBundle = CircomTransactInput & TransactBinding;
 
 /**
- * Project a bundle onto the circuit's signal set.
- *
- * The wasm witness calculator rejects an unknown key outright ("Too many values
- * for input signal"), so the binding fields are dropped here. Written as an
- * explicit pick rather than a delete list, so a signal added to
- * `CircomTransactInput` but missing here fails to compile.
+ * Project a bundle onto the circuit's signal set: the wasm witness calculator
+ * rejects an unknown key ("Too many values for input signal").
  */
 export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
     return {
@@ -147,21 +128,18 @@ export interface BuildOpts {
     relayerAddress?: Field;
     /** `SwapWrapper`'s intent hash for a swap's withdraw leg; zero elsewhere. */
     intentHash?: Field;
-    /** Fiat-Shamir challenge. Tests default to 1n; production derives it from a transcript. */
+    /** Fiat-Shamir challenge; defaults to 1n. */
     z?: Field;
     /**
-     * `auxDigest(aux)` over the outputs' encrypted-note payloads. Required: the
-     * contract recomputes this slot from calldata, so a default of 0 would build
-     * a witness the verifier rejects.
+     * `auxDigest(aux)` over the outputs' encrypted-note payloads. The contract
+     * recomputes this slot from calldata.
      */
     outputAuxDigest: Field;
 }
 
 /**
- * Build the circom input object for Transact(DEPTH, N_IN, N_OUT).
- *
- * Arity is taken from the argument lengths rather than hardcoded, so `nIn` and
- * `nOut` may differ.
+ * Build the circom input object for Transact(DEPTH, N_IN, N_OUT). Arity is
+ * taken from the argument lengths.
  */
 export function toCircomInput(P: Poseidon, opts: BuildOpts): TransactWitnessBundle {
     const { inputs, outputs, publicAssetId, publicOut, merkleRoot } = opts;
@@ -191,8 +169,6 @@ export function toCircomInput(P: Poseidon, opts: BuildOpts): TransactWitnessBund
     return {
         z: z.toString(),
         ...coeffSignals,
-        // What an honest prover writes into calldata: the digest of the
-        // signals above, which is the value the circuit computes.
         digest: transactDigest(coeffSignals).toString(),
         recipient_address: recipientAddress.toString(),
         chain_id: chainId.toString(),
@@ -232,12 +208,10 @@ export function toCircomInput(P: Poseidon, opts: BuildOpts): TransactWitnessBund
  * nf = Poseidon(TAG_NF, nk, rho, cm) with nk = Poseidon(TAG_NK, 0); a fresh
  * `rho` keeps nf distinct from prior dummies and from any real spend. `cm` must
  * be the commitment SpentNote recomputes from the dummy's zero fields: the
- * circuit feeds it into the nullifier, so a placeholder 0 would fail.
+ * circuit feeds it into the nullifier.
  *
- * Everything but `rho` is zero, so the nullifier is a function of `rho` alone
- * and `rho` is what hides the slot: a wallet samples it uniformly. The values
- * used here are small and reproducible, since the published vectors contain
- * them. Not suitable for production.
+ * Everything but `rho` is zero, so `rho` is what hides the slot: a wallet
+ * samples it uniformly. Not suitable for production.
  */
 export function dummyInputAt(P: Poseidon, depth: number, rho: Field): SpentNote {
     const nsk = 0n;
@@ -264,18 +238,15 @@ const PAD_OUT_DOMAIN = 0x706f75n; // "pou"
 
 /**
  * Zero-value output slot, padding a bundle that produces fewer notes than N_OUT.
+ * `pk = 0` makes it unspendable.
  *
  * `slot` is the output index the note occupies and seeds `rcm`, which must be
  * non-zero and differ between slots. An output's `rho` is publicly derivable
- * (`DeriveRho` over `nullifier[0]`), so `rcm` is the only secret in `cm`: with
- * a known `rcm` anyone can recompute a padding slot's `cm` from `asset`,
- * `pk = 0` and `value = 0`, which reveals the transaction's true output count.
+ * (`DeriveRho` over `nullifier[0]`), so `rcm` is the only secret in `cm`: a
+ * known `rcm` reveals the transaction's true output count.
  *
  * Deterministic so the published vectors reproduce. Not suitable for
- * production; a wallet samples `rcm` uniformly.
- *
- * `pk = 0`: a padding output is unspendable by construction, and the value is
- * hashed into `cm` rather than published.
+ * production: a wallet samples `rcm` uniformly.
  */
 export function dummyOutput(P: Poseidon, slot: number, asset: Field = 1n): Note {
     const rcm = P.hash([PAD_OUT_DOMAIN, BigInt(slot)]);

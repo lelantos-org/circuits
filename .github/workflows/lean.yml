@@ -8,8 +8,7 @@ on:
       - '.github/workflows/lean.yml'
   push:
     branches: [main]
-    # Same filter as `pull_request`, so pushes that cannot affect a proof skip
-    # the 60-minute job.
+    # Same filter as `pull_request`.
     paths:
       - 'lean/**'
       - 'src/**'
@@ -38,8 +37,8 @@ jobs:
         run: python3 scripts/check-prime.py
 
       # Installs elan from `lean-toolchain`, restores the `.lake` cache, fetches
-      # prebuilt Mathlib oleans (`lake exe cache get`), and builds. Adds elan to
-      # `$GITHUB_PATH` for the `lake env` steps below.
+      # prebuilt Mathlib oleans, and builds. Adds elan to `$GITHUB_PATH` for the
+      # `lake env` steps below.
       - name: Build
         id: lean
         uses: leanprover/lean-action@v1
@@ -49,30 +48,23 @@ jobs:
           # No `test` or `lint` target exists; disable auto-configuration of them.
           test: false
           lint: false
-          # Runs as a separate step after pruning; the action would otherwise run
-          # it on the restored `.lake`, including orphaned oleans.
+          # Runs as a separate step, after orphaned oleans are pruned.
           leanchecker: false
 
       # The restored `.lake` cache may contain oleans for deleted or renamed
-      # modules, and `leanchecker` replays all of them. An orphan fails against
-      # the current oleans of its imports, so those outputs are removed first.
+      # modules, which `leanchecker` would replay and fail on.
       - name: Prune build outputs of deleted modules
         run: ./scripts/prune-stale-build.sh
 
       # Independent kernel re-check of every declaration under the `Lelantos`
       # prefix, detecting proofs accepted only because of an elaborator bug.
       # With no arguments its target is the capitalized manifest package name
-      # (see `lean/lakefile.toml`); this is the command `lean-action` runs for
-      # `leanchecker: true`.
-      #
-      # Runs on pull requests as well as pushes, so such proofs are rejected
-      # before reaching `main`; the job's path filter limits it to changes that
-      # can affect a proof.
+      # (see `lean/lakefile.toml`).
       - name: Kernel re-check (leanchecker)
         run: lake env leanchecker
 
-      # `check-axioms.sh` detects `sorryAx` reaching a top-level theorem; this
-      # also detects `sorry` in files nothing imports.
+      # Also detects `sorry` in files nothing imports, which `check-axioms.sh`
+      # does not reach.
       - name: No `sorry`
         run: |
           if grep -rn '\bsorry\b' Lelantos/ Lelantos.lean; then
@@ -85,26 +77,22 @@ jobs:
       - name: Trusted base unchanged
         run: ./scripts/check-axioms.sh
 
-      # Dumps the hand-transcribed public-input layout for each instantiated
-      # shape and diffs it. `test/formal/layout_parity.test.ts` checks the SDK
-      # against `expected/layout-4x6.txt`, so that file must match Lean.
+      # Diffs the public-input layout of each instantiated shape.
+      # `test/formal/layout_parity.test.ts` checks the SDK against
+      # `expected/layout-4x6.txt`, so that file must match Lean.
       - name: Public-input layout unchanged
         run: ./scripts/dump-layout.sh
 
-      # Resolves every hand-maintained circom citation in doc comments, detecting
-      # renamed or deleted sources, citations past the end of a file, and spans
-      # that do not contain what the comment quotes.
+      # Resolves every circom citation in doc comments: missing sources, lines
+      # past the end of a file, and spans that do not contain the quoted text.
       - name: Source citations resolve
         run: python3 scripts/check-citations.py
 
-      # Checks that the citations together reach every `===` and `<==` the
-      # circom emits; an uncited constraint may be missing from the model. The
-      # residue (e.g. `EmptySubtreeHashes`) is pinned in
-      # `expected/coverage.txt` and diffed, as the trusted base is.
+      # Checks that the citations reach every `===` and `<==` in the circom; the
+      # uncited residue is pinned in `expected/coverage.txt` and diffed.
       - name: Constraint coverage unchanged
         run: python3 scripts/check-coverage.py
 
-      # Checks that the `Lelantos` declarations named in prose exist; the
-      # compiler does not resolve identifiers in comments.
+      # Checks that the `Lelantos` declarations named in prose exist.
       - name: Names the prose claims resolve
         run: python3 scripts/check-names.py

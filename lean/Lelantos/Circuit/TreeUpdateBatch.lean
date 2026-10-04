@@ -8,83 +8,57 @@ import Lelantos.Gadgets.CoeffDigest
 /-!
 # `src/tree_update_batch.circom` — the relayer batch tree-advance proof
 
-The batch circuit builds each slot's leaf, hands the leaves to `BatchAppend`
-(`Gadgets/BatchAppend.lean`, whose circom header explains the tree), and equates the two
-roots it returns with the public `old_root` and `new_root`.
+The circuit builds each slot's leaf, hands the leaves to `BatchAppend`
+(`Gadgets/BatchAppend.lean`), and equates the two roots it returns with the public
+`old_root` and `new_root`.
 
-A leaf is a note commitment, `cm = Poseidon(TAG_CM, asset_id·2^64 + value, inner)`, and
-the word in `cms[k]` is read by `is_deposit[k]`:
+A leaf is a note commitment, `cm = Poseidon(TAG_CM, asset_id·2^64 + value, inner)`. With
+`is_deposit[k] = 0`, `cms[k]` is the `cm` a transact proof bound as `out_cm` and is the
+leaf. With `is_deposit[k] = 1`, `cms[k]` is the depositor's `inner` and the leaf is
+`NoteCommitment(leaf_asset[k], leaf_public_in[k], cms[k])`.
 
-* `is_deposit[k] = 0` — `cms[k]` is the `cm` a transact proof bound as `out_cm`. It is the
-  leaf. Nothing is opened here.
-* `is_deposit[k] = 1` — `cms[k]` is the depositor's `inner`. The leaf is
-  `NoteCommitment(leaf_asset[k], leaf_public_in[k], cms[k])`: the circuit builds `cm` from
-  the public amount.
+Signals: `Lelantos.Circuit.BatchWitness`. Coefficient order: `Lelantos.Circuit.BatchLayout`.
+Contract checks: `Lelantos.Circuit.Obligations`. The constraint system is `BatchSat`; every
+result depends on `p_prime` alone.
 
-This module is the constraint system and what it proves. Its signals are
-`Lelantos.Circuit.BatchWitness`, its coefficient order `Lelantos.Circuit.BatchLayout`, and
-what the contract must check `Lelantos.Circuit.Obligations`.
-
-The constraint system is one structure, `BatchSat`. It used to be two, so that the tree
-results could be shown to reach no curve axiom; there is no curve in the circuit any more,
-and every result below depends on `p_prime` alone.
-
-Each over a `BatchShape`:
+Results, each over a `BatchShape`; † marks those under Poseidon collision resistance:
 
 * `batch_count_range`, `batch_active_spec`, `batch_padding_zero` — `actual_count ∈ [1, MAX_L]`,
-  `active` is its prefix, and every field of an inactive slot is zero, so padding cannot
-  smuggle values into the compressed public inputs.
-* `batch_capacity`, `batch_frontier_canonical` — the run fits the tree, and no frontier slot a
-  root does not read carries a value.
-* `batch_old_root` — `old_root` is the tree holding `start_index` leaves with this frontier.
-* `batch_advances_by_count` — `new_root` is that tree after appending exactly the first
-  `actual_count` leaves. `batch_advances_at_positions` states the same root as a run of
-  single-leaf inserts at positions `start_index + k` (`appendRoot`).
-* `batch_deposit_leaf`, `batch_spend_leaf` — what the leaf of a slot is, by `is_deposit`.
-  Unconditional.
-* `batch_deposit_opening_unique` † — a note commitment equal to a deposit leaf has exactly
-  that leaf's `(leaf_asset, leaf_public_in)` and `inner`. `batch_deposit_spend_binds` † is
-  the same read from `SpentNote`: a slot opening that leaf spends exactly that amount of
-  that asset. Nothing depends on which asset ids are registered.
-* `batch_new_root_determined` † — under Poseidon collision resistance, two proofs from the
-  same `old_root`, `start_index`, `actual_count` and per-slot words reach the same
-  `new_root`: the frontier is private, but `old_root` pins every slot of it a root reads.
-  This is a statement about the tree. It is not the commitment the compression relies on.
-
-The tree results assume `ZerosCoherent zeros`, that the `EMPTY_SUBTREE` table is the
-empty-subtree chain (`Spec/QuatTree.lean`). The table is a parameter of the constraint system
-rather than a signal, so every assignment of one circuit shares it.
-
+  `active` is its prefix, and every field of an inactive slot is zero.
+* `batch_capacity`, `batch_frontier_canonical` — the run fits the tree, and every frontier
+  slot no root reads is zero.
+* `batch_old_root`, `batch_advances_by_count`, `batch_advances_at_positions` — `old_root` is
+  the tree holding `start_index` leaves with this frontier, and `new_root` that tree after
+  `actual_count` single-leaf inserts at positions `start_index + k` (`appendRoot`).
+* `batch_deposit_leaf`, `batch_spend_leaf` — the leaf of a slot, by `is_deposit`.
+* `batch_deposit_opening_unique` †, `batch_deposit_spend_binds` † — a deposit leaf opens
+  only as its `(leaf_asset, leaf_public_in)` and `inner`, in particular from `SpentNote`.
+* `batch_new_root_determined` † — the public statement determines `new_root`, whatever the
+  private frontier.
 * `batch_compression`, `batch_challenge_nonzero` — `y` is the evaluation of the
-  `4 + 4·MAX_L` coefficients at a nonzero `z`. The slot order is `batchPiSlot`
-  (`Circuit/BatchLayout.lean`).
+  `4 + 4·MAX_L` coefficients, in `batchPiSlot` order (`Circuit/BatchLayout.lean`), at a
+  nonzero `z`.
 * `batch_digest_public` — the public `digest` is `CoeffDigest` of the same coefficients.
 * `batchCoeffs_determined_by_digest` †, `batch_calldata_binding` † — the digest determines
   the coefficient vector, between two witnesses and against a calldata vector.
-* `batch_pi_binding`, `batch_calldata_pi_binding` — two distinct coefficient vectors
-  evaluate equally on at most `4 + 4·MAX_L − 1` challenges, 35 at the deployed shape.
+* `batch_pi_binding`, `batch_calldata_pi_binding` — distinct coefficient vectors agree on at
+  most `4 + 4·MAX_L − 1` challenges, 35 at the deployed shape.
 
-The binding argument is the transact circuit's ("Why the compression binds" in
-`Lelantos.Circuit.Transact`): the contract hashes the calldata digest word into `z` and
-passes it to the verifier, so the witness coefficients are committed before the challenge.
-The Fiat-Shamir step that joins the † results to the challenge count is prose and is not
-formalised.
+The tree results assume `ZerosCoherent zeros`: the `EMPTY_SUBTREE` table, a parameter of
+the constraint system, is the empty-subtree chain (`Spec/QuatTree.lean`).
 
 ## Not covered
 
-* **Which slots are deposits.** `is_deposit` is constrained only to be boolean. Set on a
-  spend leaf, the leaf becomes the hash of `out_cm` under `(leaf_asset, leaf_public_in)`,
-  which has no opening as a note; cleared on a deposit leaf, the depositor's word is
-  inserted as it stands. Both verify. `BatchContractObligations.is_deposit_pinned` records
-  the check that excludes them.
-* `new_root` is not the commitment to the coefficients. Every active word reaches it, but
-  it is not injective in them: a zero leaf is the empty leaf, so a run with a trailing zero
-  leaf and a shorter run have the same roots. The batch has its own `CoeffDigest` public
-  signal for that purpose.
-* Nothing here is a statement about `start_index` being the true tree size, about
-  `old_root` being the live root, or about the leaves being the ones somebody escrowed.
-  Those are the contract's, recorded in `BatchContractObligations`
-  (`Circuit/Obligations.lean`) and assumed by no theorem here.
+* `is_deposit` is constrained only to be boolean. Set on a spend leaf, the leaf is the hash
+  of `out_cm` under `(leaf_asset, leaf_public_in)`, which has no opening as a note; cleared
+  on a deposit leaf, the depositor's word is inserted as it stands. Both verify;
+  `BatchContractObligations.is_deposit_pinned` records the check that excludes them.
+* `new_root` does not commit to the coefficients: a zero leaf is the empty leaf, so a run
+  with a trailing zero leaf and a shorter run have the same roots. The `CoeffDigest` public
+  signal is the commitment.
+* That `start_index` is the tree size, `old_root` the live root, and the leaves the
+  escrowed ones is the contract's to check: `BatchContractObligations`
+  (`Circuit/Obligations.lean`), assumed by no theorem here.
 -/
 
 namespace Lelantos
@@ -94,58 +68,54 @@ namespace Lelantos
 `src/tree_update_batch.circom`. -/
 structure BatchSat {depth maxL : ℕ} (countBits : ℕ) (zeros : ℕ → F)
     (w : BatchSignals depth maxL) : Prop where
-  /-- `:126` — `is_deposit` is boolean. -/
+  /-- `:98` — `is_deposit` is boolean. -/
   deposit_bit : ∀ k, k < maxL → IsBit (w.isDeposit k)
-  /-- `:127` — a spend leaf carries no `leaf_asset`. -/
+  /-- `:99` — a spend leaf carries no `leaf_asset`. -/
   spend_zero_asset : ∀ k, k < maxL → (1 - w.isDeposit k) * w.leafAsset k = 0
-  /-- `:128` — a spend leaf carries no `leaf_public_in`. -/
+  /-- `:100` — a spend leaf carries no `leaf_public_in`. -/
   spend_zero_public_in : ∀ k, k < maxL → (1 - w.isDeposit k) * w.leafPublicIn k = 0
-  /-- `:143-144` — `rng_asset`: `leaf_asset` is 64-bit, on every slot. -/
+  /-- `:113-114` — `rng_asset`: `leaf_asset` is 64-bit, on every slot. -/
   asset_range : ∀ k, k < maxL → RangeCheck64Sat (w.leafAsset k) (w.assetBits k)
-  /-- `:146-147` — `rng_public_in`: `leaf_public_in` is 64-bit, on every slot. -/
+  /-- `:116-117` — `rng_public_in`: `leaf_public_in` is 64-bit, on every slot. -/
   public_in_range : ∀ k, k < maxL → RangeCheck64Sat (w.leafPublicIn k) (w.pubInBits k)
-  /-- `:149-152` — `dep_cm = NoteCommitment(leaf_asset, leaf_public_in, cms)`: the deposit
+  /-- `:119-122` — `dep_cm = NoteCommitment(leaf_asset, leaf_public_in, cms)`: the deposit
   leaf, with `cms[k]` in the `inner` position. -/
   dep_cm_def : ∀ k, k < maxL →
     w.depCm k = noteCommitment (w.leafAsset k) (w.leafPublicIn k) (w.cms k)
-  /-- `:154` — `dep_delta[k] <== is_deposit[k] * (dep_cm[k].cm - cms[k])`. -/
+  /-- `:124` — `dep_delta[k] <== is_deposit[k] * (dep_cm[k].cm - cms[k])`. -/
   dep_delta_def : ∀ k, k < maxL → w.depDelta k = w.isDeposit k * (w.depCm k - w.cms k)
-  /-- `:155` — `leaves[k] <== cms[k] + dep_delta[k]`: the mux. -/
+  /-- `:125` — `leaves[k] <== cms[k] + dep_delta[k]`: the mux. -/
   leaf_def : ∀ k, k < maxL → w.leaves k = w.cms k + w.depDelta k
-  /-- `:161-171` — one `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, the
+  /-- `:131-141` — one `BatchAppend(DEPTH, MAX_L)` over `start_index`, `actual_count`, the
   leaves and `frontier_in`. -/
   append : BatchAppendSat depth maxL countBits zeros w.startIndex w.actualCount w.leaves
     w.frontierIn w.append
-  /-- `:172` — `old_root === append.old_root`. -/
+  /-- `:142` — `old_root === append.old_root`. -/
   old_root_def : w.oldRoot = w.append.oldRoot
-  /-- `:173` — `new_root === append.new_root`. -/
+  /-- `:143` — `new_root === append.new_root`. -/
   new_root_def : w.newRoot = w.append.newRoot
-  /-- `:178` — inactive `cms` are zero. -/
+  /-- `:148` — inactive `cms` are zero. -/
   pad_cm : ∀ k, k < maxL → (1 - w.append.active k) * w.cms k = 0
-  /-- `:179` — inactive `leaf_asset` are zero. -/
+  /-- `:149` — inactive `leaf_asset` are zero. -/
   pad_asset : ∀ k, k < maxL → (1 - w.append.active k) * w.leafAsset k = 0
-  /-- `:180` — inactive `leaf_public_in` are zero. -/
+  /-- `:150` — inactive `leaf_public_in` are zero. -/
   pad_public_in : ∀ k, k < maxL → (1 - w.append.active k) * w.leafPublicIn k = 0
-  /-- `:181` — inactive `is_deposit` are zero. -/
+  /-- `:151` — inactive `is_deposit` are zero. -/
   pad_is_deposit : ∀ k, k < maxL → (1 - w.append.active k) * w.isDeposit k = 0
-  /-- `:193-194` — `leaf_asset_z = IsZero()` on `leaf_asset`. -/
+  /-- `:160-161` — `leaf_asset_z = IsZero()` on `leaf_asset`. -/
   asset_isZero : ∀ k, k < maxL →
     IsZeroSat (w.leafAsset k) (w.assetInv k) (w.assetIsZero k)
-  /-- `:195` — step 5: `leaf_asset_z[k].out * leaf_public_in[k] === 0`. No value under asset
-  id 0.
-
-  Ungated: `spend_zero_public_in` and `pad_public_in` force `leaf_public_in` to zero on
-  spend and inactive slots, where the product vanishes whatever the asset is. A zero-value
-  deposit leaf is unaffected and may name any id, 0 included. The hash pins the asset at any
-  value, so "no value under id 0" is the only rule left for this constraint to state. -/
+  /-- `:162` — step 5: `leaf_asset_z[k].out * leaf_public_in[k] === 0`. No value under asset
+  id 0. Ungated: `spend_zero_public_in` and `pad_public_in` force `leaf_public_in` to zero
+  on spend and inactive slots. -/
   no_value_under_zero : ∀ k, k < maxL → w.assetIsZero k * w.leafPublicIn k = 0
-  /-- `:199-211` — `pe = BatchCompress(MAX_L)`, wired to the public inputs, with `y <== pe.y`:
+  /-- `:166-178` — `pe = BatchCompress(MAX_L)`, wired to the public inputs, with `y <== pe.y`:
   public-input compression. Inside it, `pe = PolyEval(N)` over the `coeffs` array the layout
-  `Lelantos.batchPiSlot` transcribes, at `src/lib/poly_eval.circom:244-249`. -/
+  `Lelantos.batchPiSlot` transcribes, at `src/lib/poly_eval.circom:209-214`. -/
   compress : PolyEvalSat (batchPiCount maxL) (batchCoeffs w) w.z w.zInv w.zIsZero w.peAcc w.y
-  /-- `src/lib/poly_eval.circom:238-242` — `dg = CoeffDigest(N)` over the same `coeffs`, with
+  /-- `src/lib/poly_eval.circom:203-207` — `dg = CoeffDigest(N)` over the same `coeffs`, with
   `digest <== dg.out`. The circuit's public output is that signal:
-  `digest <== pe.digest`, at `src/tree_update_batch.circom:212`. It is not a coefficient and
+  `digest <== pe.digest`, at `src/tree_update_batch.circom:179`. It is not a coefficient and
   is not evaluated into `y`. -/
   digest_def : CoeffDigestSat (batchPiCount maxL) (batchCoeffs w) w.dgBlock w.digest
 
@@ -188,19 +158,16 @@ theorem batch_leaf_eq (h : BatchSat countBits zeros w) {k : ℕ} (hk : k < maxL)
       (noteCommitment (w.leafAsset k) (w.leafPublicIn k) (w.cms k) - w.cms k) := by
   rw [h.leaf_def k hk, h.dep_delta_def k hk, h.dep_cm_def k hk]
 
-/-- **A deposit slot's leaf is the note commitment over the public amount.** With
-`is_deposit[k] = 1` the leaf is `NoteCommitment(leaf_asset[k], leaf_public_in[k], cms[k])`,
-where `cms[k]` is the `inner` the depositor published.
-
-Unconditional. The right-hand side mentions no private signal, so the leaf is a function of
-three public words. -/
+/-- **A deposit slot's leaf is the note commitment over the public amount**,
+`NoteCommitment(leaf_asset[k], leaf_public_in[k], cms[k])`: a function of three public
+words. -/
 theorem batch_deposit_leaf (h : BatchSat countBits zeros w) {k : ℕ} (hk : k < maxL)
     (hdep : w.isDeposit k = 1) :
     w.leaves k = noteCommitment (w.leafAsset k) (w.leafPublicIn k) (w.cms k) := by
   rw [batch_leaf_eq h hk, hdep]; ring
 
 /-- **A spend slot's leaf is `cms[k]` itself**, the commitment a transact proof bound as
-`out_cm`. Nothing is opened. -/
+`out_cm`. -/
 theorem batch_spend_leaf (h : BatchSat countBits zeros w) {k : ℕ} (hk : k < maxL)
     (hdep : w.isDeposit k = 0) : w.leaves k = w.cms k := by
   rw [batch_leaf_eq h hk, hdep]; ring
@@ -241,11 +208,9 @@ theorem batch_no_value_under_zero (h : BatchSat countBits zeros w) {k : ℕ} (hk
 
 /-- **A deposit leaf has one opening.** Under Poseidon collision resistance, any
 `(asset, value, inner)` with both scalars 64-bit whose note commitment equals a deposit
-slot's leaf is that slot's `(leaf_asset, leaf_public_in, cms)`.
-
-The binding is injective with no assumption on which asset ids exist. It rests on the two
-range checks the circuit applies to the slot and the two the opener must satisfy;
-`SpentNote` applies them unconditionally (`batch_deposit_spend_binds`).
+slot's leaf is that slot's `(leaf_asset, leaf_public_in, cms)`. The opener's two range
+checks are hypotheses; `SpentNote` applies them unconditionally
+(`batch_deposit_spend_binds`).
 
 `hcr` is unsatisfiable (`poseidon_collision`); this is an assumption recorded in the
 statement. -/
@@ -262,10 +227,8 @@ theorem batch_deposit_opening_unique (hcr : ¬ PoseidonCollision)
 `SpentNote` slot, of any transact shape, whose commitment is a deposit slot's leaf carries
 `asset_id = leaf_asset`, `value = leaf_public_in`, and an `inner` equal to the word the
 depositor published. The slot need not be real: `SpentNote` range-checks and commits on
-dummies too.
-
-This is the cross-circuit half of the deposit binding. That the leaf is the one in the tree
-at the slot's position is `TxBinding.membershipBinding`. -/
+dummies too. That the leaf is the one in the tree at the slot's position is
+`TxBinding.membershipBinding`. -/
 theorem batch_deposit_spend_binds (hcr : ¬ PoseidonCollision)
     (h : BatchSat countBits zeros w) {k : ℕ} (hk : k < maxL) (hdep : w.isDeposit k = 1)
     {d : ℕ} {s : SpentSlot d} (hs : SpentNoteSat s) (hcm : s.cm = w.leaves k) :
@@ -298,9 +261,8 @@ theorem batch_old_root (hs : BatchShape depth maxL countBits) (hz : ZerosCoheren
     w.oldRoot = batchTree w.startIndex.val 0 w.leaves w.frontierIn zeros depth 0 :=
   h.old_root_def.trans (batchAppend_old_root hs hz h.append)
 
-/-- **The batch appends exactly `actual_count` leaves.** `new_root` is the tree before the
-append with the first `actual_count` leaves added at `start_index`. The statement places no
-parity condition on `actual_count`, since appends are leaf-granular. -/
+/-- **The batch appends `actual_count` leaves.** `new_root` is the tree before the append
+with the first `actual_count` leaves added at `start_index`. -/
 theorem batch_advances_by_count (hs : BatchShape depth maxL countBits)
     (hz : ZerosCoherent zeros) (h : BatchSat countBits zeros w) :
     w.newRoot = batchTree w.startIndex.val w.actualCount.val w.leaves w.frontierIn zeros
@@ -323,16 +285,11 @@ theorem batch_advances_at_positions (hs : BatchShape depth maxL countBits)
     batchTree_eq_appendRoot hz (batch_count_range hs h).1 hcap]
 
 /-- **The new root is determined by the public statement**, under Poseidon collision
-resistance. Two proofs from the same `old_root`, `start_index`, `actual_count` and the same
-per-slot words `cms`, `leaf_asset`, `leaf_public_in` and `is_deposit` reach the same
-`new_root`, whatever private frontier each supplied: the four words fix every leaf
-(`batch_leaf_eq`), `old_root` pins every frontier slot a root reads
-(`batchTree_frontier_inj`), and the new tree reads no other.
-
-This is a property of the tree: it stops a relayer pairing a real `old_root` with a forged
-frontier. It is not the commitment the compression relies on. `new_root` is not injective
-in the coefficients (a zero leaf is the empty leaf), and the batch has a separate
-`CoeffDigest` public signal (`batch_digest_public`). -/
+resistance, whatever private frontier each proof supplied: the per-slot words `cms`,
+`leaf_asset`, `leaf_public_in` and `is_deposit` fix every leaf (`batch_leaf_eq`), and
+`old_root` pins every frontier slot a root reads (`batchTree_frontier_inj`). A relayer
+cannot pair a real `old_root` with a forged frontier. This is not the commitment the
+compression relies on (`batch_digest_public`). -/
 theorem batch_new_root_determined (hcr : ¬ PoseidonCollision)
     (hs : BatchShape depth maxL countBits) (hz : ZerosCoherent zeros)
     {w' : BatchSignals depth maxL}
@@ -362,10 +319,10 @@ theorem batch_new_root_determined (hcr : ¬ PoseidonCollision)
 
 /-! ## The compression
 
-The verifier's public signals are `(y, digest, z)`, as in the transact circuit, and the
-binding argument is the same: see "Why the compression binds" in
-`Lelantos.Circuit.Transact`. The results below are its two halves at the batch layout. The
-Fiat-Shamir step that joins them is prose and is not formalised.
+The verifier's public signals are `(y, digest, z)`. The binding argument is the transact
+circuit's ("Why the compression binds" in `Lelantos.Circuit.Transact`); the results below
+are its two halves at the batch layout. The Fiat-Shamir step that joins them is not
+formalised.
 -/
 
 /-- **`y` is the evaluation of the batch layout at `z`.** -/
@@ -377,35 +334,25 @@ theorem batch_compression (h : BatchSat countBits zeros w) :
 theorem batch_challenge_nonzero (h : BatchSat countBits zeros w) : w.z ≠ 0 :=
   polyEvalSat_z_ne_zero h.compress
 
-/-- **The public digest is the digest of the coefficient vector.** Unconditional: it is
-`coeffDigest_sound` on the circuit's own `CoeffDigest` instance, nine `Poseidon(5)` blocks
-at `MAX_L = 8`. -/
+/-- **The public digest is the digest of the coefficient vector**: `coeffDigest_sound` on
+the circuit's `CoeffDigest` instance, nine `Poseidon(5)` blocks at `MAX_L = 8`. -/
 theorem batch_digest_public (h : BatchSat countBits zeros w) :
     w.digest = coeffDigest (batchCoeffs w) (batchPiCount maxL) :=
   coeffDigest_sound h.digest_def
 
 /-- **A calldata vector with the witness's digest is the witness's vector**, under Poseidon
-collision resistance. If the `CoeffDigest` of a calldata coefficient vector `c` equals the
-public `digest` of a satisfying batch witness, then `c` agrees with that witness's
-coefficient vector on every coefficient.
-
-The hypothesis is what honest calldata satisfies. That calldata which verifies satisfies it
-is the Fiat-Shamir step, which is not formalised.
-
-`hcr` is unsatisfiable (`poseidon_collision`); this is an assumption recorded in the
-statement. -/
+collision resistance: if the `CoeffDigest` of a calldata coefficient vector `c` equals the
+public `digest` of a satisfying batch witness, `c` agrees with that witness's coefficient
+vector. That calldata which verifies satisfies the hypothesis is the Fiat-Shamir step, which
+is not formalised. -/
 theorem batch_calldata_binding (hcr : ¬ PoseidonCollision) (h : BatchSat countBits zeros w)
     {c : ℕ → F} (hd : coeffDigest c (batchPiCount maxL) = w.digest) :
     ∀ k, k < batchPiCount maxL → c k = batchCoeffs w k :=
   digest_inj hcr (hd.trans (batch_digest_public h))
 
 /-- **The public digest determines the coefficient vector**, under Poseidon collision
-resistance. Two satisfying batch witnesses with equal public digests agree on every
-coefficient. The two witnesses may be of circuits with different `COUNT_BITS` and
-`EMPTY_SUBTREE`; only the layout is shared.
-
-`hcr` is unsatisfiable (`poseidon_collision`); this is an assumption recorded in the
-statement. -/
+resistance. The two witnesses may be of circuits with different `COUNT_BITS` and
+`EMPTY_SUBTREE`; only the layout is shared. -/
 theorem batchCoeffs_determined_by_digest (hcr : ¬ PoseidonCollision)
     {w' : BatchSignals depth maxL} {countBits' : ℕ} {zeros' : ℕ → F}
     (h : BatchSat countBits zeros w) (h' : BatchSat countBits' zeros' w')
@@ -413,8 +360,8 @@ theorem batchCoeffs_determined_by_digest (hcr : ¬ PoseidonCollision)
     ∀ k, k < batchPiCount maxL → batchCoeffs w k = batchCoeffs w' k :=
   batch_calldata_binding hcr h' ((batch_digest_public h).symm.trans hd)
 
-/-- …stated per named public input: equal digests mean the same roots, the same position
-and count, and the same four words on every slot. -/
+/-- `batchCoeffs_determined_by_digest` per named public input: equal digests mean the same
+roots, position and count, and the same four words on every slot. -/
 theorem batchSlotValue_determined_by_digest (hcr : ¬ PoseidonCollision)
     {w' : BatchSignals depth maxL} {countBits' : ℕ} {zeros' : ℕ → F}
     (h : BatchSat countBits zeros w) (h' : BatchSat countBits' zeros' w')
@@ -445,7 +392,7 @@ theorem batch_pi_binding {w' : BatchSignals depth maxL} {countBits' : ℕ} {zero
 /-- **Public-input binding against calldata.** Let `c` be the coefficient vector a verifier
 read from calldata, whose evaluation at the proof's challenge is the proof's `y`. If `c`
 differs from the witness's coefficient vector anywhere, then `z` is one of at most
-`batchPiCount - 1` field elements. Unconditional. -/
+`batchPiCount - 1` field elements. -/
 theorem batch_calldata_pi_binding (h : BatchSat countBits zeros w) {c : ℕ → F}
     (hy : polyEval c (batchPiCount maxL) w.z = w.y)
     (hne : ∃ k, k < batchPiCount maxL ∧ c k ≠ batchCoeffs w k) :
@@ -464,10 +411,10 @@ example : batchPiCount 8 - 1 = 35 := by norm_num [batchPiCount]
 /-! ### The deployed instantiation
 
 `src/tree_update_batch.circom` instantiates `TreeUpdateBatch(11, 8)` with
-`COUNT_BITS = 3`. `BatchShape.deployed` discharges the numeric side conditions at those
-numbers, which shows the bounds the results above carry are simultaneously satisfiable.
-`ZerosCoherent` is not numeric and stays a hypothesis; that it holds together with
-`BatchSat` on one assignment is `batch_advances_witness` (`Proofs/BatchCompleteness.lean`).
+`COUNT_BITS = 3`. `BatchShape.deployed` discharges the numeric side conditions there, so
+the bounds the results above carry are jointly satisfiable. `ZerosCoherent` stays a
+hypothesis; that it holds together with `BatchSat` on one assignment is
+`batch_advances_witness` (`Proofs/BatchCompleteness.lean`).
 
 `MAX_L = 8` is the minimum: `COUNT_BITS` requires a power of two, and a spend emits
 `TRANSACT_OUT = 6` leaves that must fit one batch. -/
@@ -480,7 +427,7 @@ theorem BatchShape.deployed : BatchShape 11 8 3 where
   depth_pos := by norm_num
 
 /-- The windows at the deployed `BatchAppend(11, 8)`, evaluated: eight leaves, then three, then
-two per level, then the root. Their sum is `NODES` at `src/lib/batch_append.circom:195-202`, the
+two per level, then the root. Their sum is `NODES` at `src/lib/batch_append.circom:191-198`, the
 thirty `node` signals the compiled circuit carries, and each level above the leaves costs one
 `Poseidon(5)` per slot — twenty-two. -/
 theorem batchWindow_deployed :

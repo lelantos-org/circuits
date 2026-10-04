@@ -29,13 +29,9 @@ template PathIndexSelectors() {
 // Empty-subtree hashes: zeros[0] = 0, zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] x 4).
 // TAG_MERKLE must match MerkleLevel4.
 //
-// Tabulated because circom does not constant-fold Poseidon: computing the chain
-// in-circuit costs DEPTH x Poseidon(5) constraints per use.
-//
-// `test/merkle.test.ts` recomputes the chain with circomlibjs and checks every
-// entry, and checks EMPTY_SUBTREE(DEPTH) against CommitmentTree.EMPTY_ROOT in the
-// contracts repo. Other consumers should read the root from this table rather
-// than keep a separate copy.
+// Tabulated because circom does not constant-fold Poseidon. Every entry, and
+// EMPTY_SUBTREE(DEPTH) against CommitmentTree.EMPTY_ROOT in the contracts repo,
+// is checked in test/gadgets/merkle.test.ts.
 //
 // Extending the tree beyond DEPTH = 11 requires appending entries here.
 function EMPTY_SUBTREE(d) {

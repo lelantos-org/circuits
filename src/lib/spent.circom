@@ -42,8 +42,8 @@ template SpentNote(DEPTH) {
     pk_check.ivk <== ivk_d.ivk;
     (1 - is_dummy) * (pk_check.pk - pk) === 0;
 
-    // 2. Range-check value and asset_id. Both hold on a dummy slot too: the
-    //    packing in step 3 is injective only under them.
+    // 2. Range-check value and asset_id, on dummy slots too: the packing in
+    //    step 3 is injective only under both bounds.
     component rng_value = RangeCheck64();
     rng_value.v <== value;
 
@@ -73,8 +73,8 @@ template SpentNote(DEPTH) {
         mp.path_indices[d]     <== path_indices[d];
     }
 
-    // 5. nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm). cm is in the
-    //    preimage, so a rho collision alone cannot lock a note.
+    // 5. Nullifier. cm is in the preimage, so a rho collision alone cannot lock
+    //    a note.
     component nk_d = DeriveNk();
     nk_d.nsk <== nsk;
 

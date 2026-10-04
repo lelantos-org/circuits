@@ -1,31 +1,11 @@
 // The R1CS-level second-witness search, over `tree_update_batch.circom`.
-//
 // `underconstrained.fuzz.test.ts` runs the same search over `4x6.circom`.
-// `test/batch/` only checks whether the wasm accepts an input
-// object, where a signal the template computes but never constrains is not
-// observable; this file provides constraint-system coverage for the batch
-// circuit.
 //
-// It is a separate file rather than a parameterisation because the per-circuit
-// part differs: the scenario builders are `TxBuilder` shapes there and batch
-// witnesses here, and each suite's detector self-check pins its own gadget
-// census. The search part is shared: `lib/underconstrained_suite.ts` loads both
-// builds and judges a finding list.
-//
-// Out of scope: the forgery in `batch/divergent.test.ts`
-// is not reachable by these searches, by construction:
-//
-//   * The searches walk straight lines from an honest witness. That forgery is
-//     a differently shaped witness (`is_deposit` cleared, so the word is the
-//     leaf), not a null direction from a deposit witness.
-//   * `severity: "break"` means "some moving entry is an output or a public
-//     input". The forgery holds `y` and `z` fixed, so even if found it would be
-//     graded `malleable`.
-//
-// The two suites are complementary: this one decides local freedom around
-// honest witnesses, and the divergent-witness block decides whether the witness
-// may disagree with the calldata it is proved against. `just picus` decides the
-// general case, at weak safety.
+// Out of scope: the forgery in `batch/divergent.test.ts`. The searches walk
+// straight lines from an honest witness, and that forgery is a differently
+// shaped witness (`is_deposit` cleared, so the word is the leaf), not a null
+// direction from a deposit witness. `just picus` decides the general case, at
+// weak safety.
 
 import * as fc from "fast-check";
 import { expect } from "chai";
@@ -76,9 +56,8 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
 
 
     // BatchAppend pins every frontier slot neither root reads to zero, so no
-    // frontier signal may be free at any digit pattern. The sweeps below would
-    // also fail on one, since no explanation covers it; this states the property
-    // directly. start_index = 0 has every digit 0, so all 33 slots are unread.
+    // frontier signal may be free at any digit pattern. start_index = 0 has
+    // every digit 0, so all 33 slots are unread.
     it("no frontier slot is free, at any digit pattern", async () => {
         for (const start of [0, 21, 4 ** 5 - 3, 4 ** 11 - 1]) {
             const witness = await suite.witnessFor(batch.single({ val: 42n, isDeposit: 1 }, start));
@@ -91,9 +70,9 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
 
     // ===== witness-level: both sweeps, over a spread of honest batches =====
     //
-    // Which signals are free depends on the witness. The circuit branches on how
-    // many slots are active, whether each leaf is a deposit or a spend, and where
-    // the frontier sits, so the scenarios span those three axes.
+    // Which signals are free depends on how many slots are active, whether each
+    // leaf is a deposit or a spend, and where the frontier sits. The scenarios
+    // span those three axes.
 
     it("a single deposit leaf has no second witness", async () => {
         const findings = await assertNoSecond(
@@ -105,10 +84,9 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
     });
 
     it("a single spend leaf has no second witness", async () => {
-        // The word is the leaf, and `leaf_asset`/`leaf_public_in` carry only
-        // their zeroings. The deposit hash is still computed, over zeros and the
-        // word, and then not selected: `dep_cm` is pinned by its own hash
-        // whether or not anything reads it.
+        // The word is the leaf. The deposit hash is still computed and then not
+        // selected: `dep_cm` is pinned by its own hash whether or not anything
+        // reads it.
         await assertNoSecond(
             "oneSpend",
             batch.single({ val: 1000n, isDeposit: 0 }),
@@ -123,20 +101,14 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
 
     it("a full flush of principal/fee pairs with zero fees has no second witness", async () => {
         // Every fee note has zero value at asset 0, so every odd slot has both
-        // `IsZero(leaf_asset)` and its product with `leaf_public_in` at zero:
-        // the witness with the most vanishing terms in step 5.
-        //
-        // Also the all-slots-active case. The search results depend on the
-        // witness only through which slots are active (each inactive slot adds
-        // one free IsZero hint), so a separate full batch would sweep the whole
-        // witness again for the same finding set.
+        // `IsZero(leaf_asset)` and its product with `leaf_public_in` at zero.
+        // Also the all-slots-active case.
         await assertNoSecond("fbps0Flush", batch.honest(0, batch.depositPairs(MAX_L)));
     });
 
     it("a batch at a non-trivial frontier has no second witness", async () => {
         // start_index = 21 = 0b010101 gives non-zero digits at the three lowest
-        // levels, so both roots read filled frontier slots rather than an
-        // all-empty frontier.
+        // levels, so both roots read filled frontier slots.
         await assertNoSecond(
             "frontier21",
             batch.single({ val: 42n, isDeposit: 1 }, 21),
@@ -146,15 +118,14 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
     it("a full batch straddling a deep boundary has no second witness", async () => {
         // 4^5 - 3: the run crosses a level-5 boundary, so every level up to 5
         // uses both slots of its window and the level-1 window all three, with
-        // filled frontier slots below. The other scenarios start at 0 or 21,
-        // where the upper windows hold one real node and one empty subtree.
+        // filled frontier slots below.
         const leaves = batch.seededMany(MAX_L, i => (i % 2 === 0 ? 0 : 1));
         await assertNoSecond("straddle4^5", batch.honest(4 ** 5 - 3, leaves));
     });
 
     it("a batch on the last index of the tree has no second witness", async () => {
-        // Every digit is 3: all 33 frontier slots are filled and read, the
-        // opposite extreme from start 0, and the capacity check is tight.
+        // Every digit is 3: all 33 frontier slots are filled and read, and the
+        // capacity check is tight.
         await assertNoSecond(
             "lastIndex",
             batch.single({ val: 42n, isDeposit: 1 }, 4 ** BATCH_DEPTH - 1),
@@ -162,8 +133,7 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
     });
 
     it("a single zero-value fee note has no second witness", async () => {
-        // A zero-value leaf at asset 0 beside a valued one. Every constraint is
-        // per-slot, so a zero-value leaf is valid at any slot.
+        // A zero-value leaf at asset 0 beside a valued one.
         await assertNoSecond(
             "zeroValueFee",
             batch.honest(0, batch.depositPairs(2)),
@@ -172,8 +142,7 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
 
     it("a zero-value deposit leaf at a non-zero asset has no second witness", async () => {
         // The asset is an input of the leaf hash at any value, so nothing about
-        // it is free here: this is the shape the old Pedersen binding left with
-        // an unpinned 64-bit coefficient.
+        // it is free here.
         await assertNoSecond(
             "zeroValueNamedAsset",
             batch.honest(0, [batch.seeded(0, 1), batch.seeded(1, 1, 0n, 7n)]),
@@ -193,10 +162,9 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
                 fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
                 fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
                 async (count, prefill, flags, worthless) => {
-                    // Any interleaving is satisfiable: every constraint is
-                    // per-slot and refers to no neighbour. A deposit leaf is
-                    // drawn with zero value at asset 0 on half the draws, at
-                    // any slot.
+                    // Every constraint is per-slot, so any interleaving is
+                    // satisfiable. A deposit leaf is drawn with zero value at
+                    // asset 0 on half the draws.
                     const leaves = Array.from({ length: count }, (_, i) =>
                         flags[i] === 1 && worthless[i] === 1
                             ? batch.seeded(i, 1, 0n, 0n)

@@ -1,14 +1,10 @@
-// Baby-Jubjub, backed by circomlibjs.
+// Baby-Jubjub, backed by circomlibjs; used by the FMD clue reference (./fmd.ts).
 //
-// Field-element conversion is confined to this module. circomlibjs represents
-// field elements as Uint8Array(32) in Montgomery form, which is structurally
-// indistinguishable from the little-endian byte arrays used elsewhere in this
-// directory: passing one where the other is expected produces a wrong point
-// rather than a type error. Conversion goes through `F.e()` and `F.toObject()`,
-// and the public API accepts and returns only `bigint` and `[bigint, bigint]`.
-//
-// No circuit uses the curve. It remains for the FMD clue reference (./fmd.ts),
-// which is computed off-circuit and bound through the Fiat-Shamir challenge.
+// circomlibjs represents field elements as Uint8Array(32) in Montgomery form,
+// structurally indistinguishable from the little-endian byte arrays used
+// elsewhere in this directory. Conversion (`F.e()`, `F.toObject()`) is confined
+// to this module: the public API accepts and returns only `bigint` and
+// `[bigint, bigint]`.
 
 import { buildBabyjub } from "circomlibjs";
 import { BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./field.js";
@@ -48,8 +44,6 @@ export class Jubjub {
         return BABYJUB_SUBGROUP_ORDER;
     }
 
-    // ===== boundary: bigint <-> Montgomery =====
-
     private toInternal(p: Point): [Uint8Array, Uint8Array] {
         return [this.bj.F.e(p[0]), this.bj.F.e(p[1])];
     }
@@ -57,8 +51,6 @@ export class Jubjub {
     private fromInternal(p: [Uint8Array, Uint8Array]): Point {
         return [this.bj.F.toObject(p[0]), this.bj.F.toObject(p[1])];
     }
-
-    // ===== group operations =====
 
     addPoint(a: Point, b: Point): Point {
         assertPoint(a, "addPoint a");

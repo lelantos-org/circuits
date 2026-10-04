@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """Resolve every Lean name the doc comments and markdown reference.
 
-`check-citations.py` checks the circom a doc comment cites; this checks the
-`Lelantos` declarations the prose names. The build does not inspect identifiers in
-comments, so a renamed or unwritten theorem would otherwise go undetected.
-
-## What counts as a claim
+The build does not inspect identifiers in comments, so a renamed or unwritten theorem
+would otherwise go undetected.
 
 A backticked token is checked when it is unambiguously a Lean name:
 
   * `Lelantos.foo`: explicitly qualified;
-  * `Upper.lower`: a dotted name with a capitalised head, i.e. a structure field or
-    a namespaced theorem (`PISlot.auxDigest`, `InsertsTo.unique`);
-  * a bare `snake_case` token that appears nowhere in the circom sources. Circom
-    signal names (`is_deposit`, `old_root`, `actual_count`) are excluded by
-    cross-referencing `src/` rather than by a hand-maintained list.
+  * `Upper.lower`: a structure field or a namespaced theorem (`PISlot.auxDigest`,
+    `InsertsTo.unique`) under a head this development declares, which excludes
+    `Or.inr` (Lean) and `NoteCommitment.cm` (circom);
+  * a bare `snake_case` token that appears nowhere in the circom sources, which
+    excludes signal names (`is_deposit`, `old_root`, `actual_count`).
 
-Other tokens are not checked. A bare `lowerCamel` word may be a signal or a
-definition, and a dotted name under a head this development does not declare
-(`Or.inr`, `NoteCommitment.cm`) belongs to Lean or to circom. Broader rules would
-produce many false positives.
-
+Other tokens are not checked: a bare `lowerCamel` word may be a signal or a definition.
 `IGNORE` lists tactic and tool names the rules cannot classify.
 
 Run:  python3 lean/scripts/check-names.py            # check, from lean/
@@ -60,7 +53,7 @@ NOT_BUILT = {"Lelantos.Meta.Assumptions"}
 
 # The Lean side of the model-to-circuit signal map: each key must name a Lean field.
 # `test/formal/signal_parity.test.ts` checks the circom side, that each value names a
-# signal in the compiled `.sym`. Both sides are checked so neither can drift.
+# signal in the compiled `.sym`.
 SIGNAL_MAP = "expected/signal-map.json"
 # A backticked token that could be a Lean name. Backticks keep prose out.
 TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_']*(?:\.[A-Za-z_][A-Za-z0-9_']*)*)`")
@@ -120,18 +113,16 @@ def declared_names() -> set[str]:
         if line.strip():
             add_citable(names, line.strip())
 
-    # Module names (`Lelantos.Model.Poseidon`) are citable but are not constants, so
-    # they are added separately.
+    # Module names (`Lelantos.Model.Poseidon`) are citable but are not constants.
     for module in all_modules():
         add_citable(names, module)
     return names
 
 
 def add_citable(names: set[str], full: str) -> None:
-    """Record a dotted name under every suffix it can be cited by.
+    """Record a dotted name under every suffix prose may cite it by.
 
-    `Lelantos.PISlot.auxDigest` also matches `PISlot.auxDigest` and `auxDigest`,
-    since prose may cite any suffix.
+    `Lelantos.PISlot.auxDigest` also matches `PISlot.auxDigest` and `auxDigest`.
     """
     names.add(full)
     parts = full.split(".")
@@ -165,11 +156,7 @@ def lean_modules() -> list[str]:
 
 
 def circom_vocabulary() -> set[str]:
-    """Every identifier appearing in the circom sources.
-
-    A bare snake_case token found here is a quoted signal or template name, not a Lean
-    name.
-    """
+    """Every identifier appearing in the circom sources."""
     words: set[str] = set()
     for dirpath, dirnames, filenames in os.walk(SRC):
         dirnames[:] = [d for d in dirnames if d not in SKIPPED_DIRS]
@@ -190,13 +177,11 @@ def is_claim(token: str, names: set[str], circom: set[str]) -> bool:
         return True
     head, _, rest = token.partition(".")
     if rest:
-        # `Upper.lower`: a field or namespaced result, only under a head this development
-        # declares. `Or.inr` belongs to Lean and `NoteCommitment.cm` to circom.
+        # `Upper.lower`, only under a head this development declares.
         return head in names and not CAPITALISED.match(rest)
     if CAPITALISED.match(token) or "_" not in token:
-        # A bare capitalised token may be a circom template or a Lean structure, and a
-        # bare lowerCamel word may be a signal. Only snake_case, the form of theorem
-        # names here, is classified.
+        # A bare capitalised token may be a circom template or a Lean structure. Only
+        # snake_case, the form of theorem names here, is classified.
         return False
     return token not in circom
 
@@ -240,7 +225,6 @@ def main() -> int:
     failures: list[str] = []
     total = 0
 
-    # Signal-map keys and backticked prose names are checked in a single pass.
     for claim in itertools.chain(signal_map_claims(), prose_claims(names, circom)):
         total += 1
         if args.list:

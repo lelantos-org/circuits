@@ -101,13 +101,12 @@ export class TxBuilder {
     //
     // Output rho is forced to the derivation the circuit enforces,
     // rho = Poseidon(TAG_RHO, nullifier[0], out_index), overriding any note.rho
-    // the caller supplied. Matches the SDK bundle builders.
+    // the caller supplied.
     build(args: TxBuildArgs): TransactWitnessBundle {
         const nf0 = args.inputs[0].nf;
-        // `Transact` takes exactly N_IN inputs and N_OUT outputs; a short
-        // witness fails witness calculation. Unused slots take dummy inputs
-        // (`is_dummy = 1`, bypassing the pk, Merkle and asset checks) and
-        // value-0 output notes, which are real leaves and hash as such.
+        // `Transact` takes N_IN inputs and N_OUT outputs. Unused slots take
+        // dummy inputs (`is_dummy = 1`, bypassing the pk, Merkle and asset
+        // checks) and value-0 output notes, which are real leaves.
         const inputs = padInputs(this.P, this.depth, args.inputs);
         const padded = padOutputs(this.P, args.outputs);
         const outputs = padded.map((o, j) => ({ ...o, rho: buildRho(this.P, nf0, j) }));
@@ -126,11 +125,9 @@ export class TxBuilder {
             outputClues,
             outputAuxDigest,
         });
-        // Derive the challenge from the coefficients, as the contract does.
-        // `toCircomInput` defaults z to 1, at which PolyEval collapses to a
-        // plain sum and y is permutation-invariant, so a TransactCompressN that
-        // transposed two slots would still satisfy the suite. An explicit
-        // `args.z` takes precedence.
+        // Derive the challenge from the coefficients, as the contract does. At
+        // `toCircomInput`'s default z = 1, PolyEval collapses to a plain sum
+        // and y is permutation-invariant.
         if (args.z !== undefined) input.z = args.z.toString();
         else rebindFiatShamir(input);
         return input;
@@ -141,10 +138,8 @@ export class TxBuilder {
     }
 
     /**
-     * Spend `scenario`'s inputs against its root into `outputs`.
-     *
-     * `build` with the scenario unpacked; `extra` carries the public buckets,
-     * clues or a chosen challenge.
+     * Spend `scenario`'s inputs against its root into `outputs`; `extra` carries
+     * the public buckets, clues or a chosen challenge.
      */
     spend(
         scenario: Pick<Scenario, "root" | "inputs">,
@@ -155,19 +150,11 @@ export class TxBuilder {
     }
 
     // ===== scenario factories =====
-    //
-    // Each builds a tree, freezes its root, then finalizes the proofs; the root
-    // must be frozen before proofs are taken.
 
     /**
-     * Insert `notes` into a fresh tree, freeze the root, then take the proofs.
-     *
-     * Order matters: `finalize` reads an authentication path, and a path taken
-     * before the last insert authenticates against a stale root. `nsk` is one
-     * owner for every note, or one per note.
-     *
-     * The base of every factory below; call it directly for pre-shaped notes (a
-     * second asset, mixed owners).
+     * Insert `notes` into a fresh tree, freeze the root, then take the proofs: a
+     * path taken before the last insert authenticates against a stale root.
+     * `nsk` is one owner for every note, or one per note.
      */
     plant(notes: Note[], nsk: Field | readonly Field[]): Scenario {
         const owners = typeof nsk === "bigint" ? notes.map(() => nsk) : nsk;
@@ -193,11 +180,9 @@ export class TxBuilder {
     }
 
     /**
-     * The two-in-two-out transfer the fuzz suites draw: both inputs owned by
-     * `payer`, `o1` to `payee` and `o2` back to `payer`, nothing public.
-     *
-     * Returns the parts rather than the bundle, so a negative case can tamper a
-     * note before `spend`; `transfer` builds it directly.
+     * A two-in-two-out transfer: both inputs owned by `payer`, `o1` to `payee`
+     * and `o2` back to `payer`, nothing public. Returns the parts so a negative
+     * case can tamper a note before `spend`.
      */
     transferParts(
         split: Split,
@@ -212,7 +197,6 @@ export class TxBuilder {
         };
     }
 
-    /** `transferParts`, built. */
     transfer(
         split: Split,
         payer: Field,
@@ -234,11 +218,8 @@ export class TxBuilder {
     }
 
     /**
-     * A balanced witness with two real inputs and two real outputs: 100 + 50 in,
-     * 75 + 75 out, one owner, one asset, nothing public.
-     *
-     * The base for the tamper tests, which mutate a single field and expect
-     * rejection, so it is honest in every respect but the field under test.
+     * A balanced witness with two real inputs and two real outputs, one owner,
+     * one asset, nothing public: the honest base the tamper tests mutate.
      */
     balanced(nsk: Field = ALICE_NSK): TransactWitnessBundle {
         return this.spend(
@@ -248,24 +229,17 @@ export class TxBuilder {
     }
 
     /**
-     * `N_IN` real inputs and `N_OUT` real outputs, balanced: every slot the
-     * shape declares holds a real note.
+     * `N_IN` real inputs and `N_OUT` real outputs, balanced: every slot holds a
+     * real note. The base for the per-slot tamper expansion.
      *
-     * `balanced()` and the scenario factories above fill at most two input and
-     * two output slots, leaving the rest to `padInputs` / `padOutputs`. A dummy
-     * input bypasses the key and Merkle checks and a padding output is
-     * value-0, so a constraint that is mis-indexed for slot >= 2 — a loop bound
-     * one short, a high slot left unconstrained — is satisfied by every witness
-     * those factories produce. `src/4x6.circom` makes the same point about the
-     * consumer's checks: they "must range over the whole shape".
-     *
-     * This is the base for the per-slot tamper expansion, which needs every
-     * slot to carry the same constraints as slot 0 for the expectations to be
-     * uniform across `i` and `j`.
+     * The other factories fill at most two input and two output slots. A dummy
+     * input bypasses the key and Merkle checks and a padding output is value-0,
+     * so a constraint mis-indexed for slot >= 2 is satisfied by every witness
+     * they produce.
      *
      * Values are distinct per slot so a witness that confuses two slots does
-     * not balance by coincidence, and the rho seeds are spaced well apart so a
-     * `+1` tamper on one slot's field cannot land on another slot's value.
+     * not balance by coincidence, and the rho seeds are spaced so a `+1` tamper
+     * on one slot's field cannot land on another slot's value.
      */
     fullShape(nsk: Field = ALICE_NSK): TransactWitnessBundle {
         assertFullShapeValues();
@@ -279,24 +253,13 @@ export class TxBuilder {
      * `fullShape`, but every slot declares one of four distinct assets.
      *
      * `PerAssetValueBalance` sweeps N_CAND = N_IN + N_OUT + 1 = 11 candidate
-     * assets, and every other factory here is single-asset, so the whole sweep
-     * collapses onto one row: a candidate that is never evaluated, or one
-     * evaluated against the wrong slot, balances anyway. This shape gives four
-     * assets across the input slots and splits two of them across outputs, so
-     * each candidate carries a different sum.
-     *
-     * No slot is zero-valued, so relabelling any one of them — the tamper rows
-     * on `in_asset` / `out_asset` — moves value between two candidate rows and
-     * must be rejected. `test/gadgets/balance.test.ts` sweeps the gadget itself,
-     * which is where the exhaustive cases live; this is the end-to-end shape.
+     * assets. Under a single-asset witness the sweep collapses onto one row, so
+     * a candidate that is never evaluated, or one evaluated against the wrong
+     * slot, balances anyway. Here two of the four assets are split across
+     * outputs, so each candidate carries a different sum.
      *
      * `publicAssetId` is left at its default, 0 for a transfer, which no note
      * declares: the public candidate row is then `0 == 0`, the orphan case.
-     *
-     *   asset 101: in 100          -> out 60 + 40
-     *   asset 102: in  50          -> out 50
-     *   asset 103: in  30          -> out 30
-     *   asset 104: in  20          -> out 15 + 5
      */
     fullShapeMultiAsset(nsk: Field = ALICE_NSK): TransactWitnessBundle {
         assertMultiAssetConserves();
@@ -333,23 +296,16 @@ export interface Split {
     o2: bigint;
 }
 
-/**
- * Input and output values for `fullShape`, summing to the same total so the
- * witness balances.
- *
- * Distinct per slot, so a witness that reads one slot's value into another
- * changes that note's commitment rather than passing unnoticed.
- */
+/** Input and output values for `fullShape`: equal totals, distinct per slot. */
 const FULL_SHAPE_IN_VALUES = [100n, 50n, 30n, 20n];
 const FULL_SHAPE_OUT_VALUES = [60n, 50n, 40n, 30n, 15n, 5n];
 
 /**
- * `(asset, value)` per slot for `fullShapeMultiAsset`, four assets across the
- * input slots.
+ * `(asset, value)` per input slot for `fullShapeMultiAsset`.
  *
  * Every value is non-zero: a zero-valued slot contributes nothing to its
- * candidate row, so relabelling its asset would balance and the tamper rows
- * built on this shape would pass vacuously.
+ * candidate row, so relabelling its asset would still balance and a tamper
+ * test on it would pass vacuously.
  */
 export const MULTI_ASSET_IN: readonly (readonly [Field, bigint])[] = [
     [101n, 100n],
@@ -369,10 +325,9 @@ export const MULTI_ASSET_OUT: readonly (readonly [Field, bigint])[] = [
 ];
 
 /**
- * Per-asset conservation for the two tables above, checked before the shape is
- * built: an unbalanced base would be rejected by the circuit and every
- * rejection test built on it would pass without testing anything. Also pins the
- * table lengths to the shape, as `assertFullShapeValues` does.
+ * Check the two tables above for per-asset conservation, non-zero values and
+ * lengths matching the shape: on an unbalanced base every rejection test would
+ * pass vacuously.
  */
 function assertMultiAssetConserves(): void {
     if (MULTI_ASSET_IN.length !== N_IN || MULTI_ASSET_OUT.length !== N_OUT) {
@@ -399,9 +354,8 @@ function assertMultiAssetConserves(): void {
 }
 
 /**
- * The two tables above are listed explicitly rather than generated, so a change
- * to `N_IN` or `N_OUT` leaves them the wrong length and `fullShape` would no
- * longer fill every slot. This check throws in that case.
+ * Throw if the `fullShape` value tables, which are literals, do not match
+ * `N_IN` x `N_OUT` or do not balance.
  */
 function assertFullShapeValues(): void {
     const sum = (xs: bigint[]) => xs.reduce((a, b) => a + b, 0n);
@@ -421,15 +375,13 @@ function assertFullShapeValues(): void {
  * Re-derive the calldata digest and the Fiat-Shamir challenge `z` from the
  * witness in its current state: what an honest prover submits for it.
  *
- * Mirrors `lib/batch.ts :: rebindFiatShamir`. Call after mutating a
- * PolyEval-bound field when the test needs the calldata to describe the
- * witness it is evaluating; a tamper test expecting a constraint to fire does
- * not, since neither word carries a constraint of its own and a stale one only
+ * Call after mutating a PolyEval-bound field when the test needs the calldata
+ * to describe the witness. A tamper test expecting a constraint to fire does
+ * not: neither word carries a constraint of its own, and a stale one only
  * moves the `y` the circuit outputs.
  *
  * The digest is refreshed first because it is a word of the challenge
- * preimage. The circuit takes no digest input and always outputs its own, so a
- * stale `digest` here is a calldata view that disagrees with the witness.
+ * preimage. The circuit takes no digest input and outputs its own.
  */
 export function rebindFiatShamir(input: TransactWitnessBundle): TransactWitnessBundle {
     input.digest = transactDigest(input).toString();
@@ -437,12 +389,8 @@ export function rebindFiatShamir(input: TransactWitnessBundle): TransactWitnessB
 }
 
 /**
- * Snapshot a bundle's logical public inputs — the calldata view.
- *
- * A structural clone rather than a field-by-field copy, because unlike the batch
- * every field `flatten`/`coeffs` read is already a logical public input; there
- * is no private state in the bundle to exclude. The clone is deep, so the
- * caller can mutate one view without affecting the other.
+ * Snapshot a bundle's logical public inputs: the calldata view. The clone is
+ * deep, so the caller can mutate one view without affecting the other.
  */
 export function calldataView(w: TransactWitnessBundle): TransactWitnessBundle {
     return structuredClone(w);
@@ -453,21 +401,18 @@ export function calldataView(w: TransactWitnessBundle): TransactWitnessBundle {
  * `w`. `calldataPublic` computes the other two public signals the contract
  * hands the verifier.
  *
- * `rebindFiatShamir` combines two roles that are separate in deployment:
- * deriving the challenge and choosing the witness. `MASP` hashes its calldata
- * into `z`, compares its own `y`, and passes the calldata digest word to the
- * verifier; the prover then picks any witness satisfying the R1CS at that `z`.
- * `z` is a circuit input known before the witness is chosen; the digest public
- * signal is what commits the witness's coefficients before it
- * (src/README.md § 2a).
+ * In deployment `MASP` hashes its calldata into `z`, compares its own `y`, and
+ * passes the calldata digest word to the verifier; the prover then picks any
+ * witness satisfying the R1CS at that `z`. `z` is a circuit input known before
+ * the witness is chosen; the digest public signal is what commits the
+ * witness's coefficients before it (src/README.md § 2a).
  *
  * The view's `digest` is used as it stands. A divergence case that rewrites a
- * coefficient chooses whether to leave the digest stale or recompute it for
- * the rewritten coefficients; neither may verify.
+ * coefficient chooses whether to leave the digest stale or recompute it;
+ * neither may verify.
  *
- * Mirrors `lib/batch.ts :: bindFiatShamir`. Use this to test whether the prover
- * can diverge from the contract's calldata, and `rebindFiatShamir` to test
- * whether a specific constraint fires.
+ * Use this to test whether the prover can diverge from the contract's
+ * calldata, and `rebindFiatShamir` to test whether a specific constraint fires.
  */
 export function bindFiatShamir(
     w: TransactWitnessBundle,
@@ -478,10 +423,8 @@ export function bindFiatShamir(
 }
 
 /**
- * The `y` the contract computes for a calldata view at the bound challenge.
- *
- * `z` defaults to the view's own; pass one explicitly to evaluate a calldata
- * view at a challenge bound from elsewhere.
+ * The `y` the contract computes for a calldata view at challenge `z`, which
+ * defaults to the view's own.
  */
 export function calldataY(calldata: TransactWitnessBundle, z: Field = BigInt(calldata.z)): Field {
     return hornerEval(coeffs(calldata), z);
@@ -504,8 +447,7 @@ export function calldataPublic(
  *
  * Pairwise distinctness is a consumer obligation, not a circuit constraint:
  * `Transact` places no relation between nullifier slots, and `src/4x6.circom`
- * assigns the pairwise check to the consumer (`MASP.sol`). Dummies are kept
- * distinct here so a witness matches what the SDK emits.
+ * assigns the pairwise check to the consumer (`MASP.sol`).
  */
 function padInputs(P: Poseidon, depth: number, inputs: SpentNote[]): SpentNote[] {
     if (inputs.length > N_IN) {
@@ -518,10 +460,8 @@ function padInputs(P: Poseidon, depth: number, inputs: SpentNote[]): SpentNote[]
 }
 
 /**
- * Top up `outputs` to `N_OUT` with value-0 notes.
- *
- * Each padding note's `rcm` is seeded by the slot it lands in; see
- * `dummyOutput`.
+ * Top up `outputs` to `N_OUT` with value-0 notes. Each padding note's `rcm` is
+ * seeded by the slot it lands in; see `dummyOutput`.
  */
 function padOutputs(P: Poseidon, outputs: Note[]): Note[] {
     if (outputs.length > N_OUT) {
@@ -554,23 +494,18 @@ export interface Scenario {
  * Wrap a tester so it drops the challenge-only fields before the witness
  * calculator sees them.
  *
- * `TxBuilder.build` emits a `TransactWitnessBundle`: the circuit's signals plus
- * `digest`, `recipient_address`, `chain_id`, `payer_address`, `relayer_address`,
+ * A `TransactWitnessBundle` carries the circuit's signals plus `digest`,
+ * `recipient_address`, `chain_id`, `payer_address`, `relayer_address`,
  * `intent_hash`, the clue triples and `out_aux_digest`. Those are logical public
  * inputs but not input signals of this circuit: the circuit outputs its own
  * digest, and the rest reach the proof through the Fiat-Shamir challenge, not
- * through `PolyEval`.
+ * through `PolyEval`. The wasm calculator rejects an unknown key, and
+ * `expectWitnessFails` classifies that as a test bug rather than a constraint
+ * firing.
  *
- * The wasm calculator rejects an unknown key ("Signal recipient_address not
- * found"), and `expectWitnessFails` classifies that as a test bug rather than a
- * constraint firing, since a rejection test that accepts it would pass
- * vacuously. Every suite that feeds a bundle to a tester must therefore
- * project first; applying the projection at the `loadCircuit` call covers all
- * call sites.
- *
- * `circuitSignals` is an explicit pick, so this drops exactly the binding fields:
- * a signal added to the circuit but missing there fails with "Not all inputs
- * have been set" rather than being defaulted.
+ * `circuitSignals` is an explicit pick: a signal added to the circuit but
+ * missing there fails with "Not all inputs have been set" rather than being
+ * defaulted.
  */
 export function projectingTester(c: CircuitTester): CircuitTester {
     return {

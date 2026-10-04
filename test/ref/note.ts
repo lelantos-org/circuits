@@ -35,21 +35,16 @@ export interface NoteCommitInput {
 
 /**
  * inner = Poseidon(TAG_INNER, pk, rho, rcm). Mirrors NoteInner in
- * src/lib/note.circom.
- *
- * The half of a note that stays private on every path. A deposit publishes it
- * beside its public (asset, value).
+ * src/lib/note.circom. A deposit publishes it beside its public (asset, value).
  */
 export function buildInner(P: Poseidon, n: { pk: Field; rho: Field; rcm: Field }): Field {
     return P.hash([TAG_INNER, n.pk, n.rho, n.rcm]);
 }
 
 /**
- * cm = Poseidon(TAG_CM, asset·2^64 + value, inner), from an `inner` already
- * built. This is the form tree_update_batch computes for a deposit leaf.
- *
- * Soundness requires asset < 2^64 and value < 2^64; the circuit range-checks
- * both, and this function enforces the same bounds off-circuit.
+ * cm = Poseidon(TAG_CM, asset·2^64 + value, inner): the form tree_update_batch
+ * computes for a deposit leaf. Soundness requires asset < 2^64 and
+ * value < 2^64; the circuit range-checks both.
  */
 export function commitWithInner(P: Poseidon, asset: Field, value: Field, inner: Field): Field {
     if (asset >= POW_2_64) throw new Error("asset must fit in 64 bits");
@@ -59,9 +54,8 @@ export function commitWithInner(P: Poseidon, asset: Field, value: Field, inner: 
 
 /**
  * cm = Poseidon(TAG_CM, asset·2^64 + value, Poseidon(TAG_INNER, pk, rho, rcm)).
- *
- * Mirrors NoteInner + NoteCommitment in src/lib/note.circom. cm is also the
- * commitment-tree leaf: there is no separate leaf hash.
+ * Mirrors NoteInner + NoteCommitment in src/lib/note.circom. cm is the
+ * commitment-tree leaf.
  */
 export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
     return commitWithInner(P, n.asset, n.value, buildInner(P, n));
@@ -70,25 +64,22 @@ export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
 /**
  * nf = Poseidon(TAG_NF, nk, rho, cm). Mirrors Nullifier in note.circom.
  *
- * Takes nk directly so FVK holders (nk without nsk) can recompute nullifiers.
- * `cm` is in the preimage so the nullifier identifies the exact note; otherwise
- * two notes sharing a rho share a nullifier and spending either locks the other
- * (the faerie-gold attack).
+ * `cm` is in the preimage so that two notes sharing a rho have distinct
+ * nullifiers; otherwise spending either locks the other (the faerie-gold
+ * attack).
  */
 export function buildNullifier(P: Poseidon, nk: Field, rho: Field, cm: Field): Field {
     return P.hash([TAG_NF, nk, rho, cm]);
 }
 
-/** Convenience wrapper for spend paths holding nsk. */
 export function buildNullifierFromNsk(P: Poseidon, nsk: Field, rho: Field, cm: Field): Field {
     return buildNullifier(P, deriveNk(P, nsk), rho, cm);
 }
 
 /**
  * rho = Poseidon(TAG_RHO, nf0, index). Mirrors DeriveRho in note.circom.
- *
- * Output rho is bound to the first input nullifier (chain-unique) plus the
- * output index, so no two committed output notes can share a rho.
+ * nf0 is the first input nullifier (chain-unique) and index the output index,
+ * so no two committed output notes share a rho.
  */
 export function buildRho(P: Poseidon, nf0: Field, index: number | bigint): Field {
     return P.hash([TAG_RHO, nf0, BigInt(index)]);

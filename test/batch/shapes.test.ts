@@ -1,8 +1,5 @@
 // Honest batches the circuit must accept, across leaf count, deposit/spend mix
 // and start position, and the capacity bound at the end of the tree.
-//
-// A leaf is a note commitment: the word a spend supplies, or the hash this
-// circuit builds from a deposit's public amount and its `inner`.
 
 import { ARITY, BATCH_DEPTH, MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
 import type { LeafWitness } from "../lib/batch";
@@ -37,8 +34,7 @@ describe("tree_update_batch / honest shapes and capacity", function () {
 
     // ===== multi-leaf / odd-count / capacity coverage =====
     //
-    // actual_count is a leaf count, so odd batches are valid. These exercise the
-    // padded leaf slots and the insert windows up to MAX_L.
+    // actual_count is a leaf count, so odd batches are valid.
 
     it("honest 2-leaf deposit batch passes", async () => {
         const { batch, circuit } = ctx;
@@ -50,8 +46,7 @@ describe("tree_update_batch / honest shapes and capacity", function () {
     });
 
     it("honest odd batch: 3 leaves, fewer than a spend's 6 outputs, passes", async () => {
-        // A 3-output transact bundle emits three commitments, so the batch must
-        // accept an odd leaf count.
+        // A 3-output transact bundle emits three commitments.
         const { batch, circuit } = ctx;
         const leaves = [
             batch.leaf({ val: 11n, isDeposit: 0, pk: 0xb01n }),
@@ -100,9 +95,8 @@ describe("tree_update_batch / honest shapes and capacity", function () {
     // ===== batched insert at production depth =====
     //
     // BatchAppend sizes each level's window for the worst case, a run that
-    // straddles a boundary at that level. `gadgets/batch_append.test.ts` sweeps
-    // every start at depth 4 with distinct leaves; these place the straddle at
-    // every level of the deployed shape, through the full circuit.
+    // straddles a boundary at that level. These place the straddle at every
+    // level of the deployed shape.
 
     let straddleLeaves: LeafWitness[];
     before(() => {
@@ -124,9 +118,7 @@ describe("tree_update_batch / honest shapes and capacity", function () {
     // ===== tree capacity =====
     //
     // The last inserted index, start_index + actual_count - 1, is range-checked
-    // to 2·DEPTH bits. Bounding start_index + k for every slot would make the top
-    // MAX_L - 1 leaves unreachable and an honest one-leaf batch at the last free
-    // index unsatisfiable.
+    // to 2·DEPTH bits.
 
     it("accepts a single leaf at the last index in the tree", async () => {
         const { batch, circuit } = ctx;
@@ -136,7 +128,7 @@ describe("tree_update_batch / honest shapes and capacity", function () {
     it("FAILS when a batch runs past the end of the tree", async () => {
         // One free slot, two leaves: the last index is CAPACITY = 2^(2·DEPTH),
         // one past what Num2Bits(2·DEPTH) holds. The reference tree does not
-        // bound-check, so the witness builds and the circuit must reject it.
+        // bound-check, so the witness builds.
         const { batch, circuit } = ctx;
         const leaves = [
             batch.leaf({ val: 1n, isDeposit: 1, pk: 0xe01n }),

@@ -9,15 +9,13 @@ Each citation is checked for:
 
   1. existence of the named file, including paths named without a line number;
   2. the cited lines lying within that file;
-  3. the cited lines still matching the doc comment (anchoring).
-
-Checks 1 and 2 detect renamed, deleted or shortened sources. Check 3 detects spans
-that shifted because lines were inserted above them while remaining in range.
+  3. the cited lines matching the doc comment (anchoring), which detects spans shifted
+     by lines inserted above them.
 
 An *anchor* is an identifier inside backticks on the citing line (for example
 `` `acc[0] <== 0` ``, `` `NoteCommitment` ``, `` `is_deposit` ``) that also occurs in
-the cited file. An anchor must occur within the cited span; otherwise the span has
-moved. A citation with no anchors receives checks 1 and 2 only.
+the cited file. At least one anchor must occur within the cited span. A citation with
+no anchors receives checks 1 and 2 only.
 
     python3 scripts/check-citations.py            # check, from lean/
     python3 scripts/check-citations.py --list     # also print every citation
@@ -38,9 +36,8 @@ from citations import Citation, citations_in, strip_comment
 # Identifiers common to most circom lines, which cannot distinguish one span from another.
 STOPWORDS = {"signal", "input", "output", "component", "template", "var", "for", "out", "in"}
 
-# Anchors are taken only from backticked code on the citing line, the form doc comments
-# and `FIDELITY.md` rows use to quote circom. Unquoted prose words are excluded because
-# they can match unrelated spans.
+# Backticked code on the citing line. Unquoted prose words are excluded because they can
+# match unrelated spans.
 QUOTED = re.compile(r"`([^`\n]+)`")
 PATHLIKE = re.compile(r"[\w./-]*[\w-]/[\w./-]+")
 
@@ -61,18 +58,13 @@ def file_lines(path: str, cache: dict[str, list[str]]) -> list[str]:
 
 
 def anchors(citation: Citation, lines: list[str]) -> set[str]:
-    """Backticked words on the citing line that also occur in the cited file's code.
-
-    Such a word is a quotation from the source and is expected within the cited span.
-    """
-    # Vocabulary excludes circom comments, so words appearing only in comments do not
-    # anchor.
+    """Backticked words on the citing line that also occur in the cited file's code."""
+    # Words appearing only in circom comments do not anchor.
     vocabulary: set[str] = set()
     for line in lines:
         vocabulary.update(WORD.findall(strip_comment(line)))
     # Full-form paths are backticked, so paths are removed first; otherwise
-    # `src/lib/note.circom:14` would anchor on "note", and a line naming two files would
-    # anchor each on the other's directory.
+    # `src/lib/note.circom:14` would anchor on "note".
     context = PATHLIKE.sub(" ", citation.context)
     quoted: set[str] = set()
     for fragment in QUOTED.findall(context):
@@ -104,9 +96,8 @@ def unresolvable(citation: Citation, source_cache: dict[str, list[str]],
     found = anchors(citation, lines)
     if not found:
         return None
-    # A doc line may carry several spans, e.g. `` `:72, 93-94` `` for a gadget
-    # instantiated in one place and wired in another. Its quotations
-    # describe the spans jointly, so anchors are matched against their union.
+    # A doc line may carry several spans, e.g. `` `:72, 93-94` ``. Its quotations describe
+    # the spans jointly, so anchors are matched against their union.
     spans = group if group is not None else [(citation.lo, citation.hi)]
     span = "\n".join("\n".join(lines[lo - 1 : hi]) for lo, hi in spans)
     hits = {word for word in found if word in span}
@@ -119,10 +110,9 @@ def unresolvable(citation: Citation, source_cache: dict[str, list[str]],
 
 
 def suggest(found: set[str], lines: list[str]) -> str:
-    """A hint for the span where the anchors occur together.
+    """A hint: the narrowest run of lines covering the most anchors.
 
-    Returns the narrowest run of lines covering the most anchors. This is accurate when
-    a block moved intact and misleading when a constraint was rewritten.
+    Accurate when a block moved intact, misleading when a constraint was rewritten.
     """
     hits: dict[str, list[int]] = {}
     for number, line in enumerate(lines, 1):
@@ -162,7 +152,6 @@ def main() -> int:
 
     for path in scanned_files():
         found = list(citations_in(path))
-        # Spans written on one doc line, against one file, are anchored together.
         groups: dict[tuple[int, str], list[tuple[int, int]]] = {}
         for citation in found:
             if citation.hi:

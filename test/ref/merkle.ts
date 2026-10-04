@@ -9,17 +9,14 @@ import { TAG_MERKLE } from "./tags.js";
 
 const ARITY = 4;
 
-// Beyond this the (level, index) cache key would exceed 2^53.
+// Beyond this the (level, index) cache key would exceed 2^53: 2·25−2 = 48 bits
+// of index + 5 of level.
 const MAX_DEPTH = 25;
 
 /**
  * Stride making `level * stride + index` injective over every (level, index)
- * the tree can reach.
- *
- * At level L a cached index is < 4^(depth-L), so the widest level is L=1 with
- * indices < 4^(depth-1) = 2^(2·depth-2). Any smaller stride aliases one level
- * into the next, so it must scale with depth. `reference.test.ts` checks
- * injectivity across every supported depth.
+ * the tree can reach: at level L a cached index is < 4^(depth-L), so the widest
+ * level is L=1 with indices < 4^(depth-1) = 2^(2·depth-2).
  */
 export function cacheKeyStride(depth: number): number {
     return 2 ** (2 * depth - 2);
@@ -46,8 +43,6 @@ export class MerkleTree {
         private readonly P: Poseidon,
         readonly depth: number,
     ) {
-        // keyStride · depth must stay within Number.MAX_SAFE_INTEGER:
-        // 2·25−2 = 48 bits of index + 5 of level = 53.
         if (depth < 1 || depth > MAX_DEPTH) {
             throw new RangeError(`MerkleTree: depth must be 1..${MAX_DEPTH}, got ${depth}`);
         }
@@ -80,7 +75,6 @@ export class MerkleTree {
         this.invalidateRange(lo, this.leaves.length - 1);
     }
 
-    /** Replace the whole leaf array. Safe on a tree that already has inserts. */
     setLeaves(leaves: Field[]): void {
         this.leaves = [...leaves];
         this.nodeCache.clear();
@@ -88,23 +82,14 @@ export class MerkleTree {
 
     /**
      * Replace the leaf array with `n` leaves laid out in frontier blocks, seeding
-     * the node cache so a subsequent `root()` / `frontier()` / small number of
-     * `insert`s costs O(depth² · ARITY) hashes rather than the ~(4^depth − 1)/3 a
-     * distinct-leaf fill of the same size costs.
+     * the node cache instead of hashing every internal node.
      *
      * The first `n` positions split into the full subtrees `frontier()` reports:
      * at each level, the filled siblings `firstSibling..partial-1` of the first
      * node not wholly below `n`. Every leaf of block `(level, index)` is
      * `valueOf(level, index)`, so the block's root is that constant hashed up
-     * `level` times, and is seeded directly; blocks sharing a constant share the
-     * chain, so a fill with `v` distinct constants costs `v · depth` hashes.
-     * `nodeAt` descends through exactly one partial node per level; everything
-     * else it reads is a seeded block or an empty subtree, so `root()` and
-     * `frontier()` agree with a naive fill of the same leaves (checked in
-     * `reference.test.ts`).
-     *
-     * With a distinct constant per block the frontier slots at one level differ,
-     * so a production-depth witness exposes a misrouted slot.
+     * `level` times, and is seeded directly. `root()` and `frontier()` agree
+     * with a naive fill of the same leaves.
      */
     fillBlocks(n: number, valueOf: (level: number, index: number) => Field): void {
         if (!Number.isInteger(n) || n < 0 || n > ARITY ** this.depth) {

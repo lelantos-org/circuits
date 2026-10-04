@@ -1,8 +1,6 @@
-// One tampered field per test: take an honest witness, change exactly one
-// field, and require the circuit to reject it.
-//
-// Each row's `reason` names the constraint expected to fire, so a failure
-// reports which constraint stopped firing.
+// One tampered field per test: change one field of an honest witness and
+// require the circuit to reject it. Each row's `reason` names the constraint
+// expected to fire.
 
 import {
     type CircomTransactInput,
@@ -33,15 +31,10 @@ type TamperBase = "balanced" | "oneRealRestDummy" | "fullShape" | "withdraw";
 
 // ===== per-slot expansion =====
 //
-// Rows are written once with `%` as the slot index and expanded over every slot
-// the shape declares. `Transact` takes N_IN = 4 inputs and N_OUT = 6 outputs,
-// while the scenario factories fill at most two of each; a constraint
-// mis-indexed for slot >= 2 (a loop bound one short, an unwired high slot) is
-// satisfied by every witness built from `balanced()`.
-//
-// Expanded rows run against `fullShape`, where every slot holds a real note. In
+// Rows are written once with `%` as the slot index and expanded over every
+// slot. They run against `fullShape`, where every slot holds a real note: in
 // `balanced` the high slots are dummies and padding, which carry weaker
-// constraints and would need per-index expectations.
+// constraints.
 
 /** `"in_rcm[%]"` -> one row per input slot. */
 function perInput(path: string, reason: string, extra: Partial<TamperCase> = {}): TamperCase[] {
@@ -70,8 +63,7 @@ function expand(
 
 // ===== rows =====
 //
-// Grouped by what the field feeds rather than by name, so coverage gaps are
-// visible in the list.
+// Grouped by what the field feeds.
 const TAMPER_CASES: TamperCase[] = [
     // -- note commitments: cm = Poseidon(TAG_CM, packed_av, Poseidon(TAG_INNER, pk, rho, rcm)) --
     ...perOutput("out_rcm[%]", "note commitment binding rejects"),
@@ -135,14 +127,7 @@ describe("transact_4x6 / single-field tamper", function () {
 
     const ctx = useTransactCircuit();
 
-    /**
-     * The honest bases, built once and handed out as deep copies.
-     *
-     * Each base costs a full `TxBuilder` run (a tree, four inserts, four
-     * authentication paths), which dominates per-row time; `structuredClone` of
-     * the finished input is negligible. A row writes only its own copy, so the
-     * shared originals are not modified.
-     */
+    /** The honest bases, built once and handed out as deep copies. */
     type BaseName = NonNullable<TamperCase["base"]>;
     const bases = {} as Record<BaseName, CircomTransactInput>;
 
@@ -153,18 +138,15 @@ describe("transact_4x6 / single-field tamper", function () {
         bases.withdraw = withdraw();
     });
 
-    // `base` is optional on a row; omitted means the balanced shape.
     function honest(base: TamperCase["base"]): CircomTransactInput {
         return structuredClone(bases[base ?? "balanced"]);
     }
 
     /**
      * One real input in slot 0, dummies in slots 1..N_IN-1, balanced and honest.
-     *
-     * The base for rows that tamper a dummy slot. It must not be all-dummy:
-     * `Transact` asserts `all_dummy.out === 0` (src/lib/transact.circom), so an
-     * all-dummy bundle is rejected regardless of the tamper and a rejection test
-     * built on it passes vacuously.
+     * The base for rows that tamper a dummy slot. Not all-dummy: `Transact`
+     * asserts `all_dummy.out === 0` (src/lib/transact.circom), so a rejection
+     * test on an all-dummy bundle passes vacuously.
      */
     function oneRealRestDummy(): CircomTransactInput {
         const { tx } = ctx;
@@ -176,10 +158,8 @@ describe("transact_4x6 / single-field tamper", function () {
 
     /**
      * One real input of 1000, 900 kept and 100 withdrawn in the note's asset.
-     *
-     * The base for the transparent-bucket rows: on a transfer `public_out` is 0
-     * and the bucket is empty, so its range checks and its balance term have
-     * nothing to act on.
+     * The base for the transparent-bucket rows: on a transfer `public_out` is 0,
+     * so the bucket's range checks and balance term have nothing to act on.
      */
     function withdraw(): CircomTransactInput {
         const { tx } = ctx;
@@ -190,8 +170,7 @@ describe("transact_4x6 / single-field tamper", function () {
         );
     }
 
-    // Vacuity guard for the per-slot base: if the untouched witness were
-    // unsatisfiable, every rejection below would pass regardless of the tamper.
+    // Vacuity guard for the per-slot base.
     it("accepts the fully-occupied shape: every input and output slot real", async () => {
         await expectAccepts(ctx.circuit, ctx.tx.fullShape());
     });
@@ -207,7 +186,6 @@ describe("transact_4x6 / single-field tamper", function () {
     });
 
     for (const { path, reason, value, base } of TAMPER_CASES) {
-        // The default mutation nudges the field by one: enough to break any binding.
         const mutate = value ?? ((input: CircomTransactInput) => readSignal(input, path) + 1n);
         it(`FAILS when ${path} is tampered — ${reason}`, async () => {
             const input = honest(base);
@@ -218,13 +196,11 @@ describe("transact_4x6 / single-field tamper", function () {
 
     // ===== asset-id range, isolated =====
     //
-    // The rows above push an asset id to 2^64 in an otherwise honest witness, so
-    // the stale cm rejects it as well and the range check is not shown to fire.
-    // These two build the note consistently around the oversized id, with the
-    // commitment and nullifier recomputed over it, on slots whose value is 0 so
-    // conservation is untouched. RangeCheck64 on asset_id is then the only
-    // constraint left to reject, and it is the one NoteCommitment's packing
-    // depends on: asset·2^64 + value is injective only under both bounds.
+    // In the rows above the stale cm also rejects an asset id of 2^64. Here the
+    // commitment and nullifier are recomputed over the oversized id, on slots
+    // whose value is 0, so only RangeCheck64 on asset_id rejects. NoteCommitment's
+    // packing depends on it: asset·2^64 + value is injective only under both
+    // bounds.
 
     /** A zero-value `cm` over any asset id, including one the reference refuses to pack. */
     function oversizedCm(asset: bigint, n: { pk: bigint; rho: bigint; rcm: bigint }): bigint {
@@ -256,9 +232,8 @@ describe("transact_4x6 / single-field tamper", function () {
         return rebindFiatShamir(input);
     }
 
-    // The control for each rejection below: the same rebuild at the largest id
-    // in range is accepted, so the rebuild itself is sound and 2^64 is rejected
-    // for its width alone.
+    // Control for each rejection below: the same rebuild at the largest id in
+    // range is accepted.
     it("accepts a dummy input declaring asset_id = 2^64 - 1, cm and nullifier consistent", async () => {
         await expectAccepts(ctx.circuit, dummyDeclaring(TWO_64 - 1n));
     });
@@ -277,8 +252,6 @@ describe("transact_4x6 / single-field tamper", function () {
             "the asset range check must hold on an output whose value contributes nothing to balance");
     });
 
-    // The two out_cm cases need their own bases: one slot holds a real note, the
-    // other a padding output, and a different constraint rejects each.
     /** One real output in slot 0, a padding output in slot 1. */
     function realAndPaddingOutput(): CircomTransactInput {
         const { tx } = ctx;

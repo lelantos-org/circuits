@@ -1,12 +1,10 @@
 // Unit tests for `lib/batch_append.circom`: both roots, the activity prefix and
 // the range checks of the tree inside `tree_update_batch`.
 //
-// Every leaf is distinct, so a child wired from the wrong frontier slot or the
-// wrong window node changes a root. Depth 4 has window widths 8, 3, 2, 2, 1 —
-// every width class the DEPTH = 11 shape uses — and is small enough to sweep
-// every start_index against every count. Depth 2 adds the case where the tree,
-// not MAX_L, caps the top window. The straddle cases in
-// `batch/shapes.test.ts` check the full circuit at production depth.
+// Leaves are distinct, so a child wired from the wrong frontier slot or window
+// node changes a root. Depth 4 has window widths 8, 3, 2, 2, 1, every width
+// class of the DEPTH = 11 shape; depth 2 adds the case where the tree, not
+// MAX_L, caps the top window.
 
 import { expect } from "chai";
 
@@ -98,8 +96,7 @@ for (const depth of [2, 4]) {
         });
 
         it("a frontier slot below the digit moves both roots", async () => {
-            // Both roots read every filled slot: moving only one would mean a
-            // slot is wired into one root and not the other.
+            // Both roots read every filled slot.
             let checked = 0;
             for (const start of representative) {
                 const count = Math.min(MAX_L, capacity - start);

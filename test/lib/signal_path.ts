@@ -1,11 +1,6 @@
 // Address one entry of a circom input object by the name the circom uses:
-// `merkle_root`, `in_rcm[2]`, `in_path_elements[0][3][1]`.
-//
-// Tamper and divergence cases change exactly one entry of an honest witness.
-// Writing the path as a string keeps the row readable and greppable against the
-// template, and keeps nested-array copying out of each test.
-//
-// Values are decimal strings, as circom input objects carry them.
+// `merkle_root`, `in_rcm[2]`, `in_path_elements[0][3][1]`. Values are decimal
+// strings, as circom input objects carry them.
 
 type Nested = string | Nested[];
 type InputObject = object;
@@ -41,10 +36,8 @@ export function readSignal(input: InputObject, path: string): bigint {
 }
 
 /**
- * Overwrite the entry at `path` in place.
- *
- * Only the addressed entry changes; sibling arrays are shared with the input, so
- * callers that need the original intact clone first (`structuredClone`).
+ * Overwrite the entry at `path` in place. Callers that need the original intact
+ * clone first (`structuredClone`).
  */
 export function writeSignal(input: InputObject, path: string, value: bigint): void {
     const { key, idx } = parse(path);
@@ -65,7 +58,7 @@ export function writeSignal(input: InputObject, path: string, value: bigint): vo
     cur[last] = value.toString();
 }
 
-/** Add `delta` (default 1) to the entry at `path`, in place. Enough to break any binding. */
+/** Add `delta` to the entry at `path`, in place. */
 export function bumpSignal(input: InputObject, path: string, delta = 1n): void {
     writeSignal(input, path, readSignal(input, path) + delta);
 }

@@ -24,28 +24,20 @@ template DummyZeroValue(N) {
     }
 }
 
-// Per-asset value conservation.
-//
-// Integer arithmetic over asset ids compared as field elements, with no
-// group-theoretic assumption. For every asset id c present in the transaction:
+// Per-asset value conservation. For every asset id c in
+// {in_asset[*], out_asset[*], public_asset_id}:
 //
 //   Σ_i in_value[i]·[in_asset[i] == c]
 //     == Σ_j out_value[j]·[out_asset[j] == c] + public_out·[public_asset_id == c]
 //
-// The transparent bucket sits on the output side only. A transact proof never
-// moves tokens in: shielding goes through the deposit escrow and
-// tree_update_batch.
+// Any other asset contributes zero to both sides. The transparent amount is on
+// the output side only: a transact proof never moves tokens in. Dummy inputs
+// carry value 0 (DummyZeroValue), whatever asset_id they declare.
 //
-// Candidates = {in_asset[*], out_asset[*], public_asset_id}. Any asset outside
-// that set contributes zero to both sides, so covering the candidates covers
-// every asset present. Dummy inputs carry value 0 (DummyZeroValue) and are
-// neutral whatever asset_id they declare.
-//
-// Precondition (soundness-critical): the caller must 64-bit range-check every
-// value passed in. SpentNote and OutputNote apply RangeCheck64 to in_value and
-// out_value; the transact circuit applies it to public_out. With at most
-// max(N_IN, N_OUT + 1) terms below 2^64 per side, the sums stay below the
-// modulus, so these are exact integer equalities with no field wraparound.
+// Precondition: the caller 64-bit range-checks every value (SpentNote and
+// OutputNote for in_value and out_value, the transact circuit for public_out).
+// Each side then sums at most max(N_IN, N_OUT + 1) terms below 2^64, so the
+// equalities hold over the integers, without field wraparound.
 template PerAssetValueBalance(N_IN, N_OUT) {
     signal input in_asset[N_IN];
     signal input in_value[N_IN];
@@ -77,7 +69,6 @@ template PerAssetValueBalance(N_IN, N_OUT) {
         pub_eq[c].in[0] <== public_asset_id;
         pub_eq[c].in[1] <== cand[c];
 
-        // The transparent bucket is a withdrawal, so it sits with the outputs.
         lhs[c][0] <== 0;
         rhs[c][0] <== public_out * pub_eq[c].out;
 

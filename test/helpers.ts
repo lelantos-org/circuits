@@ -1,10 +1,8 @@
 // Single import path for the circuit test suite.
 //
 // Primitives and witness builders live in `./ref`, transcribed from the circom
-// under `src/lib/`. This package does not depend on `@lelantos-org/sdk`;
-// agreement with the SDK is established through the vectors under `vectors/`,
-// which are generated from `./ref`. New primitives belong in `./ref` rather
-// than in individual test files.
+// under `src/lib/`. Agreement with `@lelantos-org/sdk` is established through
+// the vectors under `vectors/`, which are generated from `./ref`.
 
 export * from "./ref/index.js";
 

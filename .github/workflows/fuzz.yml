@@ -20,9 +20,8 @@ on:
 permissions:
   contents: read
 
-# Heavy fuzz runs are long (30-minute mocha timeout), so only pull_request runs
-# cancel an in-progress run on the same ref; a manual workflow_dispatch does not
-# cancel a running nightly.
+# Only pull_request runs cancel an in-progress run on the same ref; a manual
+# workflow_dispatch does not cancel a running nightly.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -30,8 +29,7 @@ concurrency:
 jobs:
   fuzz:
     runs-on: [ubuntu-latest]
-    # PR runs use FUZZ=light; pushes to main use FUZZ=medium; scheduled and
-    # manual runs default to FUZZ=heavy. The timeout is sized for heavy mode.
+    # Sized for FUZZ=heavy.
     timeout-minutes: 60
     permissions:
       contents: read
@@ -49,11 +47,8 @@ jobs:
       - name: Setup toolchain
         uses: ./.github/actions/setup
 
-      # The seed is chosen here rather than from the clock in
-      # `test/fuzz/arbitraries.ts`, so every run is reproducible from the job
-      # summary, which outlives the logs.
-      #
-      # `workflow_dispatch` can override it to replay a failed run's seed.
+      # Chosen here so every run is reproducible from the job summary, which
+      # outlives the logs. `workflow_dispatch` can override it to replay a seed.
       - name: Pick fuzz seed
         run: echo "FUZZ_SEED=${{ inputs.fuzz_seed || github.run_id }}" >> "$GITHUB_ENV"
 
@@ -61,7 +56,6 @@ jobs:
         run: just test-fuzz
 
       # `always()`, so the replay command is recorded when the fuzz step fails.
-      # The job summary is retained longer than the logs.
       - name: Record replay command
         if: always()
         run: |

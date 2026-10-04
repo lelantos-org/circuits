@@ -9,8 +9,7 @@ import Mathlib.Tactic.NormNum
 `F = ZMod p` with `p` the BN254 scalar-field modulus (circom's default prime `r`).
 
 The primality of `p` is not machine-checked here; see `p_prime` below and
-`lean/scripts/check-prime.py` for the external check. The size bounds on `p` are decided
-by `norm_num` on concrete numerals.
+`lean/scripts/check-prime.py` for the external check.
 -/
 
 namespace Lelantos
@@ -28,8 +27,7 @@ theorem one_lt_p : 1 < p := by unfold p; norm_num
 theorem two_lt_p : 2 < p := by unfold p; norm_num
 
 /-- `3 < p`: the bound the small completeness shapes are stated at. It keeps distinct slot
-indices distinct in `F`, which `DeriveRho`'s `index` argument relies on to separate output
-slots; the deployed shape needs `seven_lt_p` below. -/
+indices distinct in `F`; the deployed shape needs `seven_lt_p` below. -/
 theorem three_lt_p : 3 < p := by unfold p; norm_num
 
 /-- `4 < p`: a small-shape bound; `transact_binding` uses `seven_lt_p` below. -/
@@ -39,7 +37,7 @@ theorem four_lt_p : 4 < p := by unfold p; norm_num
 
 The widest instantiated shape (`Transact(11, 4, 6)`, `src/4x6.circom`) needs six. The
 balance bound below rounds `(n + 1) · 2^64` up to `8 · 2^64 = 2^67`, so seven is the largest
-slot count that argument covers without a new power. -/
+slot count it covers. -/
 theorem seven_lt_p : 7 < p := by unfold p; norm_num
 
 /-- `2 ^ 64 < p`: makes `RangeCheck64` an integer range check rather than a statement
@@ -49,20 +47,19 @@ theorem two_pow_64_lt_p : 2 ^ 64 < p := by unfold p; norm_num
 /-- `2 ^ 66 < p`: `PerAssetValueBalance` sums at most `max(N_IN, N_OUT + 1)` terms of size
 `< 2 ^ 64` per side, so a three-slot side is bounded by `4 · 2^64 = 2^66`. Used by the small
 completeness shapes; `Transact(11, 4, 6)` needs `two_pow_67_lt_p` below. See
-`src/lib/balance.circom:44-48`. -/
+`src/lib/balance.circom:37-40`. -/
 theorem two_pow_66_lt_p : 2 ^ 66 < p := by unfold p; norm_num
 
 /-- `2 ^ 67 < p`: the same sum at the widest shape the repository instantiates,
 `Transact(11, 4, 6)` (`src/4x6.circom`) — seven terms and a bound of `7 · 2^64 < 2^67`.
 
-`perAssetValueBalance_nat`'s slot bound rests only on this. It covers any shape with at
-most seven slots per side, since the proof rounds up to `8 · 2^64`; more slots require the
-next power here and relaxing the two bounds that cite it. -/
+`perAssetValueBalance_nat`'s slot bound rests only on this. More than seven slots per side
+require the next power here and relaxing the two bounds that cite it. -/
 theorem two_pow_67_lt_p : 2 ^ 67 < p := by unfold p; norm_num
 
 /-- `2 ^ 128 < p`: `NoteCommitment` packs `asset_id · 2^64 + value` into one field
 element, so with both fields 64-bit range-checked the packing is injective.
-See `src/lib/note.circom:93`. -/
+See `src/lib/note.circom:81`. -/
 theorem two_pow_128_lt_p : 2 ^ 128 < p := by unfold p; norm_num
 
 instance : NeZero p := ⟨by have := p_pos; omega⟩
@@ -77,15 +74,12 @@ theorem val_inj {a b : ZMod p} (h : a.val = b.val) : a = b := by
 
 `p` is a 254-bit prime. Mathlib's `norm_num` primality extension is trial-division based
 and cannot certify a number this large, and Mathlib has no Pocklington/Pratt certificate
-tactic; a Lean proof would require the Lucas primality criterion (~200 lines) plus
-certificates for every prime factor of `p - 1`.
+tactic.
 
 It is therefore an axiom, listed in `lean/expected/axioms.txt` and surfaced by
 `#print axioms`.
 
-**Discharge:** `python3 lean/scripts/check-prime.py`, or `openssl prime <p>`. `p` is the
-published BN254 scalar-field order and the modulus circom uses, so if it were composite
-every claim about the circuit would be void, independently of this development.
+**Discharge:** `python3 lean/scripts/check-prime.py`, or `openssl prime <p>`.
 
 TODO: replace with a machine-checked Pocklington proof once Mathlib supports one.
 -/

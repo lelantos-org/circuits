@@ -1,17 +1,9 @@
 // Unit tests for `lib/balance.circom`: the conservation check, and the range
 // and dummy bookkeeping around it.
 //
-// `PerAssetValueBalance` sweeps N_CAND = N_IN + N_OUT + 1 = 11 candidate assets
-// against every slot, so its cost grows as (N_IN + N_OUT)^2 while the shapes
-// that exercise it multiply. Driving it through `transact_4x6` costs a full
-// TxBuilder run and a full-circuit witness per case, which is why the
-// transact suites only ever reach two assets; here a case is a plain field
-// array, so the combinatorics the production circuit cannot afford — every slot
-// a distinct asset, duplicate candidates, an asset present on one side only —
-// are covered exhaustively.
-//
-// The full-circuit counterpart is `transact/multi_asset.test.ts`, which pins the
-// same conservation property end to end on a handful of shapes.
+// `PerAssetValueBalance` is instantiated at (N_IN, N_OUT) and driven with plain
+// field arrays. It range-checks nothing: the equality is integer-exact only
+// under the RangeCheck64 that `SpentNote`, `OutputNote` and `Transact` apply.
 
 import { BN254_FR, mod } from "../helpers";
 import { generatedFixture } from "../lib/circuit";
@@ -30,16 +22,8 @@ describe("PerAssetValueBalance (per-asset conservation)", function () {
     // ===== the shape that fills every candidate row =====
     //
     // `cand` is [in_asset[0..3], out_asset[0..5], public_asset_id], 11 entries.
-    // Below, no two slots share an asset except out[0]/out[1], which split
-    // asset 11 — so a row that is silently skipped shows up as an accepted
-    // imbalance in the sweep that follows.
-    //
-    //   asset 11: in 100        -> out 60 + 40
-    //   asset 12: in  50        -> out 50
-    //   asset 13: in  30        -> out 30
-    //   asset 14: in  20        -> out 20
-    //   asset 15: nothing in    -> out 0
-    //   asset 16: the public bucket, nothing withdrawn
+    // No two slots share an asset except out[0]/out[1], which split asset 11,
+    // so a skipped row shows up as an accepted imbalance in the sweep below.
     const MAX_DISTINCT: PerAssetBalanceArgs = {
         inAsset: [11n, 12n, 13n, 14n],
         inValue: [100n, 50n, 30n, 20n],
@@ -62,17 +46,13 @@ describe("PerAssetValueBalance (per-asset conservation)", function () {
         return a;
     }
 
-    // Vacuity guard for every rejection below: the untouched shape must pass,
-    // or a rejection proves nothing about the field it changed.
+    // Vacuity guard for the rejections below: the untouched shape must pass.
     it("accepts a shape carrying five distinct assets plus a sixth public one", async () => {
         await expectAccepts(ctx.circuit, perAssetValueBalanceInput(MAX_DISTINCT));
     });
 
-    // Each of the value slots feeds exactly one candidate row here, so a
-    // +1 that is not rejected names a row the gadget never evaluates: a loop
-    // bound one short, or a high slot wired to the wrong candidate. The
-    // transact suites reach slots 2..3 and 2..5 only with padding values, where
-    // a missed row is invisible.
+    // Each value slot feeds one candidate row here, so an accepted +1 names a
+    // row the gadget never evaluates.
     describe("every value slot is bound", () => {
         for (let i = 0; i < N_IN; i++) {
             it(`in_value[${i}] + 1 is rejected`, async () => {
@@ -119,7 +99,7 @@ describe("PerAssetValueBalance (per-asset conservation)", function () {
         await expectAccepts(ctx.circuit, perAssetValueBalanceInput(shape(a => {
             a.publicAssetId = 11n;
             a.publicOut = 5n;
-            a.outValue[0] -= 5n; // asset 11 now has 100 in, 55 + 40 + 5 out
+            a.outValue[0] -= 5n; // asset 11: 100 in, 55 + 40 + 5 out
         })));
     });
 
@@ -140,9 +120,6 @@ describe("PerAssetValueBalance (per-asset conservation)", function () {
     });
 
     it("the gadget has no input side for the bucket: nothing can be deposited through it", async () => {
-        // The only way to add value on the left of a row is an input note. An
-        // output inflated by 5 with the bucket naming its asset stays rejected
-        // whatever public_out is.
         for (const publicOut of [0n, 5n]) {
             await expectWitnessFails(ctx.circuit, perAssetValueBalanceInput(shape(a => {
                 a.publicAssetId = 11n;
@@ -173,8 +150,7 @@ describe("PerAssetValueBalance (per-asset conservation)", function () {
     // ===== duplicate candidates =====
     //
     // `cand` is not deduplicated: an asset held by several slots produces
-    // several identical rows. Each must still be the full sum over that asset,
-    // rather than the one slot that produced the row.
+    // several identical rows, each the full sum over that asset.
 
     it("accepts a single asset spread across every slot", async () => {
         await expectAccepts(ctx.circuit, perAssetValueBalanceInput({
@@ -199,12 +175,12 @@ describe("PerAssetValueBalance (per-asset conservation)", function () {
     });
 
     // A dummy input carries value 0 (DummyZeroValue, below) and may declare any
-    // asset id; the row it adds is 0 == 0. Documented in the template header.
+    // asset id; the row it adds is 0 == 0.
     it("a zero-value slot is neutral whatever asset it declares", async () => {
         await expectAccepts(ctx.circuit, perAssetValueBalanceInput(shape(a => {
             a.inAsset[3] = 0xdeadbeefn;
             a.inValue[3] = 0n;
-            a.outValue[4] = 0n; // asset 14's 20 is no longer funded
+            a.outValue[4] = 0n; // asset 14's 20 has no funding input
             a.outAsset[4] = 0xfeedn;
         })));
     });
@@ -223,12 +199,6 @@ describe("PerAssetValueBalance (per-asset conservation)", function () {
         }));
     });
 
-    // The template header calls the caller's RangeCheck64 soundness-critical:
-    // without it the equality is modular, not integer. This pins that the
-    // gadget alone really does admit a wrapping witness, so the obligation is
-    // load-bearing rather than belt-and-braces. `SpentNote`, `OutputNote` and
-    // `Transact` supply the checks; `transact/tamper.test.ts` covers them at
-    // 2^64 on every slot.
     it("admits a field-wrapping witness — conservation is integer-exact only under the caller's RangeCheck64", async () => {
         // -1 + 2 == 1 (mod R), while as integers the input side is ~2^254.
         await expectAccepts(ctx.circuit, perAssetValueBalanceInput({

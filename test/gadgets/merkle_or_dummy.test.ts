@@ -1,16 +1,9 @@
-// Unit tests for the two merkle helpers the full circuit only exercises
-// indirectly: `MerkleProofOrDummy` (lib/merkle.circom) and
+// Unit tests for `MerkleProofOrDummy` (lib/merkle.circom, at depth 2) and
 // `PathIndexSelectors` (lib/common.circom).
 //
-// `MerkleProofOrDummy` is the dummy-slot bypass: `is_dummy = 1` drops the
-// membership equality so a padding input needs no real note. In `transact_4x6`
-// every case that reaches it also carries the pk, asset and value constraints
-// `SpentNote` layers on top, so a bypass that leaked — or one that fired on a
-// real slot — would be attributed to one of those instead. Depth 2 isolates it.
-//
-// `PathIndexSelectors` turns a quaternary digit into the one-hot selector
-// `MerkleLevel4` routes with. `gadgets/merkle.test.ts` covers the routing it
-// feeds; the selector algebra itself (one-hot, sums to one, rejects 4) is here.
+// `MerkleProofOrDummy` drops the membership equality at `is_dummy = 1`, so a
+// padding input needs no real note. `PathIndexSelectors` turns a quaternary
+// digit into the one-hot selector `MerkleLevel4` routes with.
 
 import { expect } from "chai";
 
@@ -100,10 +93,8 @@ describe("MerkleProofOrDummy (dummy-slot bypass)", function () {
     });
 
     it("bypasses the check entirely at is_dummy = 1", async () => {
-        // Garbage path, garbage leaf, garbage root: a padding slot carries no
-        // note, so nothing about it is authenticated. `DummyZeroValue` is what
-        // keeps such a slot from contributing value, and `SpentNote` still
-        // emits a real nullifier for it.
+        // A padding slot carries no note, so nothing about it is authenticated.
+        // `DummyZeroValue` keeps such a slot from contributing value.
         await expectAccepts(ctx.circuit, input({
             leaf: 0xdead_beefn,
             path: garbage,
@@ -118,8 +109,6 @@ describe("MerkleProofOrDummy (dummy-slot bypass)", function () {
 
     for (const bad of [2n, 3n]) {
         it(`FAILS when is_dummy is ${bad}`, async () => {
-            // Without the booleanity constraint, is_dummy = k scales `diff` by
-            // (1 - k), which a prover could solve for any diff.
             await expectWitnessFails(
                 ctx.circuit,
                 input({ path: garbage, isDummy: bad }),

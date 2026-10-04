@@ -2,12 +2,9 @@
 # Deletes build outputs of `Lelantos` modules that have no `.lean` source.
 #
 # `lake build` never removes oleans, and CI restores `.lake` from cache, so a deleted
-# or renamed module leaves an orphaned olean. `lake build` ignores it because nothing
-# imports it, but `leanchecker` replays every olean under the `Lelantos` prefix against
-# the current oleans of its imports and fails on mismatched declarations ("unknown
-# constant", "constant has already been declared").
-#
-# Only files under `.lake/build` whose module has no `.lean` source are removed.
+# or renamed module leaves an orphaned olean. `leanchecker` replays every olean under
+# the `Lelantos` prefix against the current oleans of its imports and fails on the
+# orphan ("unknown constant", "constant has already been declared").
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

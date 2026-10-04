@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Fails if the trusted base differs from the checked-in expectation.
-#
-# Captures the `#print axioms` output, the authoritative list of what the development
-# assumes, and diffs it against `expected/axioms.txt`, so any added axiom appears in review.
+# Fails if the trusted base differs from the checked-in expectation: diffs the
+# `#print axioms` output against `expected/axioms.txt`, so any added axiom appears in review.
 #
 # Regenerate after an intentional change:  lean/scripts/check-axioms.sh --update
 set -euo pipefail

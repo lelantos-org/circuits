@@ -1,13 +1,11 @@
 pragma circom 2.2.3;
 
-// DELIBERATELY BROKEN. Negative control for the sweep in
+// Deliberately broken. Negative control for the sweep in
 // `test/lib/underconstrained.ts`; not part of any circuit under `src/`.
 //
-// `out` is ASSIGNED with `<--` and never constrained. The witness calculator
-// still computes `in * in` and every input-level test passes, because the
-// generator is doing exactly what the template says. The R1CS contains no
-// constraint on `out` at all, so a prover picks it freely — the canonical
-// `<--` where `<==` was meant.
+// `out` is assigned with `<--` and never constrained. The witness calculator
+// computes `in * in`, so input-level tests pass, but the R1CS has no constraint
+// on `out` and a prover picks it freely.
 template LeakMissingOutputConstraint() {
     signal input in;
     signal output out;

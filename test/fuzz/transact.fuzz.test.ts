@@ -12,9 +12,8 @@ import { ALICE_NSK, BOB_NSK, TIMEOUT_HEAVY } from "../lib/constants";
 
 const fcParams = fcParamsFor("TRANSACT");
 
-// Balanced-split edge cases seeded into every fc.assert.
-// Note: MAX_VALUE = 2^64 - 1 is odd, so 2 * (MAX_VALUE / 2n) = MAX_VALUE - 1.
-// Each tuple must satisfy o1 + o2 === v1 + v2 (the circuit rejects otherwise).
+// Balanced-split edge cases; each must satisfy o1 + o2 === v1 + v2.
+// MAX_VALUE = 2^64 - 1 is odd, so 2 * (MAX_VALUE / 2n) = MAX_VALUE - 1.
 const BALANCED_EXAMPLES = [
     { v1: 0n, v2: 0n, o1: 0n, o2: 0n },
     { v1: MAX_VALUE / 2n, v2: MAX_VALUE / 2n, o1: MAX_VALUE - 1n, o2: 0n },
@@ -30,7 +29,6 @@ describe("transact_4x6 [fuzz]", function () {
         await fc.assert(fc.asyncProperty(
             arbBalancedSplit(),
             arbNsk(), arbNsk(),
-            // rhoA/rhoB always distinct via chained arbitrary (no .filter shrink penalty).
             arbDistinctBigInt(1n, 1n << 200n),
             arbField(1n << 200n), arbField(1n << 200n),
             async (split, aliceNsk, bobNsk, [rhoA, rhoB], rhoOA, rhoOB) => {
@@ -52,7 +50,7 @@ describe("transact_4x6 [fuzz]", function () {
             arbUnbalancedDelta,
             arbNsk(), arbNsk(),
             async ({ v1, v2, o1, o2, delta, skip }, aliceNsk, bobNsk) => {
-                if (skip) return; // o2 already saturated at MAX_VALUE; rare.
+                if (skip) return; // o2 already at MAX_VALUE.
                 const input = ctx.tx.transfer(
                     { v1, v2, o1, o2: o2 + delta }, aliceNsk, bobNsk,
                     [101n, 102n, 103n, 104n],
@@ -64,7 +62,6 @@ describe("transact_4x6 [fuzz]", function () {
 
     it("wrong asset_id on an output (ghost note) always fails", async () => {
         // o1 ≥ 1 forces an observable asset mismatch (commit binds asset·2^64+value).
-        // Built directly without .filter to keep shrinking efficient.
         const arbSplitO1Nonzero = fc.tuple(
             fc.bigInt(1n, MAX_VALUE / 2n - 1n),
             fc.bigInt(0n, MAX_VALUE / 2n),
@@ -89,7 +86,6 @@ describe("transact_4x6 [fuzz]", function () {
 
     it("note commitment binds asset even at value=0", async () => {
         await fc.assert(fc.asyncProperty(
-            // Distinct asset pair via chained arb; no post-hoc skip.
             arbDistinctBigInt(1n, 1n << 60n),
             arbField(1n << 200n), arbField(1n << 200n), arbField(1n << 200n),
             async ([assetA, assetB], pk, rho, rcm) => {
@@ -102,8 +98,6 @@ describe("transact_4x6 [fuzz]", function () {
     });
 
     it("input value > 2^64 always fails (range check)", async () => {
-        // Each run exercises the SDK and the circuit; the run count is scaled
-        // down by default and overridable via FUZZ_RUNS_TRANSACT_OVERFLOW.
         await fc.assert(fc.asyncProperty(
             fc.bigInt(1n, 1n << 200n),
             async (overflowSeed) => {

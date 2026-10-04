@@ -3,24 +3,22 @@ import Lelantos.Gadgets.Note
 /-!
 # The quaternary commitment tree
 
-The specification the batch circuit is proved against, with no signals: the tree an append run
-produces, and the single-leaf insert that run is made of. Nothing here mirrors a template;
-`Gadgets/BatchAppend.lean` proves its constraint system computes these objects.
+The specification the batch circuit is proved against, with no signals. Nothing here mirrors a
+template; `Gadgets/BatchAppend.lean` proves its constraint system computes these objects.
 
 * `ZerosCoherent` — the `EMPTY_SUBTREE` table is the empty-subtree chain, the one hypothesis
   every tree result carries.
 * `insertSlots`, `frontierUpd` and `InsertsTo` — one insert, as a hash chain through the fill
-  table, and the frontier it leaves. `InsertsTo.unique` shows it is a function of its inputs.
+  table, and the frontier it leaves. `InsertsTo.unique`: it is a function of its inputs.
 * `batchTree S n L fr zeros d q` — the level-`d` node at position `q` after appending `n`
   leaves `L` at position `S` over the frontier `fr`. At `n = 0` it is the tree before the
   append, so one definition gives both roots of a batch.
 * `batchTree_eq_appendRoot` — that tree is the root a run of `n` single-leaf inserts reaches,
   each an `InsertsTo` at position `S + k` (`append_insertsTo`).
-* `batchTree_frontier_inj` — under Poseidon collision resistance the tree before the append
-  determines every frontier slot it reads, so a root pins the frontier that rebuilds it.
+* `batchTree_frontier_inj` — under Poseidon collision resistance, a root pins every frontier
+  slot the tree before the append reads.
 
-The layer sits above `Gadgets.Note` (for `merkleNode`) and the digit arithmetic of
-`Model.Bits`, and below the gadget that uses it.
+Built on `Gadgets.Note` (for `merkleNode`) and the digit arithmetic of `Model.Bits`.
 -/
 
 namespace Lelantos
@@ -30,11 +28,10 @@ theorem mul_four_pow_succ (x d : ℕ) : x * 4 ^ (d + 1) = 4 ^ d * (4 * x) := by 
 
 /-! ## The empty-subtree chain
 
-`EMPTY_SUBTREE(d)` (`src/lib/common.circom:29-58`) is a table of constants, pinned by
+`EMPTY_SUBTREE(d)` (`src/lib/common.circom:29-54`) is a table of constants, pinned by
 `test/gadgets/merkle.test.ts` to the chain `zeros[0] = 0`, `zeros[d+1] = Poseidon(TAG_MERKLE, zeros[d] ×
-4)`. Lean treats Poseidon as opaque and cannot evaluate the constants, so the model keeps
-`zeros` a free parameter and states the chain as a hypothesis wherever a result needs it.
-`ZerosCoherent.eq_emptyChain` shows the hypothesis pins the table completely.
+4)`. Poseidon is opaque in Lean, so the chain is stated as a hypothesis over a free
+`zeros`. `ZerosCoherent.eq_emptyChain` shows the hypothesis pins the table.
 -/
 
 /-- The fills are the empty-subtree chain. -/
@@ -59,8 +56,8 @@ theorem ZerosCoherent.eq_emptyChain {zeros : ℕ → F} (h : ZerosCoherent zeros
 /-! ## One insert -/
 
 /-- The four children of a level: `cur` at the insertion digit, frontier siblings to its
-left, empty-subtree hash to its right — the OLD ROOT table in the header of
-`src/lib/batch_append.circom:34-39`. -/
+left, empty-subtree hash to its right — the old-root table in the header of
+`src/lib/batch_append.circom:31-35`. -/
 def insertSlots (t : ℕ) (cur : F) (fr : ℕ → F) (zero : F) : ℕ → F := fun k =>
   if k = t then cur else if k < t then fr k else zero
 
@@ -68,9 +65,9 @@ def insertSlots (t : ℕ) (cur : F) (fr : ℕ → F) (zero : F) : ℕ → F := f
 def frontierUpd (t : ℕ) (cur : F) (fr : ℕ → F) : ℕ → F := fun k =>
   if k = t then cur else fr k
 
-/-- The meaning of an insert, with no reference to selector or intermediate signals: a hash
-chain folding the leaf upwards through the fill table, together with the frontier it leaves
-behind. The counterpart of `MerkleMember` for the append direction. -/
+/-- An insert, stated without selector or intermediate signals: a hash chain folding the leaf
+upwards through the fill table, and the frontier it leaves. The append counterpart of
+`MerkleMember`. -/
 def InsertsTo (depth : ℕ) (leaf : F) (dig : ℕ → F) (frIn : ℕ → ℕ → F) (zeros : ℕ → F)
     (frOut : ℕ → ℕ → F) (root : F) : Prop :=
   ∃ chain : ℕ → F,
@@ -82,10 +79,8 @@ def InsertsTo (depth : ℕ) (leaf : F) (dig : ℕ → F) (frIn : ℕ → ℕ →
 
 /-- **The insert is a function of its inputs.** Two `InsertsTo` witnesses over the same
 leaf, digits, frontier and empty-subtree hashes produce the same root and the same frontier.
-
-Unlike `MerkleMember`, whose witnessed chain is tied to the root only by Poseidon collision
-resistance (`merkleMember_inj`), here `chain 0 = leaf` and the step equation determine
-every node, so the root is pinned by induction with no hash assumption. -/
+No hash assumption is needed, unlike `MerkleMember` (`merkleMember_inj`): `chain 0 = leaf`
+and the step equation determine every node. -/
 theorem InsertsTo.unique {depth : ℕ} {leaf root root' : F} {dig zeros : ℕ → F}
     {frIn frOut frOut' : ℕ → ℕ → F}
     (h : InsertsTo depth leaf dig frIn zeros frOut root)
@@ -214,8 +209,7 @@ theorem batchTree_congr {depth : ℕ} {L' : ℕ → F} {fr' : ℕ → ℕ → F}
 
 /-- **The tree before the append pins the frontier it reads**, under Poseidon collision
 resistance. Two frontiers rebuilding the same root at `start_index = S` agree on every filled
-slot: the root's preimage is its children, the child at the digit is the next root down, and
-the children below the digit are the frontier itself. -/
+slot. -/
 theorem batchTree_frontier_inj (hcr : ¬ PoseidonCollision) {depth : ℕ} {fr' : ℕ → ℕ → F}
     (hS : S < 4 ^ depth)
     (h : batchTree S 0 L fr zeros depth 0 = batchTree S 0 L fr' zeros depth 0) :

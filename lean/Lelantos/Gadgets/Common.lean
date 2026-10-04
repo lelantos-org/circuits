@@ -11,10 +11,9 @@ import Mathlib.Tactic.IntervalCases
     s[0] <== 1 - bits[0] - bits[1] + bb;   s[1] <== bits[0] - bb;
     s[2] <== bits[1] - bb;                 s[3] <== bb;
 
-`pathIndexSelectors_sound` establishes the two facts every `MerkleLevel4` argument needs:
-`path_index < 4`, and `s` is one-hot at exactly `path_index`. One-hotness is what makes the
-slot-filling arithmetic in `MerkleLevel4` a permutation; without it a prover could place the
-current node in more than one child slot.
+`pathIndexSelectors_sound` proves `path_index < 4` and that `s` is one-hot at `path_index`.
+`MerkleLevel4` relies on one-hotness: without it a prover could place the current node in
+more than one child slot.
 -/
 
 namespace Lelantos

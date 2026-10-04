@@ -1,26 +1,17 @@
-// Golden test-vector generator defining the cross-repo interface with
-// @lelantos-org/sdk.
-//
-// This repo owns the circom and therefore the public-input layout. The SDK
-// depends on it through versioned vectors published in the npm package and
-// checked by the SDK's test suite, not through shared code.
-//
-// Guarantees:
+// Golden test-vector generator: writes the versioned vectors, published in the
+// npm package, that the @lelantos-org/sdk test suite checks against.
 //
 //   1. Every `y` is read from a witness produced by the compiled circuit and
 //      compared against the TypeScript Horner evaluation; on mismatch the
 //      generator exits without writing.
 //   2. The slot-name layout is read from the Lean model's dump at
-//      `lean/expected/layout-<shape>.txt`, so the vector files carry Lean's
-//      ordering to the SDK.
+//      `lean/expected/layout-<shape>.txt`.
 //
 // Output must be deterministic (no randomness, timestamps or absolute paths)
 // because `just vectors-check` diffs a regeneration against the committed files.
 //
 //   just vectors        regenerate
 //   just vectors-check  regenerate into a temp dir and diff
-//
-// Per-shape construction lives in ./vectors/; this file orchestrates and writes.
 
 import * as fs from "node:fs";
 import * as path from "node:path";

@@ -1,11 +1,8 @@
-// Constraint budget gate.
-//
-// Compilation does not check circuit size, and `groth16 setup`, which would
-// reject an oversized circuit, does not run in CI.
+// Constraint budget gate. `groth16 setup`, which would reject an oversized
+// circuit, does not run in CI.
 //
 // Two assertions per circuit:
-//   domain  hard ceiling; crossing it requires a larger ptau and roughly
-//           doubles proving time
+//   domain  hard ceiling; crossing it requires a larger ptau
 //   exact   the count must match budget.json, so any change appears as a
 //           reviewable diff
 //
@@ -14,9 +11,7 @@
 //   cirPower = log2(nConstraints + nPubInputs + nOutputs + 1 - 1) + 1
 //
 // with a floor log2 (`snarkjs/build/cli.cjs`). `groth16 setup` therefore accepts
-// a circuit iff `nConstraints + nPubInputs + nOutputs <= domain - 1`, so the
-// ceiling on nConstraints alone is three lower than `domain` for a circuit with
-// one public input and one public output.
+// a circuit iff `nConstraints + nPubInputs + nOutputs <= domain - 1`.
 //
 // Usage: check-budget.mjs [--update]
 
@@ -32,11 +27,8 @@ const NAME_WIDTH = 18;
 
 /**
  * Newest mtime among the .circom sources the production circuits are built
- * from; an artifact older than this is stale.
- *
- * The `test` directory is excluded: fixtures are not inputs to 4x6 or
- * tree_update_batch. The exclusion matches directories only, so a
- * `src/lib/test.circom` still counts.
+ * from; an artifact older than this is stale. Directories named `test` are
+ * excluded: fixtures are not inputs to 4x6 or tree_update_batch.
  */
 function newestSourceMtime(dir) {
     let newest = 0;
@@ -52,10 +44,8 @@ function newestSourceMtime(dir) {
 }
 
 /**
- * Constraint count for one circuit, or an explanation of why it is unusable.
- *
- * Staleness fails rather than triggering a recompile: an .r1cs older than the
- * sources reports counts that do not correspond to the current circuits.
+ * Constraint count for one circuit, or an error when its .r1cs is missing or
+ * older than the sources.
  */
 async function measure(name, sourceMtime) {
     const file = path.join(ROOT, "build", `${name}.r1cs`);
@@ -71,8 +61,7 @@ async function measure(name, sourceMtime) {
         return { error: `${rel} is older than src/**.circom — stale; run \`${COMPILE_HINT}\`` };
     }
     const info = await snarkjs.r1cs.info(file);
-    // `sized` is the count snarkjs sizes the FFT domain from (see the header);
-    // `ceiling` uses it to express the bound in budget.json's units.
+    // `sized` is the count snarkjs sizes the FFT domain from.
     return {
         constraints: info.nConstraints,
         sized: info.nConstraints + info.nPubInputs + info.nOutputs,
@@ -80,9 +69,8 @@ async function measure(name, sourceMtime) {
 }
 
 /**
- * The largest `nConstraints` that still fits `domain`, in the same units as
- * budget.json. `sized - constraints` is the circuit's public-signal overhead,
- * which the FFT size includes and the budget file does not.
+ * The largest `nConstraints` that fits `domain`. `sized - constraints` is the
+ * public-signal count, which the FFT size includes and budget.json does not.
  */
 function ceiling(constraints, sized, domain) {
     return domain - 1 - (sized - constraints);

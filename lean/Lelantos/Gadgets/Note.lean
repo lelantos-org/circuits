@@ -9,51 +9,50 @@ Transcription of the seven templates, plus the structural facts they provide:
 
 * `packAV_inj` — packing `(asset_id, value)` into `asset_id · 2^64 + value` is injective
   once both fields are 64-bit range-checked, so `NoteCommitment` binds the asset and the
-  value separately rather than only their combination.
+  value separately.
 
 * `noteCommitment_inj` — the commitment is taken in two steps,
   `inner = Poseidon(TAG_INNER, pk, rho, rcm)` and
   `cm = Poseidon(TAG_CM, asset_id · 2^64 + value, inner)`. The outer hash binds
   `(asset_id, value, inner)`, given the two range checks; `noteInner_inj` binds
-  `(pk, rho, rcm)`; `noteCm_inj` composes them. The split is what lets a deposit publish
-  `inner` beside its public `(asset, value)` and have `tree_update_batch.circom` build the
-  leaf from the three (`Lelantos.batch_deposit_leaf`).
+  `(pk, rho, rcm)`; `noteCm_inj` composes them. A deposit publishes `inner` beside its
+  public `(asset, value)`, and `tree_update_batch.circom` builds the leaf from the three
+  (`Lelantos.batch_deposit_leaf`).
 
 * `nullifier_binds_cm` — the commitment is part of the nullifier preimage, so two notes
   that share `(nk, rho)` get different nullifiers. This is the faerie-gold defence
-  described at `src/lib/note.circom:121-128`; without `cm` in the preimage an attacker who
+  described at `src/lib/note.circom:109-113`; without `cm` in the preimage an attacker who
   produced a second note with a victim's `rho` could burn the victim's nullifier.
 
-Domain separation is by the leading tag, not by the size of the packed field: every
-same-arity pair of hash sites leads with a different constant
-(`noteCommitment_ne_deriveRho`, `noteInner_ne_nullifier`), and different arities are
-different preimage lengths (`noteCommitment_ne_merkleNode`).
+Domain separation is by the leading tag: every same-arity pair of hash sites leads with a
+different constant (`noteCommitment_ne_deriveRho`, `noteInner_ne_nullifier`), and different
+arities are different preimage lengths (`noteCommitment_ne_merkleNode`).
 
-The tree leaf is `cm` itself. There is no leaf hash.
+The tree leaf is `cm` itself.
 -/
 
 namespace Lelantos
 
-/-- `DeriveIvk` — `src/lib/note.circom:19-29`. -/
+/-- `DeriveIvk` — `src/lib/note.circom:14-24`. -/
 def deriveIvk (nsk : F) : F := poseidon [TAG_IVK, nsk]
 
-/-- `DeriveNk` — `src/lib/note.circom:31-40`. -/
+/-- `DeriveNk` — `src/lib/note.circom:26-35`. -/
 def deriveNk (nsk : F) : F := poseidon [TAG_NK, nsk]
 
-/-- `DerivePk` — `src/lib/note.circom:42-51`. -/
+/-- `DerivePk` — `src/lib/note.circom:37-46`. -/
 def derivePk (ivk : F) : F := poseidon [TAG_PK, ivk]
 
 /-- The full spend-key chain `nsk → ivk → pk`. -/
 def pkOfNsk (nsk : F) : F := derivePk (deriveIvk nsk)
 
-/-- `NoteInner` — `src/lib/note.circom:62-75`. The half of a note that stays private on
+/-- `NoteInner` — `src/lib/note.circom:53-66`. The half of a note that stays private on
 every path: the owner key, `rho` and the hiding randomness. -/
 def noteInner (pk rho rcm : F) : F := poseidon [TAG_INNER, pk, rho, rcm]
 
-/-- `packed_av <== asset_id * POW_2_64() + value` — `src/lib/note.circom:93`. -/
+/-- `packed_av <== asset_id * POW_2_64() + value` — `src/lib/note.circom:81`. -/
 def packAV (assetId value : F) : F := assetId * POW_2_64 + value
 
-/-- `NoteCommitment` — `src/lib/note.circom:86-101`: `Poseidon(TAG_CM, packed_av, inner)`.
+/-- `NoteCommitment` — `src/lib/note.circom:74-89`: `Poseidon(TAG_CM, packed_av, inner)`.
 The third argument is an `inner`, whoever computed it: `SpentNote` and `OutputNote` pass
 `noteInner pk rho rcm`, `TreeUpdateBatch` passes the word a depositor published. -/
 def noteCommitment (assetId value inner : F) : F :=
@@ -65,14 +64,14 @@ templates wire them, at `src/lib/spent.circom:54-62` on the input side and at
 def noteCm (assetId value pk rho rcm : F) : F :=
   noteCommitment assetId value (noteInner pk rho rcm)
 
-/-- `DeriveRho` — `src/lib/note.circom:108-119`. -/
+/-- `DeriveRho` — `src/lib/note.circom:96-107`. -/
 def deriveRho (nf0 index : F) : F := poseidon [TAG_RHO, nf0, index]
 
-/-- `Nullifier` — `src/lib/note.circom:133-146`. -/
+/-- `Nullifier` — `src/lib/note.circom:118-131`. -/
 def nullifierOf (nk rho cm : F) : F := poseidon [TAG_NF, nk, rho, cm]
 
 /-- The node hash of `MerkleLevel4`, `Poseidon(TAG_MERKLE, c0, c1, c2, c3)` —
-`src/lib/merkle.circom:66-74`. -/
+`src/lib/merkle.circom:62-70`. -/
 def merkleNode (c : ℕ → F) : F := poseidon [TAG_MERKLE, c 0, c 1, c 2, c 3]
 
 /-- `Poseidon` reads four children, so agreement on those four suffices. -/
@@ -103,7 +102,7 @@ theorem packAV_val {x y : F} (hx : x.val < 2 ^ 64) (hy : y.val < 2 ^ 64) :
   rw [packAV_cast, ZMod.val_natCast_of_lt (packAV_bound hx hy)]
 
 /-- Packing is injective on 64-bit-range-checked inputs, since `2^128 < p`. This is the
-precondition stated at `src/lib/note.circom:79-82`. -/
+precondition stated at `src/lib/note.circom:68-71`. -/
 theorem packAV_inj {a v a' v' : F}
     (ha : a.val < 2 ^ 64) (hv : v.val < 2 ^ 64)
     (ha' : a'.val < 2 ^ 64) (hv' : v'.val < 2 ^ 64)
@@ -112,12 +111,11 @@ theorem packAV_inj {a v a' v' : F}
     rw [← packAV_val ha hv, ← packAV_val ha' hv', h]
   refine ⟨val_inj ?_, val_inj ?_⟩ <;> omega
 
-/-- **Faerie-gold resistance.** Equal nullifiers force equal `(nk, rho, cm)`; in
-particular the commitment is pinned, so a second note sharing `(nk, rho)` cannot collide
-with the victim's nullifier.
+/-- **Faerie-gold resistance.** Equal nullifiers force equal `(nk, rho, cm)`, so a second
+note sharing `(nk, rho)` cannot collide with the victim's nullifier.
 
-Conditional on `hcr`, which is unsatisfiable (`poseidon_collision`); this is an assumption
-recorded in the statement, not a proved property. -/
+Conditional on `hcr`, which is unsatisfiable (`poseidon_collision`): an assumption, not a
+proved property. -/
 theorem nullifier_binds_cm (hcr : ¬ PoseidonCollision) {nk rho cm nk' rho' cm' : F}
     (h : nullifierOf nk rho cm = nullifierOf nk' rho' cm') :
     nk = nk' ∧ rho = rho' ∧ cm = cm' := by
@@ -150,14 +148,10 @@ theorem noteInner_inj (hcr : ¬ PoseidonCollision) {pk rho rcm pk' rho' rcm' : F
   simp only [List.cons.injEq, and_true] at h'
   exact ⟨h'.2.1, h'.2.2.1, h'.2.2.2⟩
 
-/-- **The note commitment binds `(asset_id, value, inner)`.** Given the two 64-bit range
+/-- **The note commitment binds `(asset_id, value, inner)`**, given the two 64-bit range
 checks every caller applies — `SpentNote`, `OutputNote`, and `TreeUpdateBatch` on a deposit
-leaf — a commitment cannot be reopened to a different asset, a different value or a
-different `inner`.
-
-Without `packAV_inj` this would only bind the packed pair, and a prover could trade
-asset id against value inside one field element. Both range checks are needed: dropping
-either one makes the packing non-injective. -/
+leaf. Both range checks are needed: without either the packing is not injective, and a
+prover could trade asset id against value inside one field element. -/
 theorem noteCommitment_inj (hcr : ¬ PoseidonCollision) {a v inner a' v' inner' : F}
     (ha : a.val < 2 ^ 64) (hv : v.val < 2 ^ 64)
     (ha' : a'.val < 2 ^ 64) (hv' : v'.val < 2 ^ 64)
@@ -198,7 +192,7 @@ Same arity, different leading tag; or different arity. -/
 
 /-- **A note commitment is never an output `rho`.** `NoteCommitment` and `DeriveRho` are the
 only two arity-3 sites, and they lead with different tags:
-`TAG_CM` at `src/lib/note.circom:96` and `TAG_RHO` at `src/lib/note.circom:114`. -/
+`TAG_CM` at `src/lib/note.circom:84` and `TAG_RHO` at `src/lib/note.circom:102`. -/
 theorem noteCommitment_ne_deriveRho (hcr : ¬ PoseidonCollision) (a v inner nf0 index : F) :
     noteCommitment a v inner ≠ deriveRho nf0 index := by
   intro h
@@ -223,8 +217,8 @@ theorem noteInner_ne_nullifier (hcr : ¬ PoseidonCollision) (pk rho rcm nk rho' 
 
 /-- A note commitment is never a Merkle node: the preimages have different arities
 (3 vs 5), and circom instantiates `Poseidon(3)` and `Poseidon(5)` as different
-permutations. Since the leaf is `cm`, this is what stops a prover presenting an internal
-node as a leaf. -/
+permutations. Since the leaf is `cm`, this stops a prover presenting an internal node as a
+leaf. -/
 theorem noteCommitment_ne_merkleNode (hcr : ¬ PoseidonCollision) (a v inner : F)
     (c : ℕ → F) : noteCommitment a v inner ≠ merkleNode c := by
   intro h

@@ -4,10 +4,10 @@ import Lelantos.Gadgets.Comparators
 /-!
 # `src/lib/batch_append.circom` — the tree before and after a batch
 
-`BatchAppend(DEPTH, MAX_L)` (`src/lib/batch_append.circom:106-248`) computes both roots of a
-batch append from one frontier, and performs every range check its reading depends on. The
-construction is explained in that file's header; this module transcribes the constraint
-system (`BatchAppendSat`) and proves it computes the specification in `Spec/QuatTree.lean`:
+`BatchAppend(DEPTH, MAX_L)` (`src/lib/batch_append.circom:102-244`) computes both roots of a
+batch append from one frontier, with the range checks that reading depends on. This module
+transcribes the constraint system (`BatchAppendSat`) and proves it computes the
+specification in `Spec/QuatTree.lean`:
 
 * `batchAppend_count_range`, `batchAppend_active_spec` — `actual_count ∈ [1, MAX_L]` and the
   exported `active` is the prefix indicator.
@@ -28,13 +28,13 @@ namespace Lelantos
 
 /-! ## The window width -/
 
-/-- `BATCH_WINDOW(DEPTH, n, d)` — `src/lib/batch_append.circom:57-70`. The worst-case number
+/-- `BATCH_WINDOW(DEPTH, n, d)` — `src/lib/batch_append.circom:53-66`. The worst-case number
 of level-`d` nodes that `n` consecutive leaves change: `n` at the leaves, then
 `(n - 2) \ 4^d + 2` capped at the level's width `4^(DEPTH - d)`. -/
 def batchWindow (depth n d : ℕ) : ℕ :=
   if d = 0 then n else min (if 2 ≤ n then (n - 2) / 4 ^ d + 2 else 1) (4 ^ (depth - d))
 
-/-- The top window is the single root node — `src/lib/batch_append.circom:203`,
+/-- The top window is the single root node — `src/lib/batch_append.circom:199`,
 `assert(W[DEPTH] == 1)`. -/
 theorem batchWindow_top {depth maxL : ℕ} (hd : 1 ≤ depth) : batchWindow depth maxL depth = 1 := by
   have hA : 1 ≤ (if 2 ≤ maxL then (maxL - 2) / 4 ^ depth + 2 else 1) := by
@@ -95,7 +95,7 @@ theorem batchWindow_covers {depth maxL S n d : ℕ} (hn1 : 1 ≤ n) (hn : n ≤ 
 
 /-! ## Selectors -/
 
-/-- The digit selectors — `src/lib/batch_append.circom:154-157`, `s[d][r]` as a linear
+/-- The digit selectors — `src/lib/batch_append.circom:150-153`, `s[d][r]` as a linear
 combination of the two bits `b0`, `b1` and their product `bb`. -/
 def batchSel (b0 b1 bb : F) (r : ℕ) : F :=
   if r = 0 then 1 - b0 - b1 + bb else if r = 1 then b0 - bb else if r = 2 then b1 - bb else bb
@@ -117,7 +117,7 @@ inductive BatchSrc where
   | empty
 
 /-- The source of child `k` of window slot `j`, at digit `r`, over a lower window of width
-`w` — the classification `p = 4j + k - r` at `src/lib/batch_append.circom:75-84`. -/
+`w` — the classification `p = 4j + k - r` at `src/lib/batch_append.circom:71-80`. -/
 def batchSrc (w j k r : ℕ) : BatchSrc :=
   if 4 * j + k < r then .frontier else if 4 * j + k - r < w then .node (4 * j + k - r)
   else .empty
@@ -125,13 +125,12 @@ def batchSrc (w j k r : ℕ) : BatchSrc :=
 /-! ### The classification, against the circuit's own arithmetic
 
 `batchSrc` works in `ℕ`, where `4j + k - r` truncates. The circuit computes `p = 4 * j + k - r`
-as a circom `var`, a field element, and `p < 0` compares in circom's signed reading of the
-field, which for these small values is the integer value. `circomSrc` is that computation in
-`ℤ`, transcribed literally, and `batchSrc_eq_circom` shows the two agree everywhere, so the
-`ℕ` formulation is equivalent. The same holds for `BATCH_WINDOW`'s clamp against
-`batchWindow`'s `min`, at every shape. -/
+as a circom `var` and tests `p < 0` in circom's signed reading of the field, which for these
+small values is the integer value. `circomSrc` is that computation in `ℤ`;
+`batchSrc_eq_circom` shows the two agree. Likewise `BATCH_WINDOW`'s clamp against
+`batchWindow`'s `min`. -/
 
-/-- `BATCH_SRC` at `:75-84` in `ℤ`, as circom evaluates it. -/
+/-- `BATCH_SRC` at `:71-80` in `ℤ`, as circom evaluates it. -/
 def circomSrc (w j k r : ℕ) : BatchSrc :=
   let p : ℤ := 4 * (j : ℤ) + k - r
   if p < 0 then .frontier else if p < (w : ℤ) then .node p.toNat else .empty
@@ -141,7 +140,7 @@ theorem batchSrc_eq_circom (w j k r : ℕ) : batchSrc w j k r = circomSrc w j k 
   simp only
   split_ifs <;> first | rfl | omega | (congr 1; omega)
 
-/-- `BATCH_WINDOW` (`src/lib/batch_append.circom:57-70`) as circom writes it: a clamp rather
+/-- `BATCH_WINDOW` (`src/lib/batch_append.circom:53-66`) as circom writes it: a clamp rather
 than a `min`. `BatchAppend` evaluates it only at `d ≤ DEPTH`, where `4 ** (DEPTH - d)` on the
 field is the natural `4 ^ (DEPTH - d)`. -/
 def circomWindow (DEPTH n d : ℕ) : ℕ :=
@@ -161,7 +160,7 @@ def BatchSrc.val (fr node : ℕ → F) (zero : F) (k : ℕ) : BatchSrc → F
   | .empty => zero
 
 /-- The coefficient a frontier slot is read with: the selectors for digits above it —
-`read` at `src/lib/batch_append.circom:163-166`. -/
+`read` at `src/lib/batch_append.circom:159-162`. -/
 def batchRead (sel : ℕ → F) (k : ℕ) : F := ∑ r ∈ Finset.Ico (k + 1) 4, sel r
 
 /-- Under one-hot selectors, frontier slot `k` is read exactly when the digit lies above it. -/
@@ -196,7 +195,7 @@ def batchChild (sel : ℕ → F) (w j k : ℕ) (fr node : ℕ → F) (zero : F) 
 /-- The numeric side conditions of a `BatchAppend(depth, maxL)` instance with
 `COUNT_BITS = countBits`. `BatchShape.deployed` discharges them at the deployed shape. -/
 structure BatchShape (depth maxL countBits : ℕ) : Prop where
-  /-- `assert((1 << COUNT_BITS) == MAX_L)` at `src/lib/batch_append.circom:129`. -/
+  /-- `assert((1 << COUNT_BITS) == MAX_L)` at `src/lib/batch_append.circom:125`. -/
   pow_count : 2 ^ countBits = maxL
   /-- `LessThan(COUNT_BITS + 1)` decomposes `COUNT_BITS + 2` bits without aliasing. -/
   count_lt_p : 2 ^ (countBits + 2) ≤ p
@@ -235,43 +234,42 @@ abbrev appendSel (idxBits bb : ℕ → F) (d : ℕ) : ℕ → F :=
   batchSel (idxBits (2 * d)) (idxBits (2 * d + 1)) (bb d)
 
 /-- The constraint system of `BatchAppend(depth, maxL)` with `COUNT_BITS = countBits` —
-`src/lib/batch_append.circom:106-248` — over the inputs `start_index`, `actual_count`,
-`leaves` and `frontier_in`. `zeros` is `EMPTY_SUBTREE`, a free parameter as everywhere else
-in the model. -/
+`src/lib/batch_append.circom:102-244` — over the inputs `start_index`, `actual_count`,
+`leaves` and `frontier_in`. `zeros` is `EMPTY_SUBTREE`, a free parameter. -/
 structure BatchAppendSat (depth maxL countBits : ℕ) (zeros : ℕ → F) (startIndex actualCount : F)
     (leaves : ℕ → F) (frIn : ℕ → ℕ → F) (a : BatchAppendSignals) : Prop where
-  /-- `:130-131` — `Num2Bits(COUNT_BITS)` on `actual_count - 1`. -/
+  /-- `:126-127` — `Num2Bits(COUNT_BITS)` on `actual_count - 1`. -/
   count_bits : Num2BitsSat countBits (actualCount - 1) a.cntBits
-  /-- `:133-139` — `active[k] = LessThan(COUNT_BITS+1)(k, actual_count)`. -/
+  /-- `:129-135` — `active[k] = LessThan(COUNT_BITS+1)(k, actual_count)`. -/
   active_def : ∀ k, k < maxL →
     LessThanSat (countBits + 1) ((k : ℕ) : F) actualCount (a.ltBits k) (a.active k)
-  /-- `:144-145` — `idx_bits = Num2Bits(BITS)(start_index)`. -/
+  /-- `:140-141` — `idx_bits = Num2Bits(BITS)(start_index)`. -/
   index_bits : Num2BitsSat (2 * depth) startIndex a.idxBits
-  /-- `:146-147` — `last_idx_bits.in <== start_index + actual_count - 1`. -/
+  /-- `:142-143` — `last_idx_bits.in <== start_index + actual_count - 1`. -/
   last_idx_bits : Num2BitsSat (2 * depth) (startIndex + actualCount - 1) a.lastIdxBits
-  /-- `:153` — `bb[d] <== idx_bits.out[2 * d] * idx_bits.out[2 * d + 1]`. -/
+  /-- `:149` — `bb[d] <== idx_bits.out[2 * d] * idx_bits.out[2 * d + 1]`. -/
   bb_def : ∀ d, d < depth → a.bb d = bitPairs a.idxBits d
-  /-- `:161-169` — `(1 - read) * frontier_in[d][k] === 0`. -/
+  /-- `:157-165` — `(1 - read) * frontier_in[d][k] === 0`. -/
   frontier_pin : ∀ d, d < depth → ∀ k, k < 3 →
     (1 - batchRead (appendSel a.idxBits a.bb d) k) * frIn d k = 0
-  /-- `:175` — `old_node[0] <== 0`. -/
+  /-- `:171` — `old_node[0] <== 0`. -/
   old_base : a.oldNode 0 = 0
-  /-- `:176-191` — each old-root node hashes its four children, `old_prod[d][k] <== s[d][k] *
+  /-- `:172-187` — each old-root node hashes its four children, `old_prod[d][k] <== s[d][k] *
   old_node[d]` among them. -/
   old_def : ∀ d, d < depth →
     a.oldNode (d + 1) =
       merkleNode (oldChild (appendSel a.idxBits a.bb d) (frIn d) (a.oldNode d) (zeros d))
-  /-- `:192` — `old_root <== old_node[DEPTH]`. -/
+  /-- `:188` — `old_root <== old_node[DEPTH]`. -/
   old_root_def : a.oldRoot = a.oldNode depth
-  /-- `:206-208` — `node[OFF[0] + t] <== active[t] * leaves[t]`. -/
+  /-- `:202-204` — `node[OFF[0] + t] <== active[t] * leaves[t]`. -/
   leaf_def : ∀ t, t < maxL → a.node 0 t = a.active t * leaves t
-  /-- `:224-240` — each window node's four children, `prod[pi] <== s[d][r] * node[OFF[d] +
-  src]` among them, hashed into `node` at `:242` with `h[hi].inputs[0] <== tag` at `:222`. -/
+  /-- `:220-236` — each window node's four children, `prod[pi] <== s[d][r] * node[OFF[d] +
+  src]` among them, hashed into `node` at `:238` with `h[hi].inputs[0] <== tag` at `:218`. -/
   node_def : ∀ d, d < depth → ∀ j, j < batchWindow depth maxL (d + 1) →
     a.node (d + 1) j = merkleNode (fun k =>
       batchChild (appendSel a.idxBits a.bb d) (batchWindow depth maxL d) j k (frIn d) (a.node d)
         (zeros d))
-  /-- `:247` — `new_root <== node[OFF[DEPTH]]`. -/
+  /-- `:243` — `new_root <== node[OFF[DEPTH]]`. -/
   new_root_def : a.newRoot = a.node depth 0
 
 /-! ## Soundness -/
@@ -553,7 +551,7 @@ difference, negated. -/
 def lessThanActive (countBits n : ℕ) (k : ℕ) : F :=
   1 - natBits (k + 2 ^ (countBits + 1) - n) (countBits + 1)
 
-/-- Every `BatchAppend` signal, defined as exactly the expression its constraint requires. -/
+/-- Every `BatchAppend` signal, defined as the expression its constraint requires. -/
 noncomputable def batchAppendWitness (depth maxL countBits S n : ℕ) (leaves : ℕ → F)
     (frIn : ℕ → ℕ → F) (zeros : ℕ → F) : BatchAppendSignals where
   cntBits := natBits (n - 1)
@@ -578,8 +576,8 @@ theorem natBits_quatDigit {depth S d : ℕ} (hS : S < 4 ^ depth) (hdp : 2 ^ (2 *
   rw [← quatDigit_eq_bits (bs := natBits S) (n := 2 * depth) (d := d) (by omega), ← hval]
 
 /-- **`BatchAppend(depth, maxL)` is satisfiable** at every start, every count and every
-frontier that is zero where honest writers zero it. The frontier may hold anything in the
-slots the digits read, so the pin is not over-strict. -/
+frontier that is zero at or above each level's digit. The slots the digits read are
+unconstrained. -/
 theorem batchAppend_witness {depth maxL countBits S n : ℕ} (hs : BatchShape depth maxL countBits)
     (hn1 : 1 ≤ n) (hn : n ≤ maxL) (hcap : S + n ≤ 4 ^ depth) (leaves : ℕ → F)
     (frIn : ℕ → ℕ → F) (zeros : ℕ → F) (hfr : ∀ d k, quatDigit S d ≤ k → frIn d k = 0) :

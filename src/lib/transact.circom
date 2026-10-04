@@ -15,10 +15,7 @@ include "poly_eval.circom";
 //
 // A note commits to its (asset_id, value) by hash (NoteCommitment), and
 // PerAssetValueBalance enforces conservation over asset ids as field elements.
-// There is no value commitment and no curve arithmetic.
-//
-// Per-slot constraints live in SpentNote and OutputNote; this template wires
-// them together.
+// Per-slot constraints are in SpentNote and OutputNote.
 //
 // The verifier sees only the public signals (y, digest, z), in that order,
 // with y = PolyEval(coeffs, z) and digest = CoeffDigest(coeffs). The coefficient
@@ -31,12 +28,10 @@ include "poly_eval.circom";
 // each nullifier[i] unspent, and each out_cm[j] inserted into the commitment
 // tree.
 //
-// Not circuit signals: recipient_address, chain_id, payer_address,
-// relayer_address, intent_hash, the per-output FMD clue fields and the
-// encrypted-payload digest. The circuit constrains none of them, so they are
-// not PolyEval coefficients (see TransactCompressN in poly_eval.circom). They
-// bind to the proof through the challenge: PubInputs.sol hashes them into z, so
-// altering any of them changes z and therefore y.
+// Not circuit signals, so not PolyEval coefficients: recipient_address,
+// chain_id, payer_address, relayer_address, intent_hash, the per-output FMD
+// clue fields and the encrypted-payload digest. PubInputs.sol hashes them into
+// z, so altering any of them changes z and therefore y.
 template Transact(DEPTH, N_IN, N_OUT) {
     // ===== PUBLIC (verifier-visible) =====
     signal input  z;        // Fiat-Shamir challenge.
@@ -95,18 +90,10 @@ template Transact(DEPTH, N_IN, N_OUT) {
         in_dz.value[i] <== in_value[i];
     }
 
-    // At least one input slot must be real.
-    //
-    // MerkleProofOrDummy skips the root comparison on a dummy slot, so if every
-    // slot is a dummy, no spend constraint reads merkle_root. With one real slot
-    // the root is the output of a Poseidon chain over a note the prover owns.
-    //
-    // This excludes no valid flow: shielding goes through the deposit escrow
-    // and tree_update_batch, so an all-dummy transact has nothing to spend and
-    // every output at value 0.
-    //
-    // DummyZeroValue booleanizes is_dummy, so the sum is in [0, N_IN] and a
-    // single equality suffices.
+    // At least one input slot is real. MerkleProofOrDummy skips the root check on
+    // a dummy slot, so an all-dummy transaction would leave merkle_root
+    // unconstrained. DummyZeroValue makes is_dummy boolean, so the sum lies in
+    // [0, N_IN] and one equality suffices.
     signal dummy_acc[N_IN + 1];
     dummy_acc[0] <== 0;
     for (var i = 0; i < N_IN; i++) {
@@ -148,13 +135,10 @@ template Transact(DEPTH, N_IN, N_OUT) {
     rng_pub_out.v <== public_out;
 
     // public_out == 0 ⇒ public_asset_id == 0: a transaction that withdraws
-    // nothing names no asset. Without this a shielded transfer would have to
-    // publish some asset id, and the natural choice is the one it moves.
+    // nothing names no asset, so a shielded transfer publishes no asset id.
     //
-    // The converse needs no constraint. At public_asset_id == 0 the candidate
-    // check for id 0 reads Σ in_value[asset == 0] == Σ out_value[asset == 0]
-    // + public_out; outputs reject id 0 and a real input rejects it, so only
-    // dummies remain on the left, at value 0, and public_out == 0 follows.
+    // The converse needs no constraint: outputs and real inputs reject id 0 and
+    // dummies carry value 0, so conservation at id 0 forces public_out == 0.
     component pub_out_z = IsZero();
     pub_out_z.in <== public_out;
     pub_out_z.out * public_asset_id === 0;

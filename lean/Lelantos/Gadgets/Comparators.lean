@@ -4,11 +4,10 @@ import Lelantos.Model.Bits
 # circomlib comparators, and the indicators they compute
 
 `IsZero` and `IsEqual` (`node_modules/circomlib/circuits/comparators.circom:24-43`) are the
-only comparators the transact circuit uses. Both are modelled here, together with the
-field- and `ℕ`-valued indicator functions their outputs are shown to equal.
+only comparators the transact circuit uses. Both are modelled here, with the field- and
+`ℕ`-valued indicators their outputs equal.
 
-The soundness of `IsZero` is where `p` being prime is consumed: the argument needs `F` to
-have no zero divisors.
+Soundness of `IsZero` needs `F` to have no zero divisors, i.e. `p` prime.
 -/
 
 namespace Lelantos
@@ -27,8 +26,8 @@ structure IsZeroSat (x inv out : F) : Prop where
   /-- `in * out === 0`. -/
   annihilates : x * out = 0
 
-/-- **Soundness of `IsZero`.** The `<--` hint is irrelevant: the two constraints pin `out`
-to the indicator of `x = 0` on their own. -/
+/-- **Soundness of `IsZero`.** The two constraints pin `out` to the indicator of `x = 0`,
+whatever the `<--` hint supplies. -/
 theorem isZero_sound {x inv out : F} (h : IsZeroSat x inv out) :
     out = if x = 0 then 1 else 0 := by
   by_cases hx : x = 0
@@ -52,9 +51,8 @@ theorem isEqual_sound {a b inv out : F} (h : IsEqualSat a b inv out) :
 
 /-! ## Indicators
 
-Comparator outputs are indicator values. Two readings are needed: the field-valued one the
-circuit multiplies with, and the `ℕ`-valued one the no-wrap lift in
-`Lelantos.Gadgets.Balance` sums over.
+The field-valued indicator is what the circuit multiplies with; the `ℕ`-valued one is what
+the no-wrap lift in `Lelantos.Gadgets.Balance` sums over.
 -/
 
 /-- Field-valued indicator. -/
@@ -72,17 +70,16 @@ theorem indN_le_one (P : Prop) [Decidable P] : indN P ≤ 1 := by
 /-! ## `LessThan`
 
 circomlib `LessThan(n)` (`comparators.circom:89-99`) is the comparator
-`src/lib/batch_append.circom:133-138` uses to derive `active[k] = (k < actual_count)`:
+`src/lib/batch_append.circom:129-134` uses to derive `active[k] = (k < actual_count)`:
 
     component n2b = Num2Bits(n + 1);
     n2b.in <== in[0] + (1 << n) - in[1];
     out <== 1 - n2b.out[n];
 
-The offset `2^n` keeps the difference non-negative; the top bit of the `(n+1)`-bit
-decomposition is then the borrow flag, and `out` is its complement. `LessThan` is unsound
-without the two range hypotheses: if `in[1]` may exceed `2^n` the subtraction wraps and the
-comparator reports the wrong order. For this reason
-`src/lib/batch_append.circom:135` sizes the gadget as `LessThan(COUNT_BITS + 1)` rather than
+The offset `2^n` keeps the difference non-negative, so the top bit of the `(n+1)`-bit
+decomposition is the borrow flag and `out` its complement. This is sound only for operands
+within range: if `in[1]` may exceed `2^n` the subtraction wraps. For this reason
+`src/lib/batch_append.circom:131` sizes the gadget as `LessThan(COUNT_BITS + 1)` rather than
 `LessThan(COUNT_BITS)`.
 -/
 
@@ -91,8 +88,8 @@ theorem bitsNat_succ (bs : ℕ → F) (n : ℕ) :
     bitsNat bs (n + 1) = bitsNat bs n + bitNat (bs n) * 2 ^ n := by
   simp [bitsNat, Finset.sum_range_succ]
 
-/-- The top bit of an `(n+1)`-bit decomposition is set exactly when the value reaches
-`2^n`. This is the borrow flag `LessThan` reads. -/
+/-- The top bit of an `(n+1)`-bit decomposition is set iff the value reaches `2^n`. This is
+the borrow flag `LessThan` reads. -/
 theorem bitNat_top_iff (bs : ℕ → F) (n : ℕ) :
     bitNat (bs n) = 1 ↔ 2 ^ n ≤ bitsNat bs (n + 1) := by
   have hlow : bitsNat bs n < 2 ^ n := bitsNat_lt bs n
@@ -150,8 +147,8 @@ theorem lessThan_sound {n : ℕ} {a b out : F} {bs : ℕ → F}
     rw [if_neg hlt, ho]; ring
 
 /-- **`LessThan(n)` is satisfiable at every pair of operands it admits.** The bits are the
-canonical decomposition of the shifted difference, so `lessThan_sound` reads the comparison
-off the top bit. Needed to instantiate `active[k]` in the batch circuit. -/
+canonical decomposition of the shifted difference. Used to instantiate `active[k]` in the
+batch circuit. -/
 theorem lessThan_witness {n i j : ℕ} (hi : i < 2 ^ n) (hj : j ≤ 2 ^ n) :
     LessThanSat n (i : F) (j : F) (natBits (i + 2 ^ n - j))
       (1 - natBits (i + 2 ^ n - j) n) where

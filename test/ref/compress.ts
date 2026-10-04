@@ -1,15 +1,13 @@
 // PolyEval coefficient layouts, the coefficient digest and the Fiat-Shamir
-// challenge.
+// challenge, transcribed from src/lib/poly_eval.circom.
 //
 // Each circuit exposes three public signals, (y, digest, z): the evaluation of
 // its coefficients at z, a Poseidon commitment to those coefficients, and the
 // challenge. The contract takes the digest word from calldata, hashes it into z
 // after the coefficients, and passes it to the verifier.
 //
-// Transcribed from src/lib/poly_eval.circom. The same orders appear in
-// contracts/src/lib/PubInputs.sol :: compress and in Lelantos.piSlot
-// (lean/Lelantos/Circuit/Layout.lean). lean/expected/layout-*.txt pins the Lean
-// side; test/formal/layout_parity.test.ts ties it to this module.
+// The same orders appear in contracts/src/lib/PubInputs.sol :: compress and in
+// Lelantos.piSlot (lean/Lelantos/Circuit/Layout.lean).
 
 import { keccak_256 } from "@noble/hashes/sha3";
 import { poseidon5 } from "poseidon-lite";
@@ -21,10 +19,7 @@ type Loose = string | bigint | number;
 
 const big = (x: Loose): Field => BigInt(x);
 
-/**
- * The circuit signals `TransactCompressN` evaluates: the PolyEval coefficients,
- * which are also the input of `CoeffDigest`.
- */
+/** The circuit signals `TransactCompressN` evaluates and `CoeffDigest` absorbs. */
 export interface DigestInput {
     merkle_root: Loose;
     nullifier: readonly Loose[];
@@ -36,9 +31,8 @@ export interface DigestInput {
 /** The public slots of a transact witness, as `toCircomInput` emits them. */
 export interface FlattenInput extends DigestInput {
     /**
-     * The coefficient digest as calldata carries it. The circuit outputs its own,
-     * computed from its signals, as a public signal; this is the word the
-     * contract hashes into `z` and passes to the verifier to compare against.
+     * The coefficient digest as calldata carries it: the word the contract hashes
+     * into `z` and the verifier compares against the circuit's digest output.
      */
     digest: Loose;
     recipient_address: Loose;
@@ -70,9 +64,7 @@ export function digestPrefix(input: DigestInput): Field[] {
  *   h_0     = Poseidon(TAG_DIGEST, w[0..3])
  *   h_{b+1} = Poseidon(h_b,        w[4b+4 .. 4b+7])
  *
- * Mirrors CoeffDigest in src/lib/poly_eval.circom. Calls poseidon-lite directly
- * rather than taking a `Poseidon`, so the Fiat-Shamir helpers stay free of an
- * async-built dependency.
+ * Mirrors CoeffDigest in src/lib/poly_eval.circom.
  */
 export function coeffDigest(words: readonly Field[]): Field {
     if (words.length < 1) throw new Error("coeffDigest: need at least one word");
@@ -94,14 +86,9 @@ export function transactDigest(input: DigestInput): Field {
  * The Fiat-Shamir challenge preimage: every logical public input, in calldata
  * order. Total = 10 + N_IN + 4·N_OUT; 38 at (N_IN, N_OUT) = (4, 6).
  *
- * Superset of `coeffs` below: the coefficients, then the digest word, then the
- * words the circuit has no signal for. The digest is hashed so that it is
- * fixed before `z`; the verifier compares it against the circuit's digest
- * output. The remaining words are bound by `z` alone: changing one changes the
- * public input the proof was made for.
- *
- * Arity is taken from the input array lengths, matching the circom template's
- * genericity over (N_IN, N_OUT).
+ * Layout: the coefficients, the digest word, then the words the circuit has no
+ * signal for, which are bound by `z` alone. The digest is hashed so that it is
+ * fixed before `z`.
  */
 export function flatten(input: FlattenInput): Field[] {
     const nIn = input.nullifier.length;
@@ -137,17 +124,12 @@ export function flatten(input: FlattenInput): Field[] {
 }
 
 /**
- * TransactCompressN's coefficient vector. Total = 3 + N_IN + N_OUT; 13 at
- * (N_IN, N_OUT) = (4, 6).
+ * TransactCompressN's coefficient vector: the leading words of `flatten`.
+ * Total = 3 + N_IN + N_OUT; 13 at (N_IN, N_OUT) = (4, 6).
  *
- * The leading words of `flatten`: the circuit's public signals. The digest word
- * that follows them in the preimage is not a coefficient; it is a public signal
- * of its own. `PolyEval` is affine in each coefficient and the prover knows `z`
- * before choosing the witness, so the evaluation binds only because the digest
- * commits the witness's coefficients before `z` is derived (TransactCompressN's
- * header). `recipient_address`, `chain_id`, `payer_address`, `relayer_address`,
- * `intent_hash`, `out_aux_digest` and the clue fields are not circuit signals,
- * so they are absent here and bound through `flatten`.
+ * `PolyEval` is affine in each coefficient and the prover knows `z` before
+ * choosing the witness, so the evaluation binds only because the digest commits
+ * the witness's coefficients before `z` is derived.
  */
 export function coeffs(input: DigestInput): Field[] {
     return digestPrefix(input);
@@ -172,12 +154,7 @@ export interface FlattenBatchInput extends BatchCoeffInput {
     digest: Loose;
 }
 
-/**
- * Slot names of the batch coefficients, in order.
- *
- * Matches the order `batchCoeffs` emits values in, so the names published in
- * `vectors/` label the right values. The vector generator reads this directly.
- */
+/** Slot names of the batch coefficients, in `batchCoeffs` order; published in `vectors/`. */
 export function batchLayoutNames(maxL: number): string[] {
     const names = ["oldRoot", "newRoot", "startIndex", "actualCount"];
     for (let k = 0; k < maxL; k++) names.push(`cms ${k}`);
@@ -188,16 +165,12 @@ export function batchLayoutNames(maxL: number): string[] {
 }
 
 /**
- * BatchCompress's coefficient vector. Total = 4 + 4·MAX_L; 36 at MAX_L = 8.
- *
- * Arrays are indexed by leaf slot: a batch commits `actual_count` individual
- * leaves, odd counts included. `batchLayoutNames` above names these slots in
- * the same order; a change to one requires the same change to the other.
+ * BatchCompress's coefficient vector, indexed by leaf slot. Total = 4 + 4·MAX_L;
+ * 36 at MAX_L = 8.
  *
  * Every word is a signal of `tree_update_batch.circom`, so every word is
- * evaluated: hashing a signal into `z` without evaluating it binds nothing,
- * because the prover knows `z` first and may choose a witness that disagrees
- * with the calldata it was hashed from.
+ * evaluated: the prover knows `z` before choosing the witness, so hashing a
+ * signal into `z` without evaluating it binds nothing.
  */
 export function batchCoeffs(input: BatchCoeffInput): Field[] {
     const maxL = input.cms.length;
@@ -235,11 +208,6 @@ export function batchDigest(input: BatchCoeffInput): Field {
 /**
  * The batch challenge preimage: the coefficients, then the digest word.
  * Total = 5 + 4·MAX_L (37 at MAX_L = 8).
- *
- * A separate function from `batchCoeffs`: one defines what is hashed into `z`,
- * the other what is evaluated into `y`. They differ by exactly the digest word,
- * which is hashed so that it is fixed before `z` and is compared by the
- * verifier against the circuit's digest output rather than evaluated.
  */
 export function flattenBatch(input: FlattenBatchInput): Field[] {
     return [...batchCoeffs(input), big(input.digest)];
@@ -260,14 +228,10 @@ export function hornerEval(coeffs: Field[], z: Field): Field {
 
 /**
  * `abi.encode(uint256[] coeffs)`: the preimage `fiatShamirZ` hashes.
- *
  * Layout: 32-byte offset (0x20) || 32-byte length || N × 32-byte big-endian.
- * The element order is big-endian, unlike the little-endian encoding used
- * elsewhere in this directory.
  *
- * Exported separately because the circuit does not constrain `z`, so witness
- * generation cannot detect an encoding error. The vectors record this preimage,
- * which localises a mismatch to the encoding.
+ * The circuit does not constrain `z`, so witness generation cannot detect an
+ * encoding error; the vectors record this preimage.
  */
 export function abiEncodeCoeffs(coeffs: Field[]): Uint8Array {
     const out = new Uint8Array(64 + coeffs.length * 32);

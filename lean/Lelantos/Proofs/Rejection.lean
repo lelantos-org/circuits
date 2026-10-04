@@ -3,11 +3,9 @@ import Lelantos.Circuit.Transact
 /-!
 # Assignments the constraint system rejects
 
-`transact_sound` states what a satisfying assignment proves; this module states the
-contrapositive, that families of malformed transactions have no satisfying assignment at
-all. Each result takes `TransactSat w` plus a description of the malformation and derives
-`False`, so it rules out a family rather than one hand-built counterexample. These are the
-Lean counterparts of the rejecting cases in `test/transact/`.
+Contrapositives of `transact_sound`: each result takes `TransactSat w` plus a description of
+a malformation and derives `False`. These are the Lean counterparts of the rejecting cases
+in `test/transact/`.
 -/
 
 namespace Lelantos
@@ -42,8 +40,8 @@ theorem withdraw_from_nothing_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (h
   hpos (no_asset_withdrawal hnIn hnOut h hnotIn)
 
 /-- **Inflation is rejected.** With a single asset `a` on both sides, the output total is at
-most the input total; claiming more is impossible. The transparent bucket cannot help: it
-sits on the output side and only takes value out. -/
+most the input total. The transparent bucket sits on the output side and only takes value
+out. -/
 theorem inflation_rejected (h : TransactSat w) (hnIn : nIn = 2) (hnOut : nOut = 2)
     {a : F} (hin0 : inAsset w 0 = a) (hin1 : inAsset w 1 = a)
     (hout0 : outAsset w 0 = a) (hout1 : outAsset w 1 = a)
@@ -78,8 +76,8 @@ theorem dummy_with_value_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (hnOut 
     (hval : (w.spent i).value ≠ 0) : False :=
   hval ((transact_sound hnIn hnOut h).dummySlots i hi hdummy)
 
-/-- **A zero asset id on an output is rejected**, unconditionally — the check is not gated
-on a dummy flag, unlike the input side. -/
+/-- **A zero asset id on an output is rejected.** The check is not gated on a dummy flag,
+unlike the input side. -/
 theorem zero_asset_output_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7)
     {j : ℕ} (hj : j < nOut) (hzero : outAsset w j = 0) : False :=
   ((transact_sound hnIn hnOut h).outputs j hj).assetNonzero hzero

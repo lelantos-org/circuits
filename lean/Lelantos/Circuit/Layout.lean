@@ -5,17 +5,15 @@ import Lelantos.Circuit.Witness
 
 The coefficient layout `TransactCompressN` evaluates into `y` and folds into `digest`: a map
 from coefficient index to a named slot (`piSlot`), the value lookup at a slot (`slotValue`),
-and the inverse (`slotIndex`) that turns a difference in a named field into a difference at
-a coefficient index.
+and the inverse (`slotIndex`).
 
 The digest is not in this layout. It is a public output of the circuit, computed over these
 coefficients, and is not itself evaluated into `y`. The verifier's public signals are
 `(y, digest, z)`.
 
-It is its own module because it is hand-transcribed, is dumped and diffed against the SDK
-and the contract by `lean/scripts/dump-layout.sh`, and should be reviewable without reading
-either the signal set or the soundness proofs. `Lelantos.Circuit.BatchLayout` is the same
-module for `tree_update_batch.circom`.
+The layout is hand-transcribed, and is dumped and diffed against the SDK and the contract
+by `lean/scripts/dump-layout.sh`. `Lelantos.Circuit.BatchLayout` is the same module for
+`tree_update_batch.circom`.
 -/
 
 namespace Lelantos
@@ -23,17 +21,14 @@ namespace Lelantos
 variable {depth nIn nOut : ℕ}
 
 /-- Number of `PolyEval` coefficients: `N = 3 + N_IN + N_OUT`
-(`src/lib/poly_eval.circom:136`). For `(2, 2)` this is 7, for `(4, 6)` it is 13. The same
-`N` words, in the same order, are the input of `CoeffDigest`.
+(`src/lib/poly_eval.circom:106`). The same `N` words, in the same order, are the input of
+`CoeffDigest`.
 
-**Membership rule.** A logical public input is a coefficient only if it is a signal of the
-circuit. The five address and chain words, the FMD clue triples and the payload digest are
-not signals, so they are excluded; they are bound by being hashed into the challenge
-instead. The challenge preimage is 38 words at the 4x6 shape (`src/4x6.circom:20-33`): these
-13 coefficients, the digest word, and 24 challenge-only words.
-
-The digest word is hashed into the challenge and is not a coefficient. A new coefficient is
-wired in through `prefix`, so the digest absorbs it. -/
+A logical public input is a coefficient only if it is a signal of the circuit. The five
+address and chain words, the FMD clue triples and the payload digest are not signals; they
+are bound by being hashed into the challenge. The challenge preimage is 38 words at the 4x6
+shape (`src/4x6.circom:14-27`): these 13 coefficients, the digest word, and 24
+challenge-only words. -/
 def piCount (nIn nOut : ℕ) : ℕ := 3 + nIn + nOut
 
 example : piCount 2 2 = 7 := by norm_num [piCount]
@@ -41,11 +36,11 @@ example : piCount 4 6 = 13 := by norm_num [piCount]
 
 /-! ## The slot map
 
-Defined once, as a map from coefficient index to a named slot; the field value at an index
-is a separate lookup. The dumped names and the values the proofs use therefore come from
-the same definition, which is what lets `lean/scripts/dump-layout.sh` cross-check it
-against the other implementations of this ordering: `contracts/src/libs/PubInputs.sol ::
-compress(Transact, aux)` and `test/ref/compress.ts :: coeffs`.
+A map from coefficient index to a named slot; the field value at an index is a separate
+lookup, so the dumped names and the values the proofs use come from one definition.
+`lean/scripts/dump-layout.sh` cross-checks it against the other implementations of this
+ordering: `contracts/src/libs/PubInputs.sol :: compress(Transact, aux)` and
+`test/ref/compress.ts :: coeffs`.
 -/
 
 /-- One coefficient position of `TransactCompressN`. -/
@@ -58,7 +53,7 @@ inductive PISlot where
 deriving Repr, DecidableEq, Inhabited
 
 /-- The layout of `TransactCompressN(nIn, nOut)`: the ordered `prefix`, filled at
-`src/lib/poly_eval.circom:151-163`. Single source of truth. -/
+`src/lib/poly_eval.circom:121-133`. -/
 def piSlot (nIn nOut : ℕ) (k : ℕ) : PISlot :=
   let oNf := 1
   let oCm := oNf + nIn
@@ -78,19 +73,18 @@ def slotValue (w : TxWitness depth nIn nOut) : PISlot → F
   | .publicOut => w.publicOut
 
 /-- The coefficient vector: the `prefix` signal array, which feeds both `CoeffDigest` and
-`PolyEval` (`src/lib/poly_eval.circom:165-174`), so the two cannot disagree on order. -/
+`PolyEval` (`src/lib/poly_eval.circom:135-144`), so the two cannot disagree on order. -/
 def txCoeffs (w : TxWitness depth nIn nOut) (k : ℕ) : F :=
   slotValue w (piSlot nIn nOut k)
 
 /-! ### Inverting the layout
 
-`piSlot` maps a coefficient index to a slot. `slotIndex` maps back, turning "these two
-transactions differ in `nullifier[1]`" into "their coefficient vectors differ at index
-`k`", the hypothesis `polyEval_binding` needs.
+`slotIndex` maps a slot back to its coefficient index, turning "these two transactions
+differ in `nullifier[1]`" into "their coefficient vectors differ at index `k`", the
+hypothesis `polyEval_binding` needs.
 -/
 
-/-- The slots a `(nIn, nOut)` instance has. Indexed constructors are in range only
-for the slots that exist. -/
+/-- The slots a `(nIn, nOut)` instance has. -/
 def PISlot.InRange (nIn nOut : ℕ) : PISlot → Prop
   | .nullifier i => i < nIn
   | .outCm j => j < nOut
@@ -109,7 +103,7 @@ theorem slotIndex_lt {nIn nOut : ℕ} {s : PISlot} (hs : s.InRange nIn nOut) :
   cases s <;> simp only [PISlot.InRange] at hs <;>
     simp only [slotIndex, piCount] <;> omega
 
-/-- **`slotIndex` is a section of `piSlot`.** -/
+/-- `slotIndex` is a section of `piSlot`. -/
 theorem piSlot_slotIndex {nIn nOut : ℕ} {s : PISlot} (hs : s.InRange nIn nOut) :
     piSlot nIn nOut (slotIndex nIn nOut s) = s := by
   -- Peel `piSlot`'s if-chain one branch at a time; `omega` decides each condition from the
@@ -122,12 +116,9 @@ theorem piSlot_slotIndex {nIn nOut : ℕ} {s : PISlot} (hs : s.InRange nIn nOut)
       | rw [if_pos (by omega)]
       | (congr 1; omega)
 
-/-- **`slotIndex` is a retraction of `piSlot` too.** With `piSlot_slotIndex` this makes the
-two a bijection between coefficient indices below `piCount` and in-range slots.
-
-`piSlot_slotIndex` suffices to find the index of a named slot, which is all
-`transact_pi_binding_slot` needs. This direction shows that no other index carries the
-slot, which any statement about a single coefficient being free or pinned requires. -/
+/-- `slotIndex` is a retraction of `piSlot` too. With `piSlot_slotIndex` this makes the
+two a bijection between coefficient indices below `piCount` and in-range slots: no other
+index carries a slot. -/
 theorem slotIndex_piSlot (nIn nOut : ℕ) {k : ℕ} (hk : k < piCount nIn nOut) :
     slotIndex nIn nOut (piSlot nIn nOut k) = k := by
   -- The `ite` chain is peeled by hand. Each `rw` is syntactic and the resulting goal is one
@@ -147,7 +138,7 @@ theorem slotIndex_piSlot (nIn nOut : ℕ) {k : ℕ} (hk : k < piCount nIn nOut) 
   · rw [if_pos h4]; simp only [slotIndex]; omega
   rw [if_neg h4]; simp only [slotIndex]; omega
 
-/-- **A slot occupies exactly one coefficient index.** -/
+/-- A slot occupies exactly one coefficient index. -/
 theorem piSlot_eq_iff {nIn nOut k : ℕ} (hk : k < piCount nIn nOut) {s : PISlot}
     (hs : s.InRange nIn nOut) : piSlot nIn nOut k = s ↔ k = slotIndex nIn nOut s := by
   constructor
@@ -163,12 +154,10 @@ theorem txCoeffs_slotIndex {depth nIn nOut : ℕ} (w : TxWitness depth nIn nOut)
 
 `txCoeffs_eq_update` turns "these two witnesses agree on every public input but one" into
 "their coefficient vectors differ in exactly one place", the shape `polyEval_update` and
-`polyEval_forge` consume. It uses both halves of the layout bijection: `piSlot_slotIndex`
-to place the moved slot, `slotIndex_piSlot` to show no other index carries it.
+`polyEval_forge` consume.
 
 It states how `y` moves when one slot does. Two satisfying witnesses that differ at a slot
-have different public digests unless Poseidon collides (`txCoeffs_determined_by_digest`);
-that is a property of `TransactSat`, not of this lemma.
+have different public digests unless Poseidon collides (`txCoeffs_determined_by_digest`).
 -/
 
 /-- Two witnesses agreeing on every slot but `s` have coefficient vectors related by a

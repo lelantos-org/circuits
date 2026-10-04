@@ -6,13 +6,11 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 include "tags.circom";
 include "common.circom";
 
-// BatchAppend(DEPTH, MAX_L): the quaternary commitment tree before and after
-// appending the first actual_count of MAX_L leaves at start_index, both roots
-// computed from one frontier. This header is the reference description of the
-// construction; tree_update_batch.circom, the Lean model
-// (lean/Lelantos/Gadgets/BatchAppend.lean) and the docs refer to it.
+// BatchAppend(DEPTH, MAX_L): roots of the quaternary commitment tree before and
+// after appending the first actual_count of MAX_L leaves at start_index, both
+// computed from one frontier.
 //
-// ENFORCED INTERNALLY, so the template is sound when instantiated on its own:
+// Enforced internally:
 //   * actual_count in [1, MAX_L]: Num2Bits(COUNT_BITS) on actual_count - 1,
 //     with MAX_L a power of two.
 //   * active[k] = (k < actual_count): LessThan, exported for the caller.
@@ -20,38 +18,36 @@ include "common.circom";
 //     digits and are boolean by construction.
 //   * start_index + actual_count - 1 < 4^DEPTH: the whole run fits the tree.
 //
-// DIGITS. r_d is digit d of start_index. The selector s[d][r] = 1 iff r_d == r
+// Digits. r_d is digit d of start_index. The selector s[d][r] = 1 iff r_d == r
 // is a linear combination of the digit's two bits and bb[d], their product.
 //
-// FRONTIER. frontier_in[d][k] for k < r_d is the filled left sibling at level d.
+// Frontier. frontier_in[d][k] for k < r_d is the filled left sibling at level d.
 // Slots k >= r_d are unused and pinned to zero:
 //     (1 - read) · frontier_in[d][k] === 0,   read = Σ_{r > k} s[d][r].
-// Under the pin frontier_in[d][k] = read · frontier_in[d][k], so both roots below
-// add a frontier slot as a linear term instead of a selector product. A prover
-// MUST supply zero in the unread slots, as the in-repo writers do
-// (Frontier::slots, MerkleTree::frontier, sdk merkle.ts frontier()).
+// Under the pin frontier_in[d][k] = read · frontier_in[d][k], so both roots add
+// a frontier slot as a linear term. A prover must supply zero in the unread
+// slots.
 //
-// OLD ROOT. The running node along start_index, from an empty leaf:
+// Old root. The running node along start_index, from an empty leaf:
 //     old_node[0] = 0;  child k of old_node[d+1] is
 //         frontier_in[d][k]   if k <  r_d
 //         old_node[d]         if k == r_d
 //         EMPTY_SUBTREE(d)    if k >  r_d.
-// That is the root of the tree holding start_index leaves with this frontier.
 //
-// NEW ROOT. At level d the run changes positions lo_d = start_index >> 2d
+// New root. At level d the run changes positions lo_d = start_index >> 2d
 // through hi_d = (start_index + actual_count - 1) >> 2d. A fixed window keeps
 // W[d] = BATCH_WINDOW(DEPTH, MAX_L, d) of them, slot j at position lo_d + j:
 // n consecutive leaves touch at most (n - 2) \ 4^d + 2 nodes at level d, capped
-// at the level's width 4^(DEPTH - d). For MAX_L = 8 the widths are 8, 3, 2, …,
-// 2, 1, which is 22 hashes. Child k of slot j reads BATCH_SRC(W[d], j, k, r_d):
+// at the level's width 4^(DEPTH - d). Child k of slot j reads
+// BATCH_SRC(W[d], j, k, r_d):
 //     p = 4j + k - r_d < 0     frontier_in[d][k]   (only at j = 0, k < 3)
 //     0 <= p < W[d]           node[d][p]
 //     p >= W[d]               EMPTY_SUBTREE(d)
 // Leaf slot t holds active[t] · leaves[t], so an inactive slot is
-// EMPTY_SUBTREE(0) = 0, and a window slot past hi_d reads only empty children and
-// hashes to EMPTY_SUBTREE(d + 1). This keeps the fixed shape correct for every
-// count, and is the only step that requires the EMPTY_SUBTREE table to be the
-// empty-subtree chain (ZerosCoherent in the Lean model).
+// EMPTY_SUBTREE(0) = 0, and a window slot past hi_d reads only empty children
+// and hashes to EMPTY_SUBTREE(d + 1). This is the only step that requires the
+// EMPTY_SUBTREE table to be the empty-subtree chain (ZerosCoherent in the Lean
+// model).
 
 // Worst-case number of nodes n consecutive leaves change at level d <= DEPTH.
 function BATCH_WINDOW(DEPTH, n, d) {
@@ -118,8 +114,8 @@ template BatchAppend(DEPTH, MAX_L) {
     // W[0] = MAX_L is not capped by the tree width, so a batch must fit a tree.
     assert(MAX_L <= 4 ** DEPTH);
 
-    // Count and activity. COUNT_BITS is derived from MAX_L so the two cannot
-    // diverge; the assert enforces the power of two the derivation cannot.
+    // COUNT_BITS = log2(MAX_L); the assert rejects a MAX_L that is not a power
+    // of two.
     var COUNT_BITS = 0;
     var count_span = MAX_L;
     while (count_span > 1) {
@@ -138,8 +134,8 @@ template BatchAppend(DEPTH, MAX_L) {
         active[k] <== lt[k].out;
     }
 
-    // Position and capacity. No wraparound in the last index: start_index <
-    // 2^(2·DEPTH) and actual_count - 1 < MAX_L.
+    // No wraparound in the last index: start_index < 2^(2·DEPTH) and
+    // actual_count - 1 < MAX_L.
     var BITS = 2 * DEPTH;
     component idx_bits = Num2Bits(BITS);
     idx_bits.in <== start_index;
@@ -222,7 +218,7 @@ template BatchAppend(DEPTH, MAX_L) {
             h[hi].inputs[0] <== tag;
 
             for (var k = 0; k < 4; k++) {
-                // Some digit reads the frontier exactly when 4j + k < 3.
+                // Some digit reads the frontier iff 4j + k < 3.
                 var child = 0;
                 if (4 * j + k < 3) {
                     child += frontier_in[d][k];

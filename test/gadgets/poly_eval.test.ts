@@ -8,8 +8,7 @@ import { TIMEOUT_CIRCUIT } from "../lib/constants";
 import { useCircuit } from "../lib/harness";
 
 const WRAPPER = fixturePath("test_poly_eval.circom");
-// Must match `PolyEval(N)` in the fixture. The gadget is arity-generic; this size
-// is specific to the test wrapper.
+// Must match `PolyEval(N)` in the fixture.
 const N = 26;
 
 describe("PolyEval (Horner-form binding gadget)", function () {
@@ -58,7 +57,6 @@ describe("PolyEval (Horner-form binding gadget)", function () {
         const z = 9876543210n;
         const yBase = hornerEval(coeffs, z);
         const swapped = [...coeffs];
-        // Swap two distinct entries: y depends on coefficient order.
         [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
         const yPerm = hornerEval(swapped, z);
         expect(yBase).to.not.equal(yPerm);

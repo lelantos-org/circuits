@@ -19,21 +19,18 @@ const NODE_MODULES = path.join(ROOT, "node_modules");
 export const FIXTURES = path.join(ROOT, "test", "fixtures");
 
 /**
- * A circom input object: signal name -> value, nested to whatever arity the
- * signal declares (`in_path_elements` is three deep). circom reads
- * positionally, so the key set is part of the contract with the circuit — see
- * the note atop `ref/witness.ts`.
+ * A circom input object: signal name -> value, nested to the signal's arity.
+ * The key set is part of the contract with the circuit; see `ref/witness.ts`.
  */
 export type CircuitSignal = string | CircuitSignal[];
 export type CircuitInput = Record<string, CircuitSignal>;
 
 /**
- * The subset of circom_tester's `wasm` tester this repo uses. circom_tester
- * ships no types; this is a hand-written shim.
+ * Hand-written types for the subset of circom_tester's `wasm` tester this repo
+ * uses.
  *
  * `calculateWitness` returns the flat witness vector: index 0 is the constant 1,
- * then the circuit outputs in declaration order, then everything else. Read
- * outputs through `readOutput` rather than indexing.
+ * then the circuit outputs in declaration order, then everything else.
  */
 export interface CircuitTester {
     calculateWitness(input: CircuitInput, sanityCheck?: boolean): Promise<bigint[]>;
@@ -41,12 +38,7 @@ export interface CircuitTester {
     assertOut(witness: bigint[], expected: Record<string, unknown>): Promise<void>;
 }
 
-/**
- * Read output signal `index` out of a witness vector.
- *
- * Declared here rather than in `expect.ts` so non-test callers can use it
- * without depending on chai.
- */
+/** Read output signal `index` out of a witness vector. */
 export function readOutput(witness: bigint[], index = 0): Field {
     return witness[index + 1];
 }
@@ -70,11 +62,9 @@ const GENERATED_FIXTURES = path.join(ROOT, "build", ".tester", "fixtures");
  * A one-line wrapper `component main = <template>(<args>)` over `src/<source>`,
  * written under `build/` and returned as a path for `useCircuit`.
  *
- * For fixtures whose parameters are constants the tests also use. Generating the
- * wrapper keeps it in sync with `constants.ts`; a checked-in wrapper would
- * duplicate the values and could compile a different circuit from the one the
- * test builds witnesses for. The file is rewritten only when its content
- * changes, so the compile cache keyed on its path stays valid.
+ * Generated so the parameters stay in sync with `constants.ts`. The file is
+ * rewritten only when its content changes, so the compile cache keyed on its
+ * path stays valid.
  */
 export function generatedFixture(source: string, template: string, args: readonly number[]): string {
     const name = `gen_${template}_${args.join("_")}.circom`;
@@ -96,29 +86,21 @@ export function generatedFixture(source: string, template: string, args: readonl
     return file;
 }
 
-// `wasmTester` compiles the circuit on every call; the cache reduces that to one
-// compile per circuit. Mocha runs without --parallel (see package.json), so all
-// spec files share one process and one cache.
+// `wasmTester` compiles on every call; the cache holds one compile per circuit.
+// Mocha runs without --parallel, so all spec files share one process and one
+// cache. It is keyed on the absolute path and holds the promise, so concurrent
+// `before` hooks for one circuit await a single compile.
 //
-// The output directory is pinned rather than left to circom_tester's tmpdir:
-// the compile emits the `.r1cs` and `.sym` the R1CS-level suites need
-// (`lib/r1cs.ts`), and a tmpdir would require a second ~70k-constraint compile
-// to obtain them. It lives under `build/`, which is gitignored.
-//
-// Keyed on the absolute path and holding the promise, so concurrent `before`
-// hooks for one circuit await a single compile.
+// The output directory is pinned under `build/` (gitignored) because the
+// compile also emits the `.r1cs` and `.sym` that `lib/r1cs.ts` reads.
 const TESTER_OUT = path.join(ROOT, "build", ".tester");
 
 const cache = new Map<string, Promise<CircuitArtifacts>>();
 
 /**
- * A compiled circuit: the wasm tester the witness suites drive, plus the paths
- * to the constraint system behind it.
- *
- * Both must come from the same compile. A suite that mutates a witness and
- * checks it against the R1CS compares the two artifacts, so a stale `.r1cs`
- * beside a fresh wasm would not error; it would report on a circuit that no
- * longer matches `src/`.
+ * A compiled circuit: the wasm tester plus the paths to its constraint system.
+ * Both must come from the same compile: a stale `.r1cs` beside a fresh wasm
+ * does not error.
  */
 export interface CircuitArtifacts {
     tester: CircuitTester;
@@ -135,12 +117,7 @@ function outputDirFor(absPath: string): string {
     return path.join(TESTER_OUT, `${path.basename(absPath, ".circom")}-${tag}`);
 }
 
-/**
- * Compile a circuit (once per process) and return its artifacts.
- *
- * Resolves circom_tester's `include` to node_modules, the same way for every
- * suite.
- */
+/** Compile a circuit (once per process) and return its artifacts. */
 export async function loadCircuitArtifacts(absPath: string): Promise<CircuitArtifacts> {
     let pending = cache.get(absPath);
     if (pending === undefined) {
@@ -163,7 +140,6 @@ export async function loadCircuitArtifacts(absPath: string): Promise<CircuitArti
     return pending;
 }
 
-/** Load a circuit by absolute path; resolves circom_tester's `include` to node_modules. */
 export async function loadCircuit(absPath: string): Promise<CircuitTester> {
     return (await loadCircuitArtifacts(absPath)).tester;
 }
@@ -175,22 +151,11 @@ const exec = promisify(execCb);
 /**
  * Compile a circuit to `.r1cs` and `.sym` only, with circom's optimizer off.
  *
- * `loadCircuitArtifacts` above compiles at circom's default `--O2`, the system a
- * proof binds and therefore the one to sweep for a second witness. `--O2`
- * substitutes linear constraints away, and a bit decomposition is a linear
- * constraint: after optimization the weighted sum `sum 2^i b_i === in` is gone,
- * its bits folded into whatever consumed them. In `4x6` no linear combination
- * remains with more than two power-of-two coefficients, so a structural search
- * for decompositions finds none there.
- *
- * `--O0` keeps them, which is also why `just picus` compiles its own `--O0`
- * copy. Reasoning about aliasing on the `--O0` system is sound for the deployed
- * one: the optimizer's substitutions preserve the solution set, so a
- * decomposition wide enough to alias at `--O0` also aliases at `--O2`, in a
- * different form.
- *
- * No wasm is emitted: the caller needs only the constraint system, and skipping
- * wasm keeps this near one second even for `4x6`.
+ * `--O2` (circom's default, and the system a proof binds) substitutes linear
+ * constraints away, including bit decompositions `sum 2^i b_i === in`, so a
+ * structural search for decompositions needs the `--O0` system. The
+ * substitutions preserve the solution set, so a decomposition wide enough to
+ * alias at `--O0` also aliases at `--O2`.
  */
 export async function compileConstraintsOnly(
     absPath: string,
