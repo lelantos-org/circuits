@@ -191,8 +191,12 @@ theorem merkleProofOrDummy_dummy (d : ℕ) (leaf root : F) :
 
 /-! ## The padding input slot -/
 
-/-- Padding notes commit to the all-zero note. The commitment is also the leaf. -/
-noncomputable def padCm : F := noteCm 0 0 0 0 0
+/-- The key a padding slot derives: `nsk = 0` at diversifier `0`. -/
+noncomputable def padPk : F := pkOfNsk 0 0
+
+/-- Padding notes commit to the zero-value note under `padPk`. The commitment is also the
+leaf. -/
+noncomputable def padCm : F := noteCm 0 0 padPk 0 0
 
 /-- One padding input slot. Its `nsk` is `0`, so its nullifier is that of the all-zero note,
 an instance of the prover-chosen value described by `dummy_nullifier_unconstrained`. Its
@@ -200,7 +204,6 @@ asset id is `0`, which a dummy slot may carry. -/
 noncomputable def padSlot (d : ℕ) (root : F) : SpentSlot d where
   assetId := 0
   value := 0
-  pk := 0
   rho := 0
   rcm := 0
   nsk := 0
@@ -209,9 +212,9 @@ noncomputable def padSlot (d : ℕ) (root : F) : SpentSlot d where
   root := root
   nullifier := nullifierOf (deriveNk 0) 0 padCm
   ivk := deriveIvk 0
-  pkDerived := derivePk (deriveIvk 0) 0
+  pk := padPk
   nk := deriveNk 0
-  inner := noteInner 0 0 0
+  inner := noteInner padPk 0 0
   cm := padCm
   valueBits := zeroBits
   assetBits := zeroBits
@@ -227,12 +230,12 @@ noncomputable def padSlot (d : ℕ) (root : F) : SpentSlot d where
   mpDiff := rootFrom d padCm - root
 
 theorem padSlot_sat (d : ℕ) (root : F) : SpentNoteSat (padSlot d root) := by
-  refine ⟨rfl, rfl, ?_, num2Bits_zero 64, num2Bits_zero 64, rfl, rfl,
+  refine ⟨rfl, rfl, num2Bits_zero 64, num2Bits_zero 64, rfl, rfl,
     merkleProofOrDummy_dummy d padCm root, rfl, rfl, ⟨?_, ?_⟩, ?_⟩ <;> simp [padSlot]
 
 theorem padSlot_dummy (d : ℕ) (root : F) :
-    IsBit (padSlot d root).isDummy ∧ (padSlot d root).isDummy * (padSlot d root).value = 0 :=
-  ⟨by simp [padSlot, IsBit], by simp [padSlot]⟩
+    (padSlot d root).isDummy * (padSlot d root).value = 0 := by
+  simp [padSlot]
 
 /-! ## Output slots
 
@@ -273,8 +276,7 @@ asset `1`, owned by `nsk = 0` under the diversifier `1`, opened against a root i
 reaches.
 -/
 
-/-- The spender's key, at diversifier `1`. `pk` must equal the derived key, since the
-ownership constraint is active for a real slot. -/
+/-- The spender's key, at diversifier `1`: the key the slot derives. -/
 noncomputable def realPk : F := pkOfNsk 0 1
 
 /-- One unit of asset `1`, committed. The commitment is the leaf. -/
@@ -283,12 +285,11 @@ noncomputable def realCm : F := noteCm 1 1 realPk 0 0
 /-- The root this note is opened against, at the shape's depth. -/
 noncomputable def realRoot (d : ℕ) : F := rootFrom d realCm
 
-/-- A real spent slot: `is_dummy = 0`, so ownership, the non-zero asset id and Merkle
-membership are all enforced. -/
+/-- A real spent slot: `is_dummy = 0`, so the non-zero asset id and Merkle membership are
+both enforced. -/
 noncomputable def realSlot (d : ℕ) : SpentSlot d where
   assetId := 1
   value := 1
-  pk := realPk
   rho := 0
   rcm := 0
   nsk := 0
@@ -297,7 +298,7 @@ noncomputable def realSlot (d : ℕ) : SpentSlot d where
   root := realRoot d
   nullifier := nullifierOf (deriveNk 0) 0 realCm
   ivk := deriveIvk 0
-  pkDerived := derivePk (deriveIvk 0) 1
+  pk := realPk
   nk := deriveNk 0
   inner := noteInner realPk 0 0
   cm := realCm
@@ -315,9 +316,9 @@ noncomputable def realSlot (d : ℕ) : SpentSlot d where
   mpDiff := 0
 
 theorem realSlot_sat (d : ℕ) : SpentNoteSat (realSlot d) := by
-  refine ⟨rfl, rfl, ?_, num2Bits_one (by norm_num), num2Bits_one (by norm_num), rfl, rfl,
+  refine ⟨rfl, rfl, num2Bits_one (by norm_num), num2Bits_one (by norm_num), rfl, rfl,
     merkleProofOrDummy_real d realCm, rfl, rfl, ⟨?_, ?_⟩, ?_⟩ <;>
-    simp [realSlot, realPk, pkOfNsk]
+    simp [realSlot]
 
 /-! ## Assembling a transaction
 
@@ -455,7 +456,7 @@ hypotheses are the facts that depend on which notes the transaction moves. -/
 theorem transactSat_ofParts {depth nIn nOut : ℕ} (p : Parts depth nIn nOut)
     (hspent : ∀ i, SpentNoteSat (p.spent i))
     (hroot : ∀ i, (p.spent i).root = p.root)
-    (hdummy : ∀ i, IsBit (p.spent i).isDummy ∧ (p.spent i).isDummy * (p.spent i).value = 0)
+    (hdummy : ∀ i, (p.spent i).isDummy * (p.spent i).value = 0)
     (hrho : ∀ j, (p.out j).rho = deriveRho (p.spent 0).nullifier (j : F))
     (hout : ∀ j, OutputNoteSat (p.out j))
     (hpubAsset : Num2BitsSat 64 p.pubAsset p.pubAssetBits)
@@ -539,9 +540,9 @@ theorem minIn_root (depth : ℕ) (i : ℕ) : (minIn depth i).root = realRoot dep
     rfl (fun _ _ => rfl) i
 
 theorem minIn_dummy (depth : ℕ) (i : ℕ) :
-    IsBit (minIn depth i).isDummy ∧ (minIn depth i).isDummy * (minIn depth i).value = 0 :=
-  pair_forall (P := fun s : SpentSlot depth => IsBit s.isDummy ∧ s.isDummy * s.value = 0)
-    ⟨by simp [realSlot, IsBit], by simp [realSlot]⟩ (fun _ => padSlot_dummy depth _) i
+    (minIn depth i).isDummy * (minIn depth i).value = 0 :=
+  pair_forall (P := fun s : SpentSlot depth => s.isDummy * s.value = 0)
+    (by simp [realSlot]) (fun _ => padSlot_dummy depth _) i
 
 theorem minIn_isDummy_head (depth : ℕ) : (minIn depth 0).isDummy = 0 := rfl
 
@@ -609,8 +610,7 @@ theorem spendIn_sat (i : ℕ) : SpentNoteSat (spendIn i) := minIn_sat 10 i
 
 theorem spendIn_root (i : ℕ) : (spendIn i).root = realRoot 10 := minIn_root 10 i
 
-theorem spendIn_dummy (i : ℕ) :
-    IsBit (spendIn i).isDummy ∧ (spendIn i).isDummy * (spendIn i).value = 0 :=
+theorem spendIn_dummy (i : ℕ) : (spendIn i).isDummy * (spendIn i).value = 0 :=
   minIn_dummy 10 i
 
 noncomputable def spendTx : TxWitness 10 2 2 := minTx 10 2 2
@@ -739,7 +739,6 @@ noncomputable def pairRoot (D : ℕ) : F := chainFrom nodeA D
 noncomputable def slotA (D : ℕ) : SpentSlot (D + 1) where
   assetId := 1
   value := 1
-  pk := realPk
   rho := 0
   rcm := 0
   nsk := 0
@@ -748,7 +747,7 @@ noncomputable def slotA (D : ℕ) : SpentSlot (D + 1) where
   root := pairRoot D
   nullifier := nullifierOf (deriveNk 0) 0 realCm
   ivk := deriveIvk 0
-  pkDerived := derivePk (deriveIvk 0) 1
+  pk := realPk
   nk := deriveNk 0
   inner := noteInner realPk 0 0
   cm := realCm
@@ -767,8 +766,7 @@ noncomputable def slotA (D : ℕ) : SpentSlot (D + 1) where
 
 theorem slotA_sat (D : ℕ) : SpentNoteSat (slotA D) where
   ivk_def := rfl
-  pk_derived := rfl
-  owns := by simp [slotA, realPk, pkOfNsk]
+  pk_def := rfl
   value_range := num2Bits_one (by norm_num)
   asset_range := num2Bits_one (by norm_num)
   inner_def := rfl
@@ -785,7 +783,6 @@ theorem slotA_sat (D : ℕ) : SpentNoteSat (slotA D) where
 noncomputable def slotB (D : ℕ) : SpentSlot (D + 1) where
   assetId := 2
   value := 1
-  pk := realPk
   rho := 0
   rcm := 0
   nsk := 0
@@ -794,7 +791,7 @@ noncomputable def slotB (D : ℕ) : SpentSlot (D + 1) where
   root := pairRoot D
   nullifier := nullifierOf (deriveNk 0) 0 cmB
   ivk := deriveIvk 0
-  pkDerived := derivePk (deriveIvk 0) 1
+  pk := realPk
   nk := deriveNk 0
   inner := noteInner realPk 0 0
   cm := cmB
@@ -813,8 +810,7 @@ noncomputable def slotB (D : ℕ) : SpentSlot (D + 1) where
 
 theorem slotB_sat (D : ℕ) : SpentNoteSat (slotB D) where
   ivk_def := rfl
-  pk_derived := rfl
-  owns := by simp [slotB, realPk, pkOfNsk]
+  pk_def := rfl
   value_range := num2Bits_one (by norm_num)
   asset_range := num2Bits_two (by norm_num)
   inner_def := rfl
@@ -843,11 +839,9 @@ theorem dualIn_root (i : ℕ) : (dualIn i).root = pairRoot 9 :=
   pair_cases (motive := fun (_ : ℕ) (s : SpentSlot 10) => s.root = pairRoot 9)
     rfl (fun _ _ => rfl) i
 
-theorem dualIn_dummy (i : ℕ) :
-    IsBit (dualIn i).isDummy ∧ (dualIn i).isDummy * (dualIn i).value = 0 :=
-  pair_forall (P := fun s : SpentSlot 10 => IsBit s.isDummy ∧ s.isDummy * s.value = 0)
-    ⟨by simp [slotA, IsBit], by simp [slotA]⟩
-    (fun _ => ⟨by simp [slotB, IsBit], by simp [slotB]⟩) i
+theorem dualIn_dummy (i : ℕ) : (dualIn i).isDummy * (dualIn i).value = 0 :=
+  pair_forall (P := fun s : SpentSlot 10 => s.isDummy * s.value = 0)
+    (by simp [slotA]) (fun _ => by simp [slotB]) i
 
 noncomputable def dualOut : ℕ → OutputSlot :=
   pair (outSlotOf spendNf0 1 1 oneBits oneBits 0) (outSlotOf spendNf0 2 1 twoBits oneBits)

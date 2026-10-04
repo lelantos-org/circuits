@@ -11,7 +11,7 @@ include "poly_eval.circom";
 // Parameters:
 //   DEPTH — Merkle depth; capacity 4^DEPTH leaves.
 //   N_IN  — spent-note slots; unused slots are dummies.
-//   N_OUT — output-note slots; unused slots are value-0 notes to self.
+//   N_OUT — output-note slots; unused slots are value-0 notes.
 //
 // A note commits to its (asset_id, value) by hash (NoteCommitment), and
 // PerAssetValueBalance enforces conservation over asset ids as field elements.
@@ -48,7 +48,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
     // ===== PRIVATE: spent notes =====
     signal input in_asset[N_IN];
     signal input in_value[N_IN];
-    signal input in_pk[N_IN];
     signal input in_rho[N_IN];
     signal input in_rcm[N_IN];
     signal input in_nsk[N_IN];
@@ -72,7 +71,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
         spent[i] = SpentNote(DEPTH);
         spent[i].asset_id <== in_asset[i];
         spent[i].value    <== in_value[i];
-        spent[i].pk       <== in_pk[i];
         spent[i].rho      <== in_rho[i];
         spent[i].rcm      <== in_rcm[i];
         spent[i].nsk      <== in_nsk[i];
@@ -94,7 +92,7 @@ template Transact(DEPTH, N_IN, N_OUT) {
 
     // At least one input slot is real. MerkleProofOrDummy skips the root check on
     // a dummy slot, so an all-dummy transaction would leave merkle_root
-    // unconstrained. DummyZeroValue makes is_dummy boolean, so the sum lies in
+    // unconstrained. SpentNote makes is_dummy boolean, so the sum lies in
     // [0, N_IN] and one equality suffices.
     signal dummy_acc[N_IN + 1];
     dummy_acc[0] <== 0;

@@ -115,7 +115,7 @@ export class TxBuilder {
     build(args: TxBuildArgs): TransactWitnessBundle {
         const nf0 = args.inputs[0].nf;
         // `Transact` takes N_IN inputs and N_OUT outputs. Unused slots take
-        // dummy inputs (`is_dummy = 1`, bypassing the pk, Merkle and asset
+        // dummy inputs (`is_dummy = 1`, bypassing the Merkle and asset
         // checks) and value-0 output notes, which are real leaves.
         const inputs = padInputs(this.P, this.depth, args.inputs);
         const padded = padOutputs(this.P, args.outputs);
@@ -243,7 +243,7 @@ export class TxBuilder {
      * real note. The base for the per-slot tamper expansion.
      *
      * The other factories fill at most two input and two output slots. A dummy
-     * input bypasses the key and Merkle checks and a padding output is value-0,
+     * input bypasses the Merkle check and a padding output is value-0,
      * so a constraint mis-indexed for slot >= 2 is satisfied by every witness
      * they produce.
      *

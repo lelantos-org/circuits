@@ -7,12 +7,16 @@ include "../../node_modules/circomlib/circuits/comparators.circom";
 
 // One spent-note slot.
 //
-// is_dummy = 0 enforces Merkle membership, asset_id != 0 and the pk check:
-//   pk == Poseidon(TAG_PK, Poseidon(TAG_IVK, nsk), d)
-// is_dummy = 1 bypasses those, leaving d unconstrained; the caller's
-// DummyZeroValue forces value == 0.
+// The note's pk is not an input. It is derived from the slot's nsk and d,
+//   pk = Poseidon(TAG_PK, Poseidon(TAG_IVK, nsk), d),
+// so the commitment opened here is owned by nsk on every slot.
+//
+// is_dummy = 0 enforces Merkle membership and asset_id != 0.
+// is_dummy = 1 bypasses both; the caller's DummyZeroValue forces value == 0.
+// d is any field element in both cases.
 //
 // Enforced in both cases:
+//   is_dummy is boolean (MerkleProofOrDummy)
 //   value, asset_id < 2^64
 //   cm == Poseidon(TAG_CM, asset_id·2^64 + value, Poseidon(TAG_INNER, pk, rho, rcm))
 //   nf == Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm)
@@ -24,7 +28,6 @@ template SpentNote(DEPTH) {
     // ===== PRIVATE =====
     signal input asset_id;
     signal input value;
-    signal input pk;
     signal input rho;
     signal input rcm;
     signal input nsk;
@@ -41,10 +44,9 @@ template SpentNote(DEPTH) {
     component ivk_d = DeriveIvk();
     ivk_d.nsk <== nsk;
 
-    component pk_check = DerivePk();
-    pk_check.ivk <== ivk_d.ivk;
-    pk_check.d   <== d;
-    (1 - is_dummy) * (pk_check.pk - pk) === 0;
+    component owner_pk = DerivePk();
+    owner_pk.ivk <== ivk_d.ivk;
+    owner_pk.d   <== d;
 
     // 2. Range-check value and asset_id, on dummy slots too: the packing in
     //    step 3 is injective only under both bounds.
@@ -56,7 +58,7 @@ template SpentNote(DEPTH) {
 
     // 3. Note commitment.
     component inner = NoteInner();
-    inner.owner_pk <== pk;
+    inner.owner_pk <== owner_pk.pk;
     inner.rho      <== rho;
     inner.rcm      <== rcm;
 

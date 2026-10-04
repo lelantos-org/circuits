@@ -14,12 +14,12 @@ template RangeCheck64() {
     n2b.in <== v;
 }
 
-// dummy[i] ∈ {0,1} and dummy[i] = 1 ⇒ value[i] = 0.
+// dummy[i] != 0 ⇒ value[i] = 0. The caller makes dummy[i] boolean: SpentNote
+// does, through MerkleProofOrDummy.
 template DummyZeroValue(N) {
     signal input dummy[N];
     signal input value[N];
     for (var i = 0; i < N; i++) {
-        dummy[i] * (dummy[i] - 1) === 0;
         dummy[i] * value[i] === 0;
     }
 }

@@ -44,7 +44,8 @@ circuits enforce the following for every accepted transaction.
   the contract hashes the calldata copy of that word into `z` (§2a).
 - **Indistinguishable padding.** Dummy input slots emit Poseidon nullifiers and
   padding outputs are `value = 0` notes with Poseidon commitments. No sentinel
-  value reveals the transaction shape.
+  value reveals the transaction shape. The clue and ciphertext of a padding
+  output are a wallet obligation (§9).
 - **A transfer names no asset.** `public_out == 0` forces
   `public_asset_id == 0`.
 - **Deposit binding.** Each deposit leaf in `tree_update_batch` is
@@ -107,8 +108,8 @@ output addressed to the relayer's key.
 
 Private inputs per slot:
 
-- Input: `asset_id, value, pk, rho, rcm, nsk, d, path_elements[DEPTH][3],
-  path_indices[DEPTH], is_dummy`.
+- Input: `asset_id, value, rho, rcm, nsk, d, path_elements[DEPTH][3],
+  path_indices[DEPTH], is_dummy`. The slot derives `pk` from `nsk` and `d`.
 - Output: `asset_id, value, pk, rho, rcm`.
 
 ### 2a. Public-input compression
@@ -398,10 +399,10 @@ Spending requires `nsk`.
 `ivk` has a distinct `pk` for each `d`, and every such `pk` opens only under
 that `ivk`, so notes held under different diversifiers are spent by the same
 `nsk`. The circuit does not range-check `d`: wallets use 128-bit values, and
-any field element is accepted. A real input slot enforces
-`pk == Poseidon(TAG_PK, ivk, d)`; on a dummy slot the check is bypassed and `d`
-is unconstrained. An output takes `pk` as an opaque input, so the sender needs
-the recipient's `pk` and not its `d`.
+any field element is accepted. An input slot has no `pk` input: it derives
+`pk = Poseidon(TAG_PK, ivk, d)` from its own `nsk` and `d` and opens the
+commitment under that key, on real and dummy slots alike. An output takes `pk`
+as an opaque input, so the sender needs the recipient's `pk` and not its `d`.
 
 Every input slot constrains `nullifier[i] === Poseidon(TAG_NF, nk, rho, cm)`,
 with `nk` derived in-circuit from `nsk` and `cm` recomputed from the same
@@ -468,12 +469,20 @@ For any asset mix:
 
 Padding:
 
-- **Dummy inputs** carry `is_dummy = 1` and skip the `pk` check, the Merkle
-  check and the `asset != 0` check, leaving `d` unconstrained. `DummyZeroValue`
-  enforces `is_dummy · value === 0`. The nullifier and both range checks still
-  apply.
+- **Dummy inputs** carry `is_dummy = 1` and skip the Merkle check and the
+  `asset != 0` check. `DummyZeroValue` enforces `is_dummy · value === 0`. The
+  `pk` derivation, the nullifier and both range checks still apply, over
+  prover-chosen `nsk`, `d`, `rho` and `rcm`.
 - **Padding outputs** are `value = 0` notes under a non-zero asset id, with a
   uniformly sampled `rcm`.
+
+The circuit does not constrain whom an output is addressed to. A wallet MUST
+address each padding output to keys drawn uniformly for that output (`pk`, the
+ECDH key and the FMD clue key), not to its own address. A clue made for a key
+no one holds matches a given detection key with probability `2^-GAMMA`, as an
+unrelated output does. Padding addressed to the spender carries a matching
+clue on every unused slot, which identifies the spender to whoever holds its
+detection key (§7a).
 
 ---
 
@@ -573,7 +582,7 @@ public outputs.
 
 | Circuit | Constraints | Wires | Private inputs | Domain | Ceiling |
 |---|---:|---:|---:|---:|---:|
-| `Transact(11, 4, 6)` | 69,643 | 69,778 | 251 | 2^17 | 131,068 |
+| `Transact(11, 4, 6)` | 69,635 | 69,774 | 247 | 2^17 | 131,068 |
 | `TreeUpdateBatch(11, 8)` | 41,521 | 41,466 | 69 | 2^16 | 65,532 |
 
 snarkjs requires `nConstraints + nPubInputs + nOutputs ≤ domain − 1`, so the
@@ -599,13 +608,13 @@ Each gadget compiled on its own at circom's default `--O1`.
 | `RangeCheck64` | 65 |
 | `NoteInner` + `NoteCommitment` | 736 + 606 |
 | `MerkleProofOrDummy(11)` | 9,419 |
-| `SpentNote(11)` | 13,270 |
+| `SpentNote(11)` | 13,269 |
 | `OutputNote` (plus its `DeriveRho`, 605) | 1,473 |
 | `PerAssetValueBalance(4, 6)` | 594 |
 | `CoeffDigest(13)`, four `Poseidon(5)` | 3,340 |
 | `CoeffDigest(36)`, nine `Poseidon(5)` | 7,515 |
 
-`Transact(11, 4, 6)` is four `SpentNote` (53,080), six output slots (12,468),
+`Transact(11, 4, 6)` is four `SpentNote` (53,076), six output slots (12,468),
 the balance, the digest, and about 160 constraints for the transparent bucket,
 the dummy checks and the Horner chain.
 

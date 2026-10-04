@@ -4,7 +4,13 @@
 import type { Field } from "./field.js";
 import type { Poseidon } from "./poseidon.js";
 import { transactDigest } from "./compress.js";
-import { buildNoteCommitment, buildNullifierFromNsk, type Note, type SpentNote } from "./note.js";
+import {
+    buildNoteCommitment,
+    buildNullifierFromNsk,
+    derivePk,
+    type Note,
+    type SpentNote,
+} from "./note.js";
 
 /** Per-output FMD clue witness. */
 export interface ClueInputs {
@@ -63,7 +69,6 @@ export type CircomTransactInput = CircomCoeffInputs & {
 
     in_asset: string[];
     in_value: string[];
-    in_pk: string[];
     in_rho: string[];
     in_rcm: string[];
     in_nsk: string[];
@@ -99,7 +104,6 @@ export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
         public_out: w.public_out,
         in_asset: w.in_asset,
         in_value: w.in_value,
-        in_pk: w.in_pk,
         in_rho: w.in_rho,
         in_rcm: w.in_rcm,
         in_nsk: w.in_nsk,
@@ -180,7 +184,6 @@ export function toCircomInput(P: Poseidon, opts: BuildOpts): TransactWitnessBund
 
         in_asset: inputs.map((i) => i.asset.toString()),
         in_value: inputs.map((i) => i.value.toString()),
-        in_pk: inputs.map((i) => i.pk.toString()),
         in_rho: inputs.map((i) => i.rho.toString()),
         in_rcm: inputs.map((i) => i.rcm.toString()),
         in_nsk: inputs.map((i) => i.nsk.toString()),
@@ -206,19 +209,21 @@ export function toCircomInput(P: Poseidon, opts: BuildOpts): TransactWitnessBund
 }
 
 /**
- * Dummy spent slot. `is_dummy = 1` bypasses Merkle membership and the pk check.
+ * Dummy spent slot. `is_dummy = 1` bypasses Merkle membership and the
+ * `asset != 0` check.
  *
  * nf = Poseidon(TAG_NF, nk, rho, cm) with nk = Poseidon(TAG_NK, 0); a fresh
  * `rho` keeps nf distinct from prior dummies and from any real spend. `cm` must
- * be the commitment SpentNote recomputes from the dummy's zero fields: the
- * circuit feeds it into the nullifier.
+ * be the commitment SpentNote recomputes from the dummy's fields, under the pk
+ * it derives from `nsk` and `d`: the circuit feeds it into the nullifier.
  *
- * Everything but `rho` is zero, so `rho` is what hides the slot: a wallet
+ * `nsk`, `d` and `rcm` are zero, so `rho` is what hides the slot: a wallet
  * samples it uniformly. Not suitable for production.
  */
 export function dummyInputAt(P: Poseidon, depth: number, rho: Field): SpentNote {
     const nsk = 0n;
-    const note: Note = { asset: 0n, value: 0n, pk: 0n, rho, rcm: 0n };
+    const d = 0n;
+    const note: Note = { asset: 0n, value: 0n, pk: derivePk(P, nsk, d), rho, rcm: 0n };
     const cm = buildNoteCommitment(P, note);
     const nf = buildNullifierFromNsk(P, nsk, rho, cm);
     const pathElements: Field[][] = [];
@@ -226,7 +231,7 @@ export function dummyInputAt(P: Poseidon, depth: number, rho: Field): SpentNote 
     return {
         ...note,
         nsk,
-        d: 0n,
+        d,
         cm,
         nf,
         leafIndex: 0,

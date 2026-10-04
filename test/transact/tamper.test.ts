@@ -10,6 +10,7 @@ import {
     TAG_CM,
     buildInner,
     buildNullifierFromNsk,
+    derivePk,
     dummyOutput,
 } from "../helpers";
 import { expectAccepts, expectWitnessFails } from "../lib/expect";
@@ -83,8 +84,8 @@ const TAMPER_CASES: TamperCase[] = [
     ...perOutput("out_value[%]", "out_cm no longer matches, and the transaction is unbalanced"),
 
     // -- keys and nullifiers --
-    ...perInput("in_pk[%]",     "pk === DerivePk(ivk, d) rejects a forged pk"),
-    ...perInput("in_d[%]",      "pk === DerivePk(ivk, d) rejects a diversifier pk is not derived under"),
+    ...perInput("in_d[%]",      "pk = DerivePk(ivk, d) moves with d, so cm is no longer the leaf"),
+    ...perInput("in_nsk[%]",    "pk and nk move with nsk, so neither cm nor the nullifier matches"),
     ...perInput("nullifier[%]", "nf === Poseidon(TAG_NF, nk, rho, cm) rejects a forged nullifier"),
 
     // -- 64-bit range checks: RangeCheck64 on every asset id and every value --
@@ -206,7 +207,6 @@ describe("transact_4x6 / single-field tamper", function () {
         const input = ctx.tx.balanced();
         expect(input.in_nsk[0], "one owner").to.equal(input.in_nsk[1]);
         expect(input.in_d[0], "two diversifiers").to.not.equal(input.in_d[1]);
-        expect(input.in_pk[0], "so two owner keys").to.not.equal(input.in_pk[1]);
         for (const i of [0, 1]) expect(BigInt(input.in_d[i]), `in_d[${i}]`).to.not.equal(0n);
         await expectAccepts(ctx.circuit, input);
     });
@@ -219,19 +219,36 @@ describe("transact_4x6 / single-field tamper", function () {
         await expectWitnessFails(ctx.circuit, input, "each slot's pk opens only under its own d");
     });
 
-    // Slot 1 of `oneRealRestDummy` is a dummy: the pk check is bypassed, and
-    // nothing else reads d.
+    // Slot 1 of `oneRealRestDummy` is a dummy. Its pk is derived from nsk and d
+    // as on a real slot, so d reaches the nullifier through cm; d itself is any
+    // field element.
+
+    /** `oneRealRestDummy` with dummy slot 1 rebuilt under the diversifier `d`. */
+    function dummyUnder(d: bigint): TransactWitnessBundle {
+        const { P } = ctx.tx;
+        const input = oneRealRestDummy() as TransactWitnessBundle;
+        const rho = readSignal(input, "in_rho[1]");
+        const cm = oversizedCm(0n, { pk: derivePk(P, 0n, d), rho, rcm: 0n });
+        writeSignal(input, "in_d[1]", d);
+        writeSignal(input, "nullifier[1]", buildNullifierFromNsk(P, 0n, rho, cm));
+        return rebindFiatShamir(input);
+    }
+
     for (const [label, d] of [
         ["1", 1n],
         ["a 128-bit value", (1n << 128n) - 1n],
         ["2^253", 1n << 253n],
     ] as const) {
         it(`accepts ${label} as a dummy input's d`, async () => {
-            const input = oneRealRestDummy();
-            writeSignal(input, "in_d[1]", d);
-            await expectAccepts(ctx.circuit, input);
+            await expectAccepts(ctx.circuit, dummyUnder(d));
         });
     }
+
+    it("FAILS when a dummy input's d moves and its nullifier does not", async () => {
+        const input = oneRealRestDummy();
+        writeSignal(input, "in_d[1]", 1n);
+        await expectWitnessFails(ctx.circuit, input, "a dummy's nullifier binds the cm of its derived pk");
+    });
 
     // ===== asset-id range, isolated =====
     //
@@ -252,7 +269,7 @@ describe("transact_4x6 / single-field tamper", function () {
         const { P } = ctx.tx;
         const input = oneRealRestDummy() as TransactWitnessBundle;
         const rho = readSignal(input, "in_rho[1]");
-        const cm = oversizedCm(asset, { pk: 0n, rho, rcm: 0n });
+        const cm = oversizedCm(asset, { pk: derivePk(P, 0n, 0n), rho, rcm: 0n });
         writeSignal(input, "in_asset[1]", asset);
         writeSignal(input, "nullifier[1]", buildNullifierFromNsk(P, 0n, rho, cm));
         return rebindFiatShamir(input);

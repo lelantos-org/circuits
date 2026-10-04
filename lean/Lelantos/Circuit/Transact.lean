@@ -36,50 +36,50 @@ variable {depth nIn nOut : ℕ}
 
 /-- The constraint system of `Transact(depth, nIn, nOut)`. -/
 structure TransactSat (w : TxWitness depth nIn nOut) : Prop where
-  /-- `src/lib/transact.circom:72-88` — each `SpentNote`, wired to its inputs. -/
+  /-- `src/lib/transact.circom:71-86` — each `SpentNote`, wired to its inputs. -/
   spent_sat : ∀ i, i < nIn → SpentNoteSat (w.spent i)
-  /-- `:87` — `spent[i].root <== merkle_root`: every slot opens against the shared root. -/
+  /-- `:85` — `spent[i].root <== merkle_root`: every slot opens against the shared root. -/
   spent_root : ∀ i, i < nIn → (w.spent i).root = w.merkleRoot
-  /-- `:69, 91-92` — `DummyZeroValue(N_IN)` over `in_is_dummy` and `in_value`. -/
+  /-- `:68, 89-90` — `DummyZeroValue(N_IN)` over `in_is_dummy` and `in_value`. -/
   dummy_zero : DummyZeroValueSat nIn (fun i => (w.spent i).isDummy) (inValue w)
-  /-- `:100` — `dummy_acc[0] <== 0`.
+  /-- `:98` — `dummy_acc[0] <== 0`.
 
-  `:99-107` together say at least one input slot is real. `MerkleProofOrDummy` skips the
+  `:97-105` together say at least one input slot is real. `MerkleProofOrDummy` skips the
   root comparison on a dummy slot, so with every slot dummy no spend constraint reads
   `merkleRoot`. -/
   dummy_acc_base : w.dummyAcc 0 = 0
-  /-- `:101-103` — `dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i]`. -/
+  /-- `:99-101` — `dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i]`. -/
   dummy_acc_step : ∀ i, i < nIn → w.dummyAcc (i + 1) = w.dummyAcc i + (w.spent i).isDummy
-  /-- `:104-106` — `all_dummy = IsEqual()` on the count and `N_IN`. -/
+  /-- `:102-104` — `all_dummy = IsEqual()` on the count and `N_IN`. -/
   dummy_all_eq : IsEqualSat (w.dummyAcc nIn) (nIn : F) w.dummyAllInv w.dummyAllOut
-  /-- `:107` — `all_dummy.out === 0`. -/
+  /-- `:105` — `all_dummy.out === 0`. -/
   not_all_dummy : w.dummyAllOut = 0
-  /-- `:116-119` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
+  /-- `:114-117` — output `rho` is the Orchard-style derivation from `nullifier[0]`. -/
   rho_derived : ∀ j, j < nOut → (w.out j).rho = deriveRho (w.spent 0).nullifier (j : F)
-  /-- `:121-127` — each `OutputNote`, wired to its inputs. -/
+  /-- `:119-125` — each `OutputNote`, wired to its inputs. -/
   out_sat : ∀ j, j < nOut → OutputNoteSat (w.out j)
-  /-- `:133-134` — `rng_pub_asset`: the bucket's asset id is 64-bit, matching the on-chain
+  /-- `:131-132` — `rng_pub_asset`: the bucket's asset id is 64-bit, matching the on-chain
   `uint64`. -/
   pub_asset_range : RangeCheck64Sat w.publicAssetId w.pubAssetBits
-  /-- `:136-137` — `rng_pub_out`: the withdrawn amount is 64-bit; it is a term of the
+  /-- `:134-135` — `rng_pub_out`: the withdrawn amount is 64-bit; it is a term of the
   conservation sums. -/
   pub_out_range : RangeCheck64Sat w.publicOut w.pubOutBits
-  /-- `:144-145` — `pub_out_z = IsZero()` on `public_out`. -/
+  /-- `:142-143` — `pub_out_z = IsZero()` on `public_out`. -/
   pub_out_isZero : IsZeroSat w.publicOut w.pubOutInv w.pubOutIsZero
-  /-- `:146` — `pub_out_z.out * public_asset_id === 0`: a transaction that withdraws
+  /-- `:144` — `pub_out_z.out * public_asset_id === 0`: a transaction that withdraws
   nothing names no asset. -/
   transfer_names_no_asset : w.pubOutIsZero * w.publicAssetId = 0
-  /-- `:149-159` — the conservation check, `vbal`. -/
+  /-- `:147-157` — the conservation check, `vbal`. -/
   value_balance : PerAssetValueBalanceSat nIn nOut (inAsset w) (inValue w) (outAsset w)
     (outValue w) w.publicAssetId w.publicOut w.vbPubInv w.vbPubEq
     w.vbInInv w.vbInEq w.vbOutInv w.vbOutEq w.vbInTerm w.vbOutTerm w.vbLhs w.vbRhs
   /-- `src/lib/poly_eval.circom:135-139` — `dg = CoeffDigest(N)` over the ordered `prefix`,
   the coefficient vector, with `digest <== dg.out`. The circuit's public output is that
-  signal: `digest <== pe.digest`, at `src/lib/transact.circom:174`. -/
+  signal: `digest <== pe.digest`, at `src/lib/transact.circom:172`. -/
   digest_def : CoeffDigestSat (piCount nIn nOut) (txCoeffs w) w.dgBlock w.digest
   /-- `src/lib/poly_eval.circom:141-146` — public-input compression: `pe = PolyEval(N)` over
   the same `prefix`. The compressor is instantiated and wired, with `y <== pe.y`, at
-  `src/lib/transact.circom:162-173`. -/
+  `src/lib/transact.circom:160-171`. -/
   compress : PolyEvalSat (piCount nIn nOut) (txCoeffs w) w.z w.zInv w.zIsZero w.peAcc w.y
 
 /-- What a satisfying assignment proves. -/
@@ -158,7 +158,7 @@ private theorem dummyAcc_eq_of_all {depth nIn nOut : ℕ} {w : TxWitness depth n
 /-! ## The transparent bucket -/
 
 /-- A transaction that withdraws nothing names no asset. Direct from
-`pub_out_z.out * public_asset_id === 0` (`src/lib/transact.circom:146`): `IsZero` pins its
+`pub_out_z.out * public_asset_id === 0` (`src/lib/transact.circom:144`): `IsZero` pins its
 output to `1` at `public_out = 0`. A shielded transfer therefore publishes asset id `0`
 rather than the id it moves. -/
 theorem publicBucket_zero_asset {w : TxWitness depth nIn nOut} (h : TransactSat w)
@@ -171,7 +171,7 @@ theorem publicBucket_zero_asset {w : TxWitness depth nIn nOut} (h : TransactSat 
 /-- The converse, which needs no constraint of its own. At `public_asset_id = 0` the
 conservation equation for asset id `0` reads `Σ in_value[asset = 0] = Σ out_value[asset = 0] +
 public_out`; outputs and real inputs reject id `0` and a dummy input carries value `0`, so
-both sums vanish. This is the argument at `src/lib/transact.circom:142-143`. It holds in the
+both sums vanish. This is the argument at `src/lib/transact.circom:140-141`. It holds in the
 field, so it needs neither the slot bound nor a range check. -/
 theorem publicBucket_zero_out {w : TxWitness depth nIn nOut} (h : TransactSat w)
     (hasset : w.publicAssetId = 0) : w.publicOut = 0 := by
@@ -180,7 +180,7 @@ theorem publicBucket_zero_out {w : TxWitness depth nIn nOut} (h : TransactSat w)
   have hin : ∑ i ∈ Finset.range nIn, inValue w i * ind (inAsset w i = 0) = 0 :=
     Finset.sum_eq_zero fun i hi => by
       have hi' := Finset.mem_range.mp hi
-      rcases dummyZeroValue_bit h.dummy_zero hi' with h0 | h1
+      rcases spentNote_isDummy_bit (h.spent_sat i hi') with h0 | h1
       · have hnz : inAsset w i ≠ 0 := (spentNote_sound (h.spent_sat i hi') h0).assetNonzero
         rw [ind, if_neg hnz, mul_zero]
       · rw [dummyZeroValue_zero h.dummy_zero hi' h1, zero_mul]
@@ -216,7 +216,7 @@ theorem transact_sound {w : TxWitness depth nIn nOut}
   digest := coeffDigest_sound h.digest_def
   compression := polyEval_sound h.compress
   challengeNonzero := polyEvalSat_z_ne_zero h.compress
-  dummyIsBit _i hi := dummyZeroValue_bit h.dummy_zero hi
+  dummyIsBit i hi := spentNote_isDummy_bit (h.spent_sat i hi)
   inputAssetRange i hi := spentNote_assetRange (h.spent_sat i hi)
   publicAssetRange := rangeCheck64_sound h.pub_asset_range
   publicOutRange := rangeCheck64_sound h.pub_out_range
@@ -229,7 +229,7 @@ theorem transact_sound {w : TxWitness depth nIn nOut}
     push_neg at hcon
     have hall : ∀ i, i < nIn → (w.spent i).isDummy = 1 := by
       intro i hi
-      rcases dummyZeroValue_bit h.dummy_zero hi with h0 | h1
+      rcases spentNote_isDummy_bit (h.spent_sat i hi) with h0 | h1
       · exact absurd h0 (hcon i hi)
       · exact h1
     have hout := isEqual_sound h.dummy_all_eq

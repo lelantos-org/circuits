@@ -3,7 +3,7 @@
 
 import { expect } from "chai";
 
-import { commit, dummyOutput, nullifier, type Note } from "../helpers";
+import { commit, derivePk, dummyOutput, nullifier, type Note } from "../helpers";
 import { expectAccepts, expectWitnessFails } from "../lib/expect";
 import { ALICE_NSK, BOB_NSK, MALLORY_NSK, TIMEOUT_CIRCUIT } from "../lib/constants";
 import { DEFAULT_ASSET as ASSET, diversifierOf } from "../lib/transact";
@@ -155,18 +155,21 @@ describe("transact_4x6 / value balance", function () {
 
     // ===== dummy and padding slot semantics =====
     //
-    // A dummy input bypasses the key and Merkle checks and may carry arbitrary
-    // fields; value = 0 keeps it balance-neutral. A padding output is a real
-    // value-0 note: its commitment is constrained and asset_id = 0 is rejected.
+    // A dummy input bypasses the Merkle and asset checks and may carry any nsk,
+    // d, rho and rcm; value = 0 keeps it balance-neutral. Its pk is derived from
+    // nsk and d as on a real slot. A padding output is a real value-0 note: its
+    // commitment is constrained and asset_id = 0 is rejected.
 
-    it("dummy input with garbage non-zero pk/rho/rcm still accepted (key + Merkle bypassed)", async () => {
+    it("dummy input with arbitrary nsk/d/rcm and path still accepted (Merkle bypassed)", async () => {
         const { tx, circuit } = ctx;
         const scenario = tx.oneRealOneDummy(100n, ALICE_NSK);
         const dummy = scenario.inputs[1];
-        dummy.pk = 0xbadc0den;
+        dummy.nsk = 0xbadc0den;
+        dummy.d = 0xd1n;
+        dummy.pk = derivePk(tx.P, dummy.nsk, dummy.d);
         dummy.rcm = 0xdeadn;
         dummy.pathElements[0][0] = 12345n;
-        // nf binds cm, and cm covers pk/rcm — re-seal after mutating them.
+        // nf binds nk and cm, and cm covers pk/rcm — re-seal after mutating them.
         dummy.cm = commit(tx.P, dummy);
         dummy.nf = nullifier(tx.P, dummy.nsk, dummy.rho, dummy.cm);
 
@@ -174,6 +177,21 @@ describe("transact_4x6 / value balance", function () {
             scenario,
             [tx.note(100n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
         ));
+    });
+
+    it("FAILS when a dummy input's nullifier is over a pk its nsk does not derive", async () => {
+        const { tx, circuit } = ctx;
+        const scenario = tx.oneRealOneDummy(100n, ALICE_NSK);
+        const dummy = scenario.inputs[1];
+        dummy.pk = 0xbadc0den;
+        dummy.cm = commit(tx.P, dummy);
+        dummy.nf = nullifier(tx.P, dummy.nsk, dummy.rho, dummy.cm);
+
+        await expectWitnessFails(
+            circuit,
+            tx.spend(scenario, [tx.note(100n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)]),
+            "SpentNote derives pk on a dummy slot too",
+        );
     });
 
     it("dummy with arbitrary asset_id accepted (value=0 ⇒ no balance contribution)", async () => {

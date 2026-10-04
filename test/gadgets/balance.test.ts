@@ -234,12 +234,19 @@ describe("DummyZeroValue (dummy bookkeeping)", function () {
         );
     });
 
-    for (const bad of [2n, mod(-1n, BN254_FR)]) {
-        it(`FAILS when a dummy flag is ${bad === 2n ? "2" : "-1"}`, async () => {
+    // The template does not make the flag boolean: SpentNote does, through
+    // MerkleProofOrDummy. Any non-zero flag still pins the value to zero.
+    for (const flag of [2n, mod(-1n, BN254_FR)]) {
+        const label = flag === 2n ? "2" : "-1";
+        it(`accepts a flag of ${label} on a zero-value slot`, async () => {
+            await expectAccepts(ctx.circuit, input([flag, 0n, 0n, 0n], [0n, 0n, 0n, 0n]));
+        });
+
+        it(`FAILS when a slot flagged ${label} carries value`, async () => {
             await expectWitnessFails(
                 ctx.circuit,
-                input([bad, 0n, 0n, 0n], [0n, 0n, 0n, 0n]),
-                "dummy[i] * (dummy[i] - 1) === 0 must reject a non-boolean flag",
+                input([flag, 0n, 0n, 0n], [1n, 0n, 0n, 0n]),
+                "dummy[i] * value[i] === 0 must reject under any non-zero flag",
             );
         });
     }

@@ -18,7 +18,7 @@ sibling list (`slots`), given a one-hot selector (`pathIndexSelectors_sound`).
 `merkleProofOrDummy_sound`: a slot with `is_dummy = 0` proves membership of its leaf under
 `root`. A slot with `is_dummy = 1` proves nothing, since the path is unconstrained; this is
 sound only because `DummyZeroValue`, outside this template, forces such a slot to carry
-value `0`.
+value `0`. The booleanity of `is_dummy` that `Transact` relies on is this template's.
 -/
 
 namespace Lelantos

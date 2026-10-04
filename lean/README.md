@@ -90,6 +90,7 @@ All in `Circuit/Transact.lean`.
 | Theorem | Where | Statement |
 |---|---|---|
 | `spentNote_sound` | `Circuit/Spent.lean` | A non-dummy slot proves ownership and Merkle membership of its commitment |
+| `spentNote_owns` | `Circuit/Spent.lean` | Every input slot's `pk` is the key its `nsk` derives at its diversifier, dummies included |
 | `spentNote_assetRange`, `spentNote_valueRange` | `Circuit/Spent.lean` | Both packed fields are 64-bit on every input slot, dummies included |
 | `outputNote_sound` | `Circuit/Output.lean` | An output's `cm` is the commitment of its note, with a non-zero 64-bit asset id and a 64-bit value |
 | `merkleProofOrDummy_sound` | `Gadgets/Merkle.lean` | A non-dummy slot's leaf is under the root |

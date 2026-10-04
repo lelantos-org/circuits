@@ -15,9 +15,14 @@ export interface Note {
     rcm: Field;
 }
 
+/**
+ * `pk` is not a circuit input on a spent slot: `SpentNote` derives it from
+ * `nsk` and `d`. It is carried here for the commitment the witness is built
+ * around.
+ */
 export interface SpentNote extends Note {
     nsk: Field;
-    /** Diversifier `pk` is derived under. Unconstrained on a dummy slot. */
+    /** Diversifier `pk` is derived under, on every slot. */
     d: Field;
     cm: Field;
     nf: Field;

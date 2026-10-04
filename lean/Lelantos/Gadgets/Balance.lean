@@ -33,23 +33,20 @@ theorem rangeCheck64_sound {v : F} {bits : ℕ → F} (h : RangeCheck64Sat v bit
     v.val < 2 ^ 64 :=
   (num2Bits_sound (le_of_lt two_pow_64_lt_p) h).2
 
-/-- `DummyZeroValue(N)` — `src/lib/balance.circom:18-25`:
+/-- `DummyZeroValue(N)` — `src/lib/balance.circom:19-25`:
 
-    dummy[i] * (dummy[i] - 1) === 0;
     dummy[i] * value[i] === 0;
+
+The template does not make `dummy[i]` boolean. `SpentNote` does, through
+`MerkleProofOrDummy` (`spentNote_isDummy_bit`).
 -/
 def DummyZeroValueSat (n : ℕ) (dummy value : ℕ → F) : Prop :=
-  ∀ i, i < n → IsBit (dummy i) ∧ dummy i * value i = 0
-
-/-- The dummy flag is boolean, so every slot is either real or padding. -/
-theorem dummyZeroValue_bit {n : ℕ} {dummy value : ℕ → F} (h : DummyZeroValueSat n dummy value)
-    {i : ℕ} (hi : i < n) : dummy i = 0 ∨ dummy i = 1 :=
-  isBit_iff.mp (h i hi).1
+  ∀ i, i < n → dummy i * value i = 0
 
 /-- A slot flagged as padding carries no value, so it is neutral for conservation. -/
 theorem dummyZeroValue_zero {n : ℕ} {dummy value : ℕ → F} (h : DummyZeroValueSat n dummy value)
     {i : ℕ} (hi : i < n) (hd : dummy i = 1) : value i = 0 := by
-  have hmul := (h i hi).2
+  have hmul := h i hi
   rwa [hd, one_mul] at hmul
 
 /-! ## `PerAssetValueBalance` -/

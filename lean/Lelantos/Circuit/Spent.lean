@@ -15,16 +15,16 @@ inserted with (`Lelantos.batch_deposit_spend_binds`).
 
 `spentNote_sound` gives what a non-dummy slot proves: ownership (the prover knows `nsk` and
 the diversifier `d` that `pk` derives from), a non-zero asset id, membership of `cm` under
-the root, and a correctly formed nullifier. When `is_dummy = 1` the Merkle path and `d` are
-unconstrained, `pk` need not derive from `nsk`, `asset_id` may be zero, and the slot still
-emits a prover-chosen `nullifier`.
+the root, and a correctly formed nullifier. When `is_dummy = 1` the Merkle path is
+unconstrained, `asset_id` may be zero, and the slot still emits a prover-chosen `nullifier`.
 
-On every slot, dummy or not, `value` and `asset_id` are 64-bit (`spentNote_valueRange`,
+On every slot, dummy or not, `pk` is the key `nsk` derives at `d` (`spentNote_owns`): it is
+not an input of the template. `value` and `asset_id` are 64-bit (`spentNote_valueRange`,
 `spentNote_assetRange`), `cm` is the commitment of the slot's own fields, and the nullifier
 is derived from it. The asset bound is unconditional because the packing inside
 `NoteCommitment` is injective only under both bounds.
 
-`DummyZeroValue` (applied by the caller, `src/lib/transact.circom:69`) makes the dummy
+`DummyZeroValue` (applied by the caller, `src/lib/transact.circom:68`) makes the dummy
 branch safe by forcing `value = 0`, so the slot is neutral for value conservation. The
 prover-chosen nullifier is an obligation on the contract's double-spend set; see
 `dummy_nullifier_unconstrained`.
@@ -37,7 +37,6 @@ structure SpentSlot (depth : ℕ) where
   -- Note fields.
   assetId : F
   value : F
-  pk : F
   rho : F
   rcm : F
   nsk : F
@@ -46,9 +45,9 @@ structure SpentSlot (depth : ℕ) where
   -- Binding inputs supplied by the caller.
   root : F
   nullifier : F
-  -- Key-chain and hash intermediates.
+  -- Key-chain and hash intermediates. `pk` is the output of `owner_pk`, not an input.
   ivk : F
-  pkDerived : F
+  pk : F
   nk : F
   inner : F
   cm : F
@@ -72,30 +71,28 @@ structure SpentSlot (depth : ℕ) where
 constraint, each citing its source line. `FIDELITY.md`'s constraint table is checked
 against this definition row by row. -/
 structure SpentNoteSat {depth : ℕ} (s : SpentSlot depth) : Prop where
-  /-- `src/lib/spent.circom:41-42` — `ivk = Poseidon(TAG_IVK, nsk)`. -/
+  /-- `src/lib/spent.circom:44-45` — `ivk = Poseidon(TAG_IVK, nsk)`. -/
   ivk_def : s.ivk = deriveIvk s.nsk
-  /-- `:44-46` — `pk_check.pk = Poseidon(TAG_PK, ivk, d)`. -/
-  pk_derived : s.pkDerived = derivePk s.ivk s.d
-  /-- `:47` — ownership, real notes only. -/
-  owns : (1 - s.isDummy) * (s.pkDerived - s.pk) = 0
-  /-- `:51-52` — `rng_value`: the value is 64-bit, on every slot. -/
+  /-- `:47-49` — `owner_pk.pk = Poseidon(TAG_PK, ivk, d)`, on every slot. -/
+  pk_def : s.pk = derivePk s.ivk s.d
+  /-- `:53-54` — `rng_value`: the value is 64-bit, on every slot. -/
   value_range : RangeCheck64Sat s.value s.valueBits
-  /-- `:54-55` — `rng_asset`: the asset id is 64-bit, on every slot, dummies included. -/
+  /-- `:56-57` — `rng_asset`: the asset id is 64-bit, on every slot, dummies included. -/
   asset_range : RangeCheck64Sat s.assetId s.assetBits
-  /-- `:58-61` — `inner = NoteInner(pk, rho, rcm)`, over the *supplied* pk. -/
+  /-- `:60-63` — `inner = NoteInner(owner_pk.pk, rho, rcm)`, over the derived pk. -/
   inner_def : s.inner = noteInner s.pk s.rho s.rcm
-  /-- `:63-66` — `cm = NoteCommitment(asset_id, value, inner)`. -/
+  /-- `:65-68` — `cm = NoteCommitment(asset_id, value, inner)`. -/
   cm_def : s.cm = noteCommitment s.assetId s.value s.inner
-  /-- `:69-78` — membership of `cm`, which is the leaf; bypassed for dummies. -/
+  /-- `:71-80` — membership of `cm`, which is the leaf; bypassed for dummies. -/
   membership : MerkleProofOrDummySat depth s.cm s.pathElements s.pathIndices s.root
     s.isDummy s.mpDiff s.mpComputed s.mpB s.mpS s.mpC s.mpChain
-  /-- `:82-83` — `nk = Poseidon(TAG_NK, nsk)`. -/
+  /-- `:84-85` — `nk = Poseidon(TAG_NK, nsk)`. -/
   nk_def : s.nk = deriveNk s.nsk
-  /-- `:85-89` — nullifier. -/
+  /-- `:87-91` — nullifier. -/
   nf_def : nullifierOf s.nk s.rho s.cm = s.nullifier
-  /-- `:93-94` — `IsZero(asset_id)`. -/
+  /-- `:95-96` — `IsZero(asset_id)`. -/
   asset_isZero : IsZeroSat s.assetId s.assetInv s.assetIsZero
-  /-- `:95` — real notes have a non-zero asset id. Id 0 means "no asset". -/
+  /-- `:97` — real notes have a non-zero asset id. Id 0 means "no asset". -/
   asset_nonzero_real : (1 - s.isDummy) * s.assetIsZero = 0
 
 /-- What a non-dummy spent slot establishes. -/
@@ -127,6 +124,12 @@ theorem spentNote_assetRange {depth : ℕ} {s : SpentSlot depth} (h : SpentNoteS
     s.assetId.val < 2 ^ 64 :=
   rangeCheck64_sound h.asset_range
 
+/-- Every spent slot's `pk` is the key its `nsk` derives at its diversifier, dummy or not. -/
+theorem spentNote_owns {depth : ℕ} {s : SpentSlot depth} (h : SpentNoteSat s) :
+    s.pk = pkOfNsk s.nsk s.d := by
+  rw [h.pk_def, h.ivk_def]
+  rfl
+
 /-- Every spent slot's `cm` is the commitment of its own five note fields, dummy or not. -/
 theorem spentNote_commitment {depth : ℕ} {s : SpentSlot depth} (h : SpentNoteSat s) :
     s.cm = noteCm s.assetId s.value s.pk s.rho s.rcm := by
@@ -135,11 +138,6 @@ theorem spentNote_commitment {depth : ℕ} {s : SpentSlot depth} (h : SpentNoteS
 /-- Soundness of `SpentNote` on a real slot. -/
 theorem spentNote_sound {depth : ℕ} {s : SpentSlot depth}
     (h : SpentNoteSat s) (hreal : s.isDummy = 0) : SpentReal s := by
-  have hown : s.pk = pkOfNsk s.nsk s.d := by
-    have howns := h.owns
-    rw [hreal, sub_zero, one_mul, sub_eq_zero] at howns
-    rw [← howns, h.pk_derived, h.ivk_def]
-    rfl
   have hassetNz : s.assetId ≠ 0 := by
     have hnz := h.asset_nonzero_real
     rw [hreal, sub_zero, one_mul] at hnz
@@ -148,7 +146,7 @@ theorem spentNote_sound {depth : ℕ} {s : SpentSlot depth}
     rw [if_pos hz] at hnz
     exact one_ne_zero hnz
   exact
-    { owns := hown
+    { owns := spentNote_owns h
       assetNonzero := hassetNz
       valueRange := spentNote_valueRange h
       assetRange := spentNote_assetRange h
@@ -162,8 +160,8 @@ theorem spentNote_isDummy_bit {depth : ℕ} {s : SpentSlot depth} (h : SpentNote
     s.isDummy = 0 ∨ s.isDummy = 1 :=
   merkleProofOrDummy_bit h.membership
 
-/-- A dummy slot also emits a nullifier, chosen by the prover: `nsk` and `rho` are
-unconstrained in that branch. -/
+/-- A dummy slot also emits a nullifier, chosen by the prover: `nsk`, `d`, `rho` and `rcm`
+are unconstrained in that branch. -/
 theorem dummy_nullifier_unconstrained {depth : ℕ} {s : SpentSlot depth}
     (h : SpentNoteSat s) : s.nullifier = nullifierOf (deriveNk s.nsk) s.rho s.cm := by
   rw [← h.nf_def, h.nk_def]

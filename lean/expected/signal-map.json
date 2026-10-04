@@ -56,7 +56,6 @@
 
       "SpentSlot.assetId": "main.in_asset[{i<N_IN}]",
       "SpentSlot.value": "main.in_value[{i<N_IN}]",
-      "SpentSlot.pk": "main.in_pk[{i<N_IN}]",
       "SpentSlot.rho": "main.in_rho[{i<N_IN}]",
       "SpentSlot.rcm": "main.in_rcm[{i<N_IN}]",
       "SpentSlot.nsk": "main.in_nsk[{i<N_IN}]",
@@ -65,7 +64,7 @@
       "SpentSlot.root": "main.merkle_root",
       "SpentSlot.nullifier": "main.nullifier[{i<N_IN}]",
       "SpentSlot.ivk": "main.spent[{i<N_IN}].ivk_d.ivk",
-      "SpentSlot.pkDerived": "main.spent[{i<N_IN}].pk_check.pk",
+      "SpentSlot.pk": "main.spent[{i<N_IN}].inner.owner_pk",
       "SpentSlot.nk": "main.spent[{i<N_IN}].nf_h.nk",
       "SpentSlot.inner": "main.spent[{i<N_IN}].cm.inner",
       "SpentSlot.cm": "main.spent[{i<N_IN}].cm.cm",

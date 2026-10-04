@@ -61,7 +61,7 @@ def noteCommitment (assetId value inner : F) : F :=
   poseidon [TAG_CM, packAV assetId value, inner]
 
 /-- The commitment of a whole note: `NoteInner` then `NoteCommitment`, as the two slot
-templates wire them, at `src/lib/spent.circom:58-66` on the input side and at
+templates wire them, at `src/lib/spent.circom:60-68` on the input side and at
 `src/lib/output.circom:36-45` on the output side. -/
 def noteCm (assetId value pk rho rcm : F) : F :=
   noteCommitment assetId value (noteInner pk rho rcm)

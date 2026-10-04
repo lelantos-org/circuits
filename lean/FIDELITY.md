@@ -195,8 +195,7 @@ it described; `batch_capacity` consumes the one range check that replaced it.
 | circom | Lean |
 |---|---|
 | `:11-15` `RangeCheck64` → `Num2Bits(64)` | `RangeCheck64Sat` / `Num2BitsSat` (`Bits.lean`). The template has no `bits` output; the model's bit array is the internal `n2b.out` |
-| `:22` `dummy*(dummy-1) === 0` | `DummyZeroValueSat` (first conjunct) |
-| `:23` `dummy*value === 0` | `DummyZeroValueSat` (second conjunct) |
+| `:23` `dummy*value === 0` | `DummyZeroValueSat` |
 | `:49-57` `cand[]` fill | `candAt` |
 | `:68-70` `pub_eq[c] = IsEqual(pa, cand[c])` | `PerAssetValueBalanceSat.pubEq_sat` |
 | `:72` `lhs[c][0] <== 0` | `lhs_chain` initial value. There is no public-input term |
@@ -346,18 +345,17 @@ order, each field's doc comment citing the source line it mirrors.
 
 | circom | Lean |
 |---|---|
-| `:41-42` `ivk_d = DeriveIvk(nsk)` | `SpentNoteSat.ivk_def` |
-| `:44-46` `pk_check = DerivePk(ivk, d)` | `SpentNoteSat.pk_derived` |
-| `:47` `(1 - is_dummy) * (pk_check.pk - pk) === 0` | `SpentNoteSat.owns` |
-| `:51-52` `rng_value = RangeCheck64(value)` | `SpentNoteSat.value_range` |
-| `:54-55` `rng_asset = RangeCheck64(asset_id)` | `SpentNoteSat.asset_range` |
-| `:58-61` `inner = NoteInner(pk, rho, rcm)` | `SpentNoteSat.inner_def` |
-| `:63-66` `cm = NoteCommitment(asset_id, value, inner)` | `SpentNoteSat.cm_def` |
-| `:69-78` `mp = MerkleProofOrDummy(DEPTH)`, with the commitment as its `leaf` | `SpentNoteSat.membership` |
-| `:82-83` `nk_d = DeriveNk(nsk)` | `SpentNoteSat.nk_def` |
-| `:85-89` `nf_h.nf === nullifier` | `SpentNoteSat.nf_def` |
-| `:93-94` `asset_nz = IsZero(asset_id)` | `SpentNoteSat.asset_isZero` |
-| `:95` `(1 - is_dummy) * asset_nz.out === 0` | `SpentNoteSat.asset_nonzero_real` |
+| `:44-45` `ivk_d = DeriveIvk(nsk)` | `SpentNoteSat.ivk_def` |
+| `:47-49` `owner_pk = DerivePk(ivk, d)` | `SpentNoteSat.pk_def` |
+| `:53-54` `rng_value = RangeCheck64(value)` | `SpentNoteSat.value_range` |
+| `:56-57` `rng_asset = RangeCheck64(asset_id)` | `SpentNoteSat.asset_range` |
+| `:60-63` `inner = NoteInner(owner_pk.pk, rho, rcm)` | `SpentNoteSat.inner_def` |
+| `:65-68` `cm = NoteCommitment(asset_id, value, inner)` | `SpentNoteSat.cm_def` |
+| `:71-80` `mp = MerkleProofOrDummy(DEPTH)`, with the commitment as its `leaf` | `SpentNoteSat.membership` |
+| `:84-85` `nk_d = DeriveNk(nsk)` | `SpentNoteSat.nk_def` |
+| `:87-91` `nf_h.nf === nullifier` | `SpentNoteSat.nf_def` |
+| `:95-96` `asset_nz = IsZero(asset_id)` | `SpentNoteSat.asset_isZero` |
+| `:97` `(1 - is_dummy) * asset_nz.out === 0` | `SpentNoteSat.asset_nonzero_real` |
 
 ### `src/lib/output.circom`
 
@@ -395,22 +393,22 @@ order, each field's doc comment citing the source line it mirrors.
 
 | circom | Lean |
 |---|---|
-| `:72-88` `spent[i] = SpentNote(DEPTH)` and its wiring | `TransactSat.spent_sat` |
-| `:87` `spent[i].root <== merkle_root` | `TransactSat.spent_root` |
-| `:91-92` `in_dz` wiring | `TransactSat.dummy_zero` |
-| `:100` `dummy_acc[0] <== 0` | `TransactSat.dummy_acc_base` |
-| `:101-103` `dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i]` | `TransactSat.dummy_acc_step` |
-| `:104-106` `all_dummy = IsEqual(dummy_acc[N_IN], N_IN)` | `TransactSat.dummy_all_eq` |
-| `:107` `all_dummy.out === 0` | `TransactSat.not_all_dummy` |
-| `:116-119` `out_rho[j] === DeriveRho(nullifier[0], j)` | `TransactSat.rho_derived` |
-| `:121-127` `out_note[j] = OutputNote()` and its wiring | `TransactSat.out_sat` |
-| `:133-134` `rng_pub_asset = RangeCheck64(public_asset_id)` | `TransactSat.pub_asset_range` |
-| `:136-137` `rng_pub_out = RangeCheck64(public_out)` | `TransactSat.pub_out_range` |
-| `:144-145` `pub_out_z = IsZero(public_out)` | `TransactSat.pub_out_isZero` |
-| `:146` `pub_out_z.out * public_asset_id === 0` | `TransactSat.transfer_names_no_asset` |
-| `:149-159` `vbal = PerAssetValueBalance(N_IN, N_OUT)` and its wiring | `TransactSat.value_balance` |
-| `:162-173` `pe = TransactCompressN(N_IN, N_OUT)`, its wiring, and `y <== pe.y` | `TransactSat.compress` |
-| `:174` `digest <== pe.digest` | `TransactSat.digest_def` |
+| `:71-86` `spent[i] = SpentNote(DEPTH)` and its wiring | `TransactSat.spent_sat` |
+| `:85` `spent[i].root <== merkle_root` | `TransactSat.spent_root` |
+| `:89-90` `in_dz` wiring | `TransactSat.dummy_zero` |
+| `:98` `dummy_acc[0] <== 0` | `TransactSat.dummy_acc_base` |
+| `:99-101` `dummy_acc[i + 1] <== dummy_acc[i] + in_is_dummy[i]` | `TransactSat.dummy_acc_step` |
+| `:102-104` `all_dummy = IsEqual(dummy_acc[N_IN], N_IN)` | `TransactSat.dummy_all_eq` |
+| `:105` `all_dummy.out === 0` | `TransactSat.not_all_dummy` |
+| `:114-117` `out_rho[j] === DeriveRho(nullifier[0], j)` | `TransactSat.rho_derived` |
+| `:119-125` `out_note[j] = OutputNote()` and its wiring | `TransactSat.out_sat` |
+| `:131-132` `rng_pub_asset = RangeCheck64(public_asset_id)` | `TransactSat.pub_asset_range` |
+| `:134-135` `rng_pub_out = RangeCheck64(public_out)` | `TransactSat.pub_out_range` |
+| `:142-143` `pub_out_z = IsZero(public_out)` | `TransactSat.pub_out_isZero` |
+| `:144` `pub_out_z.out * public_asset_id === 0` | `TransactSat.transfer_names_no_asset` |
+| `:147-157` `vbal = PerAssetValueBalance(N_IN, N_OUT)` and its wiring | `TransactSat.value_balance` |
+| `:160-171` `pe = TransactCompressN(N_IN, N_OUT)`, its wiring, and `y <== pe.y` | `TransactSat.compress` |
+| `:172` `digest <== pe.digest` | `TransactSat.digest_def` |
 
 ## Defence 2 — witness parity harness
 
@@ -515,7 +513,7 @@ at the width of the template.
 
 Writing it found two things beyond drifted line numbers. `merkle.circom`'s
 `root <== cur[depth]` was cited three lines off, and — the more interesting one — the
-citation form `` `:65-72, 105-106` `` was being read as a single span, silently discarding
+citation form `` `:64-71, 103-104` `` was being read as a single span, silently discarding
 everything after the comma. Several fields that looked cited had no working citation over
 half of what they mirrored. The scanner now parses span lists, and anchors them together.
 
