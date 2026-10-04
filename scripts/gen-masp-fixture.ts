@@ -86,7 +86,7 @@ function arg(name: string, fallback: string): string {
     return path.resolve(v);
 }
 
-const KEYS = arg("keys", path.join(ROOT, "build", "prototype-0.17.0"));
+const KEYS = arg("keys", path.join(ROOT, "build", "prototype-0.18.0"));
 const WASM = arg("wasm", "");
 const CONTRACTS = arg("contracts", path.join(ROOT, "..", "contracts"));
 const OUT = arg("out", path.join(CONTRACTS, "test", "fixtures", "masp_flow_proof.json"));

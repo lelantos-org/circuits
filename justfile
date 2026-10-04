@@ -259,7 +259,7 @@ vectors-consumers-check:
 # build/<shape>_js/. Proving is randomized, so every run rewrites the proofs.
 
 # Regenerate the MASP-level proof fixture in ../contracts from `keys`.
-masp-fixture keys=(BUILD / "prototype-0.17.0"):
+masp-fixture keys=(BUILD / "prototype-0.18.0"):
     NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/gen-masp-fixture.ts" --keys "{{keys}}"
 
 # The linted tree contains no `<--` (the recipe checks), so CS0005 / CS0015 /
