@@ -6,10 +6,15 @@
 
 import {
     type CircomTransactInput,
+    type TransactWitnessBundle,
+    TAG_CM,
+    buildInner,
+    buildNullifierFromNsk,
     dummyOutput,
 } from "../helpers";
 import { expectAccepts, expectWitnessFails } from "../lib/expect";
-import { ALICE_NSK, N_IN, N_OUT, TIMEOUT_CIRCUIT, TWO_64, TWO_252 } from "../lib/constants";
+import { ALICE_NSK, N_IN, N_OUT, TIMEOUT_CIRCUIT, TWO_64 } from "../lib/constants";
+import { DEFAULT_ASSET, rebindFiatShamir } from "../lib/transact";
 import { readSignal, writeSignal } from "../lib/signal_path";
 import { useTransactCircuit } from "./setup";
 
@@ -24,7 +29,7 @@ interface TamperCase {
     base?: TamperBase;
 }
 
-type TamperBase = "balanced" | "oneRealRestDummy" | "fullShape";
+type TamperBase = "balanced" | "oneRealRestDummy" | "fullShape" | "withdraw";
 
 // ===== per-slot expansion =====
 //
@@ -38,12 +43,12 @@ type TamperBase = "balanced" | "oneRealRestDummy" | "fullShape";
 // `balanced` the high slots are dummies and padding, which carry weaker
 // constraints and would need per-index expectations.
 
-/** `"in_rcv[%]"` -> one row per input slot. */
+/** `"in_rcm[%]"` -> one row per input slot. */
 function perInput(path: string, reason: string, extra: Partial<TamperCase> = {}): TamperCase[] {
     return expand(path, reason, N_IN, extra);
 }
 
-/** `"out_cv[%][0]"` -> one row per output slot. */
+/** `"out_cm[%]"` -> one row per output slot. */
 function perOutput(path: string, reason: string, extra: Partial<TamperCase> = {}): TamperCase[] {
     return expand(path, reason, N_OUT, extra);
 }
@@ -68,43 +73,45 @@ function expand(
 // Grouped by what the field feeds rather than by name, so coverage gaps are
 // visible in the list.
 const TAMPER_CASES: TamperCase[] = [
-    // -- value commitments: cv = value·V^asset + rcv·H --
-    ...perInput("in_rcv[%]",   "cv binding rejects a wrong input blinding"),
-    ...perOutput("out_rcv[%]", "cv binding rejects a wrong output blinding"),
-    ...perInput("in_cv[%][0]",   "in_cv must equal the ValueCommit recomputation"),
-    ...perInput("in_cv[%][1]",   "the y-coordinate half of the same equality"),
-    ...perOutput("out_cv[%][0]", "out_cv must equal the ValueCommit recomputation"),
-    ...perOutput("out_cv[%][1]", "the y-coordinate half of the same equality"),
-
-    // -- deposit anchor: cv_dep, which also feeds the Merkle leaf --
-    ...perInput("in_rcv_dep[%]",    "leaf hash changes, so the Merkle proof no longer matches"),
-    ...perOutput("out_rcv_dep[%]",  "the out_cv_dep equality constraint rejects"),
-    ...perOutput("out_cv_dep[%][0]", "out_cv_dep[j][0] === out_note[j].cv_dep[0]"),
-    ...perOutput("out_cv_dep[%][1]", "the y-coordinate half of the same equality"),
-
-    // -- note commitments: cm = Poseidon over (packed_av, pk, rho, rcm) --
+    // -- note commitments: cm = Poseidon(TAG_CM, packed_av, Poseidon(TAG_INNER, pk, rho, rcm)) --
     ...perOutput("out_rcm[%]", "note commitment binding rejects"),
-    ...perInput("in_rcm[%]",   "a different cm gives a different leaf, so Merkle rejects"),
+    ...perInput("in_rcm[%]",   "a different cm is a different leaf, so Merkle rejects"),
     ...perOutput("out_rho[%]", "output note commitment binding (distinct from the out_rcm path)"),
     ...perInput("in_rho[%]",   "nullifier mismatch and Merkle leaf change, both fire"),
+    ...perOutput("out_pk[%]",  "the owner key is inside cm"),
     // Every slot's out_cm is constrained, not only the ones a caller filled.
     ...perOutput("out_cm[%]",  "out_cm must equal the recomputed commitment"),
+
+    // -- (asset, value) inside cm: the leaf is cm, so either moves the leaf --
+    ...perInput("in_asset[%]",   "a relabelled input opens a different leaf, and unbalances its asset"),
+    ...perInput("in_value[%]",   "a revalued input opens a different leaf, and unbalances"),
+    ...perOutput("out_asset[%]", "out_cm no longer matches, and the asset is unbalanced"),
+    ...perOutput("out_value[%]", "out_cm no longer matches, and the transaction is unbalanced"),
 
     // -- keys and nullifiers --
     ...perInput("in_pk[%]",     "pk === DerivePk(nsk) rejects a forged pk"),
     ...perInput("nullifier[%]", "nf === Poseidon(TAG_NF, nk, rho, cm) rejects a forged nullifier"),
 
-    // -- 64-bit range checks: HashToAssetGen's Num2Bits(64) and RangeCheck64 --
-    { path: "public_asset_id", reason: "HashToAssetGen Num2Bits(64)", value: () => TWO_64 },
-    ...perInput("in_asset[%]",   "per-note Num2Bits(64) in HashToAssetGen", { value: () => TWO_64 }),
-    ...perOutput("out_asset[%]", "per-note Num2Bits(64) in HashToAssetGen", { value: () => TWO_64 }),
-    { path: "public_in",       reason: "RangeCheck64 on the public bucket", value: () => TWO_64 },
-    { path: "public_out",      reason: "RangeCheck64 on the public bucket", value: () => TWO_64 },
+    // -- 64-bit range checks: RangeCheck64 on every asset id and every value --
+    ...perInput("in_asset[%]",   "RangeCheck64 on a spent note's asset id", { value: () => TWO_64 }),
+    ...perOutput("out_asset[%]", "RangeCheck64 on an output note's asset id", { value: () => TWO_64 }),
     ...perInput("in_value[%]",   "value is bounded to 64 bits", { value: () => TWO_64 }),
     ...perOutput("out_value[%]", "value is bounded to 64 bits", { value: () => TWO_64 }),
+    { path: "public_asset_id", reason: "RangeCheck64 on the public bucket's asset id",
+      value: () => TWO_64, base: "withdraw" },
+    { path: "public_out",      reason: "RangeCheck64 on the public bucket", value: () => TWO_64, base: "withdraw" },
 
-    // -- 252-bit blinder range: MulH's Num2Bits(RCV_BITS) --
-    ...perInput("in_rcv[%]", "Num2Bits(252) rejects a 253-bit blinder", { value: () => TWO_252 }),
+    // -- transparent bucket --
+    // On the balanced transfer public_out is 0, so naming an asset touches no
+    // candidate sum: the bucket constraint is the only one that can reject.
+    { path: "public_asset_id", reason: "public_out == 0 forces public_asset_id == 0",
+      value: () => DEFAULT_ASSET },
+    { path: "public_out",      reason: "a withdrawal nothing funds is unbalanced" },
+    { path: "public_out",      reason: "withdrawing one unit more than the inputs fund", base: "withdraw" },
+    { path: "public_asset_id", reason: "a withdrawal under id 0 is unbalanced: no real note carries id 0",
+      value: () => 0n, base: "withdraw" },
+    { path: "public_asset_id", reason: "a withdrawal relabelled to an asset no input carries",
+      base: "withdraw" },
 
     // -- booleanity --
     // On `fullShape` every slot is real (is_dummy = 0). The row below covers the
@@ -129,7 +136,7 @@ describe("transact_4x6 / single-field tamper", function () {
     const ctx = useTransactCircuit();
 
     /**
-     * The three honest bases, built once and handed out as deep copies.
+     * The honest bases, built once and handed out as deep copies.
      *
      * Each base costs a full `TxBuilder` run (a tree, four inserts, four
      * authentication paths), which dominates per-row time; `structuredClone` of
@@ -143,6 +150,7 @@ describe("transact_4x6 / single-field tamper", function () {
         bases.fullShape = ctx.tx.fullShape();
         bases.balanced = ctx.tx.balanced();
         bases.oneRealRestDummy = oneRealRestDummy();
+        bases.withdraw = withdraw();
     });
 
     // `base` is optional on a row; omitted means the balanced shape.
@@ -166,6 +174,22 @@ describe("transact_4x6 / single-field tamper", function () {
         );
     }
 
+    /**
+     * One real input of 1000, 900 kept and 100 withdrawn in the note's asset.
+     *
+     * The base for the transparent-bucket rows: on a transfer `public_out` is 0
+     * and the bucket is empty, so its range checks and its balance term have
+     * nothing to act on.
+     */
+    function withdraw(): CircomTransactInput {
+        const { tx } = ctx;
+        return tx.spend(
+            tx.oneRealOneDummy(1000n, ALICE_NSK),
+            [tx.note(900n, ALICE_NSK, 9n)],
+            { publicOut: 100n },
+        );
+    }
+
     // Vacuity guard for the per-slot base: if the untouched witness were
     // unsatisfiable, every rejection below would pass regardless of the tamper.
     it("accepts the fully-occupied shape: every input and output slot real", async () => {
@@ -175,6 +199,11 @@ describe("transact_4x6 / single-field tamper", function () {
     // Vacuity guard for the dummy-slot base.
     it("accepts one real input with the remaining slots dummy", async () => {
         await expectAccepts(ctx.circuit, oneRealRestDummy());
+    });
+
+    // Vacuity guard for the transparent-bucket base.
+    it("accepts a withdrawal in the spent note's asset", async () => {
+        await expectAccepts(ctx.circuit, withdraw());
     });
 
     for (const { path, reason, value, base } of TAMPER_CASES) {
@@ -187,20 +216,65 @@ describe("transact_4x6 / single-field tamper", function () {
         });
     }
 
-    // Honest witness: the top of the declared blinder range must stay spendable.
-    // A Num2Bits one bit too narrow in MulH would make notes near the ceiling
-    // unspendable; the SDK does not mint blinders this large, so no other test
-    // covers it.
-    it("accepts blinders at the top of the 252-bit range", async () => {
-        const { tx, circuit } = ctx;
-        const maxRcv = TWO_252 - 1n;
+    // ===== asset-id range, isolated =====
+    //
+    // The rows above push an asset id to 2^64 in an otherwise honest witness, so
+    // the stale cm rejects it as well and the range check is not shown to fire.
+    // These two build the note consistently around the oversized id, with the
+    // commitment and nullifier recomputed over it, on slots whose value is 0 so
+    // conservation is untouched. RangeCheck64 on asset_id is then the only
+    // constraint left to reject, and it is the one NoteCommitment's packing
+    // depends on: asset·2^64 + value is injective only under both bounds.
 
-        const wide = { ...tx.note(100n, ALICE_NSK, 1n), rcv: maxRcv, rcvDep: maxRcv - 1n };
-        const outA = { ...tx.note(75n, ALICE_NSK, 9n), rcv: maxRcv - 2n, rcvDep: maxRcv - 3n };
-        await expectAccepts(circuit, tx.spend(
-            tx.plant([wide, tx.note(50n, ALICE_NSK, 2n)], ALICE_NSK),
-            [outA, tx.note(75n, ALICE_NSK, 11n)],
-        ));
+    /** A zero-value `cm` over any asset id, including one the reference refuses to pack. */
+    function oversizedCm(asset: bigint, n: { pk: bigint; rho: bigint; rcm: bigint }): bigint {
+        const { P } = ctx.tx;
+        return P.hash([TAG_CM, asset * TWO_64, buildInner(P, n)]);
+    }
+
+    /** `oneRealRestDummy` with dummy slot 1 rebuilt around `asset`. */
+    function dummyDeclaring(asset: bigint): TransactWitnessBundle {
+        const { P } = ctx.tx;
+        const input = oneRealRestDummy() as TransactWitnessBundle;
+        const rho = readSignal(input, "in_rho[1]");
+        const cm = oversizedCm(asset, { pk: 0n, rho, rcm: 0n });
+        writeSignal(input, "in_asset[1]", asset);
+        writeSignal(input, "nullifier[1]", buildNullifierFromNsk(P, 0n, rho, cm));
+        return rebindFiatShamir(input);
+    }
+
+    /** `oneRealRestDummy` with its zero-value output (slot 1) rebuilt around `asset`. */
+    function zeroOutputDeclaring(asset: bigint): TransactWitnessBundle {
+        const input = oneRealRestDummy() as TransactWitnessBundle;
+        const n = {
+            pk: readSignal(input, "out_pk[1]"),
+            rho: readSignal(input, "out_rho[1]"),
+            rcm: readSignal(input, "out_rcm[1]"),
+        };
+        writeSignal(input, "out_asset[1]", asset);
+        writeSignal(input, "out_cm[1]", oversizedCm(asset, n));
+        return rebindFiatShamir(input);
+    }
+
+    // The control for each rejection below: the same rebuild at the largest id
+    // in range is accepted, so the rebuild itself is sound and 2^64 is rejected
+    // for its width alone.
+    it("accepts a dummy input declaring asset_id = 2^64 - 1, cm and nullifier consistent", async () => {
+        await expectAccepts(ctx.circuit, dummyDeclaring(TWO_64 - 1n));
+    });
+
+    it("FAILS when a dummy input declares asset_id = 2^64, cm and nullifier consistent", async () => {
+        await expectWitnessFails(ctx.circuit, dummyDeclaring(TWO_64),
+            "the asset range check must hold on a dummy slot: nothing else reads its asset id");
+    });
+
+    it("accepts a zero-value output declaring asset_id = 2^64 - 1, cm consistent", async () => {
+        await expectAccepts(ctx.circuit, zeroOutputDeclaring(TWO_64 - 1n));
+    });
+
+    it("FAILS when a zero-value output declares asset_id = 2^64, cm consistent", async () => {
+        await expectWitnessFails(ctx.circuit, zeroOutputDeclaring(TWO_64),
+            "the asset range check must hold on an output whose value contributes nothing to balance");
     });
 
     // The two out_cm cases need their own bases: one slot holds a real note, the

@@ -1,8 +1,7 @@
 // Field <-> byte conversion and bit packing.
 //
-// Bit order is significant: the Pedersen asset-generator input is LSB-first
-// within each byte (src/lib/asset_gen.circom), as are the FMD clue bits on the
-// wire. `toBeBytes32` is big-endian for ABI encoding only.
+// Bit order is significant: the FMD clue bits are LSB-first within each byte
+// on the wire. `toBeBytes32` is big-endian for ABI encoding only.
 
 import type { Field } from "./field.js";
 

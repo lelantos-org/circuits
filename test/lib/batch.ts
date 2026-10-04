@@ -2,35 +2,46 @@
 
 import {
     Poseidon,
-    Jubjub,
     MerkleTree,
-    buildLeaf,
-    buildNoteCommitment,
+    buildInner,
+    commitWithInner,
     fiatShamirZ,
     hornerEval,
     type Field,
-    type Point,
 } from "../helpers";
 import {
     treeUpdateBatchChallenge,
     treeUpdateBatchCoeffs,
+    treeUpdateBatchDigest,
     padToSlots,
     type TreeUpdateBatchArgs,
     type TreeUpdateBatchPublicArgs,
 } from "./inputs";
 import { BATCH_DEPTH, MAX_L } from "./constants";
 
-/** One leaf's contribution to a batch: the commitment plus its deposit anchor. */
+/** One leaf's contribution to a batch. */
 export interface LeafWitness {
-    cm: Field;
-    cvDep: Point;
+    /**
+     * What `cms[k]` carries: the note commitment on a spend leaf, the
+     * depositor's `inner` on a deposit leaf.
+     */
+    word: Field;
+    /**
+     * What the tree holds. On a spend leaf it is `word`. On a deposit leaf it
+     * is the commitment the circuit builds from `leafAsset`, `leafPublicIn` and
+     * `word`.
+     */
+    leaf: Field;
     leafAsset: Field;
     leafPublicIn: Field;
     isDeposit: 0 | 1;
-    rcv: Field;
 }
 
-/** A full batch witness: the circuit inputs plus the reference `y` to check against. */
+/**
+ * A full batch witness: the circuit inputs, plus the two public signals the
+ * contract would hand the verifier beside `z`. `y` is the reference evaluation
+ * and `digest` the calldata digest word; the circuit must output both.
+ */
 export interface BatchWitness extends TreeUpdateBatchArgs {
     startIndex: number;
     actualCount: number;
@@ -39,35 +50,27 @@ export interface BatchWitness extends TreeUpdateBatchArgs {
 }
 
 export function buildLeafWitness(opts: {
-    J: Jubjub;
     P: Poseidon;
     asset: Field;
     val: Field;
     pk: Field;
     rho: Field;
     rcm: Field;
-    rcvDep: Field;
     isDeposit: 0 | 1;
 }): LeafWitness {
-    const { J, P, asset, val, pk, rho, rcm, rcvDep, isDeposit } = opts;
-    const cm = buildNoteCommitment(P, { asset, value: val, pk, rho, rcm });
-    const assetGen = J.hashToAssetGen(asset);
-    const cvDep = J.valueCommit(val, assetGen, rcvDep);
-    // A deposit leaf is pinned directly: cv_dep = val·V^asset + rcv·H, so the
-    // claimed public_in must be exactly this leaf's value.
-    return {
-        cm,
-        cvDep,
-        leafAsset: isDeposit === 1 ? asset : 0n,
-        leafPublicIn: isDeposit === 1 ? val : 0n,
-        isDeposit,
-        rcv: rcvDep,
-    };
+    const { P, asset, val, pk, rho, rcm, isDeposit } = opts;
+    const inner = buildInner(P, { pk, rho, rcm });
+    const cm = commitWithInner(P, asset, val, inner);
+    // Either way the leaf is the note's commitment. A deposit hands the
+    // circuit `inner` and the public amount and lets it build the leaf; a
+    // spend hands it the commitment a transact proof already bound.
+    return isDeposit === 1
+        ? { word: inner, leaf: cm, leafAsset: asset, leafPublicIn: val, isDeposit }
+        : { word: cm, leaf: cm, leafAsset: 0n, leafPublicIn: 0n, isDeposit };
 }
 
 /** Leaf-witness factory taking only the discriminating fields; the rest are fixed. */
 export function simpleLeaf(opts: {
-    J: Jubjub;
     P: Poseidon;
     val: Field;
     isDeposit: 0 | 1;
@@ -75,12 +78,11 @@ export function simpleLeaf(opts: {
     pk?: Field;
 }): LeafWitness {
     return buildLeafWitness({
-        J: opts.J,
         P: opts.P,
         asset: opts.asset ?? 7n,
         val: opts.val,
         pk: opts.pk ?? 0xabcn,
-        rho: 1n, rcm: 3n, rcvDep: 5n,
+        rho: 1n, rcm: 3n,
         isDeposit: opts.isDeposit,
     });
 }
@@ -88,24 +90,22 @@ export function simpleLeaf(opts: {
 /**
  * A leaf derived entirely from `seed`, for property tests needing k distinct
  * leaves. `val` and `asset` override the seeded ones where a shape needs
- * specific values; a zero-value fee note needs both at zero (step 6a).
+ * specific values.
  */
 export function seededLeaf(
     P: Poseidon,
-    J: Jubjub,
     seed: number,
     isDeposit: 0 | 1,
     val?: Field,
     asset?: Field,
 ): LeafWitness {
     return buildLeafWitness({
-        P, J,
+        P,
         asset: asset ?? 7n,
         val: val ?? BigInt(100 + seed),
         pk: BigInt(0xb000 + seed),
         rho: BigInt(1 + 2 * seed),
         rcm: BigInt(3 + 2 * seed),
-        rcvDep: BigInt(11 + 7 * seed),
         isDeposit,
     });
 }
@@ -156,7 +156,7 @@ export function buildHonest(
     const oldRoot = tree.root();
     const frontier = tree.frontier();
 
-    for (const l of leaves) tree.insert(buildLeaf(P, l.cm, l.cvDep));
+    for (const l of leaves) tree.insert(l.leaf);
     const newRoot = tree.root();
 
     const w: BatchWitness = {
@@ -164,13 +164,12 @@ export function buildHonest(
         newRoot,
         startIndex: prefilled,
         actualCount: leaves.length,
-        cms: padToSlots(leaves.map(l => l.cm), MAX_L, 0n),
-        cvDep: padToSlots(leaves.map(l => l.cvDep), MAX_L, [0n, 0n] as Point),
+        cms: padToSlots(leaves.map(l => l.word), MAX_L, 0n),
         leafAsset: padToSlots(leaves.map(l => l.leafAsset), MAX_L, 0n),
         leafPublicIn: padToSlots(leaves.map(l => l.leafPublicIn), MAX_L, 0n),
         isDeposit: padToSlots(leaves.map(l => l.isDeposit as number), MAX_L, 0),
-        rcv: padToSlots(leaves.map(l => l.rcv), MAX_L, 0n),
         frontier,
+        digest: 0n,
         z: 0n,
         y: 0n,
     };
@@ -179,16 +178,18 @@ export function buildHonest(
 }
 
 /**
- * Re-derive Fiat-Shamir `(z, y)` from the witness in its current state.
+ * Re-derive the calldata digest and Fiat-Shamir `(z, y)` from the witness in
+ * its current state: what an honest prover submits for it.
  *
- * Call after mutating any PolyEval-bound field, so the failure comes from the
- * constraint under test rather than a stale challenge. `rcv` and `frontier` are
- * outside the coefficient vector and do not require it.
+ * Call after mutating any coefficient, so the failure comes from the
+ * constraint under test rather than stale calldata. `frontier` is outside the
+ * coefficient vector and does not require it.
  *
  * Implemented as `bindFiatShamir` applied to the calldata view that matches the
  * witness, so the derivation has a single definition.
  */
 export function rebindFiatShamir(w: BatchWitness): void {
+    w.digest = treeUpdateBatchDigest(w);
     bindFiatShamir(w, calldataView(w));
 }
 
@@ -201,16 +202,25 @@ export function rebindFiatShamir(w: BatchWitness): void {
  * hand-written projection would lose that property for any field added to
  * `TreeUpdateBatchPublicArgs`.
  *
- * `BatchWitness` extends the public args with `rcv`, `frontier`, `z` and `y`;
+ * `BatchWitness` extends the public args with `frontier`, `z` and `y`;
  * carrying them along is harmless, since the challenge and coefficient functions
- * read only the public fields.
+ * read only the public fields. The view's `digest` is the witness's at the time
+ * of the snapshot; a divergence case decides whether to leave it or recompute
+ * it for the rewritten coefficients (`redigest`).
  */
 export function calldataView(w: BatchWitness): TreeUpdateBatchPublicArgs {
     return structuredClone(w);
 }
 
+/** Recompute a calldata view's digest word for its current coefficients. */
+export function redigest(c: TreeUpdateBatchPublicArgs): void {
+    c.digest = treeUpdateBatchDigest(c);
+}
+
 /**
- * Bind `(z, y)` to a calldata view that may differ from the witness `w`.
+ * Bind `(z, y, digest)` to a calldata view that may differ from the witness `w`:
+ * the three public signals the contract would hand the verifier for that
+ * calldata.
  *
  * `rebindFiatShamir` combines two roles that are separate in deployment:
  * deriving the challenge and choosing the witness. The contract derives `z` and
@@ -225,48 +235,45 @@ export function calldataView(w: BatchWitness): TreeUpdateBatchPublicArgs {
 export function bindFiatShamir(w: BatchWitness, calldata: TreeUpdateBatchPublicArgs): void {
     w.z = fiatShamirZ(treeUpdateBatchChallenge(calldata));
     w.y = hornerEval(treeUpdateBatchCoeffs(calldata), w.z);
+    w.digest = calldata.digest;
 }
 
 /**
  * `count` leaves in the layout MASP's deposit path emits: slot 2i is a
  * principal and slot 2i+1 its fee note. The circuit does not require this
- * (step 6a is per-slot), but it is the shape a flush produces.
+ * (every constraint is per-slot), but it is the shape a flush produces.
  *
- * Fee notes carry zero value, the fbps = 0 flush: a permitted shape
- * (`_validateDeposit`: "The fee note's value may be zero") and the one where the
- * deposit binding degenerates and leaves 64-bit `leaf_asset` values otherwise
- * unpinned.
- *
- * Fee notes are at asset 0 as well as value 0, as step 6a requires of a leaf
- * the binding does not constrain.
+ * Fee notes carry zero value at asset 0, the zero-fee deposit: a permitted
+ * shape (`_validateDeposit`: "The fee note's value may be zero"), and the one
+ * a flush of four such deposits fills half its slots with.
  */
-export function depositPairs(P: Poseidon, J: Jubjub, count: number): LeafWitness[] {
+export function depositPairs(P: Poseidon, count: number): LeafWitness[] {
     return Array.from({ length: count }, (_, i) =>
         i % 2 === 0
-            ? seededLeaf(P, J, i, 1)
-            : seededLeaf(P, J, i, 1, 0n, 0n));
+            ? seededLeaf(P, i, 1)
+            : seededLeaf(P, i, 1, 0n, 0n));
 }
 
 /**
- * The builders above with the gadgets bound, for suites that hold a `P` and `J`
- * for their whole run. Mirrors `lib/transact.ts :: TxBuilder`.
+ * The builders above with the hash bound, for suites that hold a `P` for their
+ * whole run. Mirrors `lib/transact.ts :: TxBuilder`.
  */
 export class BatchBuilder {
-    constructor(public readonly P: Poseidon, public readonly J: Jubjub) {}
+    constructor(public readonly P: Poseidon) {}
 
     /** `simpleLeaf`: only the discriminating fields, the rest fixed. */
     leaf(opts: { val: Field; isDeposit: 0 | 1; asset?: Field; pk?: Field }): LeafWitness {
-        return simpleLeaf({ P: this.P, J: this.J, ...opts });
+        return simpleLeaf({ P: this.P, ...opts });
     }
 
     /** `buildLeafWitness`: every field chosen. */
-    leafWith(opts: Omit<Parameters<typeof buildLeafWitness>[0], "P" | "J">): LeafWitness {
-        return buildLeafWitness({ P: this.P, J: this.J, ...opts });
+    leafWith(opts: Omit<Parameters<typeof buildLeafWitness>[0], "P">): LeafWitness {
+        return buildLeafWitness({ P: this.P, ...opts });
     }
 
     /** `seededLeaf`: k distinct leaves from k seeds. */
     seeded(seed: number, isDeposit: 0 | 1, val?: Field, asset?: Field): LeafWitness {
-        return seededLeaf(this.P, this.J, seed, isDeposit, val, asset);
+        return seededLeaf(this.P, seed, isDeposit, val, asset);
     }
 
     /** `count` seeded leaves, seeds `0..count-1`, deposit flag per slot. */
@@ -286,7 +293,7 @@ export class BatchBuilder {
 
     /** `depositPairs`: principal/fee pairs as a flush emits them. */
     depositPairs(count: number): LeafWitness[] {
-        return depositPairs(this.P, this.J, count);
+        return depositPairs(this.P, count);
     }
 }
 
@@ -296,9 +303,9 @@ export class BatchBuilder {
  * One field a batch's calldata can declare differently from the witness proved
  * against it.
  *
- * Each is a coefficient, so the circuit's own `y` detects the divergence. The
- * cases fail if any of these fields becomes challenge-only, where nothing would
- * detect it.
+ * Each is a coefficient, so the circuit's own `y` or `digest` detects the
+ * divergence. The cases fail if any of these fields becomes challenge-only,
+ * where nothing would detect it.
  */
 export interface DivergenceCase {
     /** The per-leaf field, as named in the circom and in the vector. */
@@ -311,6 +318,5 @@ export const DIVERGENCE_CASES: readonly DivergenceCase[] = [
     { field: "leaf_asset",     diverge: c => { c.leafAsset[0] = 42n; } },
     { field: "leaf_public_in", diverge: c => { c.leafPublicIn[0] = 1n; } },
     { field: "is_deposit",     diverge: c => { c.isDeposit[0] = 0; } },
-    { field: "cm",             diverge: c => { c.cms[0] = c.cms[0] + 1n; } },
-    { field: "cv_dep_x",       diverge: c => { c.cvDep[0] = [c.cvDep[0][0] + 1n, c.cvDep[0][1]]; } },
+    { field: "cms",            diverge: c => { c.cms[0] = c.cms[0] + 1n; } },
 ];

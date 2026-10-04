@@ -8,6 +8,12 @@ include "tags.circom";
 // Key hierarchy:
 //   nsk → ivk = Poseidon(TAG_IVK, nsk) → pk = Poseidon(TAG_PK, ivk)
 //       → nk  = Poseidon(TAG_NK, nsk)
+//
+// Note commitment, in two steps:
+//   inner = Poseidon(TAG_INNER, pk, rho, rcm)
+//   cm    = Poseidon(TAG_CM, asset_id·2^64 + value, inner)
+// The tree leaf is cm itself.
+//
 // nf = Poseidon(TAG_NF, nk, rho, cm).
 
 template DeriveIvk() {
@@ -44,27 +50,53 @@ template DerivePk() {
     pk <== h.out;
 }
 
-// cm = Poseidon(packed_av, owner_pk, rho, rcm), packed_av = asset_id·2^64 + value.
+// inner = Poseidon(TAG_INNER, owner_pk, rho, rcm): the half of a note that
+// stays private on every path.
 //
-// No leading tag: callers enforce asset_id != 0, so packed_av >= 2^64 and cm
-// cannot collide with TAG_MERKLE (5) or TAG_LEAF (10) preimages, whose first
-// field element is a small constant.
-template NoteCommitment() {
-    signal input asset_id;
-    signal input value;
+// A deposit publishes `inner` beside its public (asset, value) and
+// tree_update_batch hashes the three into the leaf, so the deposit path binds
+// the leaf without opening the note. rcm is the hiding randomness: it is the
+// only thing keeping owner_pk out of a published `inner`, and the only thing
+// keeping (asset, value) out of a spend's published cm, because an output's rho
+// is publicly derivable (DeriveRho).
+template NoteInner() {
     signal input owner_pk;
     signal input rho;
     signal input rcm;
+    signal output inner;
+
+    component h = Poseidon(4);
+    var tag = TAG_INNER();
+    h.inputs[0] <== tag;
+    h.inputs[1] <== owner_pk;
+    h.inputs[2] <== rho;
+    h.inputs[3] <== rcm;
+    inner <== h.out;
+}
+
+// cm = Poseidon(TAG_CM, packed_av, inner), packed_av = asset_id·2^64 + value.
+//
+// Precondition (soundness-critical): the caller must range-check both asset_id
+// and value to 64 bits. The packing is injective only under those bounds, and
+// the injectivity is what binds a leaf to one (asset, value): SpentNote and
+// OutputNote check both, and tree_update_batch checks both on a deposit leaf.
+//
+// The leading tag separates this site from DeriveRho, the only other arity-3
+// hash in the circuits.
+template NoteCommitment() {
+    signal input asset_id;
+    signal input value;
+    signal input inner;
     signal output cm;
 
     signal packed_av;
     packed_av <== asset_id * POW_2_64() + value;
 
-    component h = Poseidon(4);
-    h.inputs[0] <== packed_av;
-    h.inputs[1] <== owner_pk;
-    h.inputs[2] <== rho;
-    h.inputs[3] <== rcm;
+    component h = Poseidon(3);
+    var tag = TAG_CM();
+    h.inputs[0] <== tag;
+    h.inputs[1] <== packed_av;
+    h.inputs[2] <== inner;
     cm <== h.out;
 }
 
@@ -94,6 +126,10 @@ template DeriveRho() {
 // the transact path, but the deposit path does not constrain rho and output rho
 // is publicly derivable from nullifier[0], so a deposit could create a note
 // with a colliding rho for another owner. Binding cm covers every inserter.
+//
+// Two leaves with the same cm still share a nullifier. That takes a deposit
+// repeating an earlier (asset, value, inner) exactly, and the second leaf is
+// then unspendable at the depositor's own cost; a wallet must count a cm once.
 template Nullifier() {
     signal input nk;
     signal input rho;

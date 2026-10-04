@@ -7,39 +7,11 @@
 // rather than a type error. Conversion goes through `F.e()` and `F.toObject()`,
 // and the public API accepts and returns only `bigint` and `[bigint, bigint]`.
 //
-// Scalars are not reduced, matching the circuit: `MulH` is Num2Bits(252) +
-// FixedBaseMul (not circomlib's EscalarMulFix; see src/lib/fixed_base_mul.circom)
-// and `ValueScalarMul` is EscalarMulAny(64) over raw bits. Reduction would
-// diverge for points outside the prime-order subgroup; the bit widths those
-// Num2Bits calls enforce are asserted instead.
+// No circuit uses the curve. It remains for the FMD clue reference (./fmd.ts),
+// which is computed off-circuit and bound through the Fiat-Shamir challenge.
 
-import { buildBabyjub, buildPedersenHash } from "circomlibjs";
-import { BABYJUB_SUBGROUP_ORDER, BN254_FR, POW_2_64, mod, type Field, type Point } from "./field.js";
-import { toLeBytes } from "./bytes.js";
-import { TAG_ASSET } from "./tags.js";
-
-/**
- * Fixed independent generator for value-commitment blinding:
- *   cv = value·gen + rcv·H
- * Must equal H_BASE_X() / H_BASE_Y() in src/lib/value_commit.circom.
- */
-export const H_BASE: Point = [
-    5802099305472655231388284418920769829666717045250560929368476121199858275951n,
-    5980429700218124965372158798884772646841287887664001482443826541541529227896n,
-];
-
-/** Width of the `rcv` scalar, mirroring `RCV_BITS()` in src/lib/value_commit.circom. */
-const MAX_BLINDER_BITS = 252n;
-
-/**
- * `−(x, y) = (−x, y)`, the twisted Edwards negation.
- *
- * Coordinates live in the BN254 scalar field, the same modulus the circuit's
- * signals reduce by, so this is the negation `PointSum` cancels against.
- */
-export function negatePoint(p: Point): Point {
-    return [mod(-p[0], BN254_FR), p[1]];
-}
+import { buildBabyjub } from "circomlibjs";
+import { BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./field.js";
 
 function assertBigint(x: unknown, what: string): asserts x is bigint {
     if (typeof x !== "bigint") {
@@ -58,14 +30,13 @@ function assertPoint(p: Point, what: string): void {
 export class Jubjub {
     private constructor(
         private readonly bj: any,
-        private readonly pedersen: any,
         private readonly _base8: Point,
     ) {}
 
     static async build(): Promise<Jubjub> {
-        const [bj, pedersen] = await Promise.all([buildBabyjub(), buildPedersenHash()]);
+        const bj = await buildBabyjub();
         const base8: Point = [bj.F.toObject(bj.Base8[0]), bj.F.toObject(bj.Base8[1])];
-        return new Jubjub(bj, pedersen, base8);
+        return new Jubjub(bj, base8);
     }
 
     get base8(): Point {
@@ -114,75 +85,5 @@ export class Jubjub {
     unpackPoint(buf: Uint8Array): Point | null {
         const out = this.bj.unpackPoint(buf);
         return out ? this.fromInternal(out) : null;
-    }
-
-    // ===== circuit gadget mirrors =====
-
-    /**
-     * Per-asset generator V^t = Pedersen(TAG_ASSET || asset_id_LE_64).
-     * Mirrors HashToAssetGen in src/lib/asset_gen.circom, whose header states
-     * the equivalence to circomlibjs `pedersen.hash([TAG_ASSET, ...assetId_LE_8])`.
-     *
-     * The buffer is 9 bytes and circomlibjs reads bits LSB-first within each
-     * byte, matching the circom's `(TAG >> i) & 1` followed by
-     * `Num2Bits(64).out[i]`.
-     */
-    hashToAssetGen(assetId: Field): Point {
-        assertBigint(assetId, "hashToAssetGen assetId");
-        if (assetId >= POW_2_64) {
-            throw new Error("asset_id must be < 2^64 for HashToAssetGen parity");
-        }
-        const buf = new Uint8Array(9);
-        buf[0] = Number(TAG_ASSET);
-        buf.set(toLeBytes(assetId, 8), 1);
-        const pt = this.bj.unpackPoint(this.pedersen.hash(buf));
-        if (!pt) throw new Error("hashToAssetGen: pedersen output did not unpack");
-        return this.fromInternal(pt);
-    }
-
-    /**
-     * cv = value·gen + rcv·H.
-     *
-     * Bounds mirror the circuit: `value` goes through EscalarMulAny(64) and
-     * `rcv` through Num2Bits(252); wider values are not representable in a
-     * witness.
-     */
-    valueCommit(value: Field, assetGen: Point, rcv: Field): Point {
-        assertBigint(value, "valueCommit value");
-        assertBigint(rcv, "valueCommit rcv");
-        if (value >= POW_2_64) throw new Error("valueCommit: value must be < 2^64");
-        if (rcv >= 1n << MAX_BLINDER_BITS) throw new Error("valueCommit: rcv must be < 2^252");
-        return this.addPoint(
-            this.mulPointEscalar(assetGen, value),
-            this.mulPointEscalar(H_BASE, rcv),
-        );
-    }
-
-    /** `valueCommit` against the note's own generator: cv = value·V^asset + rcv·H. */
-    commit(asset: Field, value: Field, rcv: Field): Point {
-        return this.valueCommit(value, this.hashToAssetGen(asset), rcv);
-    }
-
-    /**
-     * The four points `ValueCommitPair` emits for one note: the spend
-     * commitment, the deposit anchor, and each one's blinding multiple.
-     *
-     * Mirrors ValueCommitPair in src/lib/value_commit.circom, where both
-     * commitments share a single value·V^asset scalar mul and differ only in
-     * their blinder.
-     */
-    commitPair(n: { asset: Field; value: Field; rcv: Field; rcvDep: Field }): {
-        cv: Point;
-        rH: Point;
-        cvDep: Point;
-        rHDep: Point;
-    } {
-        const gen = this.hashToAssetGen(n.asset);
-        return {
-            cv: this.valueCommit(n.value, gen, n.rcv),
-            rH: this.mulPointEscalar(H_BASE, n.rcv),
-            cvDep: this.valueCommit(n.value, gen, n.rcvDep),
-            rHDep: this.mulPointEscalar(H_BASE, n.rcvDep),
-        };
     }
 }

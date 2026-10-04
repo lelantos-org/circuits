@@ -3,8 +3,6 @@ pragma circom 2.2.3;
 include "spent.circom";
 include "output.circom";
 include "balance.circom";
-include "asset_gen.circom";
-include "value_commit.circom";
 include "poly_eval.circom";
 
 // MASP pool: N_IN-input x N_OUT-output multi-asset transact circuit.
@@ -15,20 +13,19 @@ include "poly_eval.circom";
 //   N_IN  — spent-note slots; unused slots are dummies.
 //   N_OUT — output-note slots; unused slots are value-0 notes to self.
 //
-// Per-note generator V^t = HashToAssetGen(asset_id); the transparent bucket uses
-// V^pub = HashToAssetGen(public_asset_id); cv = value·V^t + rcv·H.
-// PerAssetValueBalance enforces conservation; PerAssetPointBalance is defence in
-// depth (see balance.circom).
+// A note commits to its (asset_id, value) by hash (NoteCommitment), and
+// PerAssetValueBalance enforces conservation over asset ids as field elements.
+// There is no value commitment and no curve arithmetic.
 //
 // Per-slot constraints live in SpentNote and OutputNote; this template wires
 // them together.
 //
-// The verifier sees only the public signals (y, z), in that order, with
-// y = PolyEval(coeffs, z). The coefficient layout is TransactCompressN's and
-// must match PubInputs.sol.
+// The verifier sees only the public signals (y, digest, z), in that order,
+// with y = PolyEval(coeffs, z) and digest = CoeffDigest(coeffs). The coefficient
+// layout is TransactCompressN's and must match PubInputs.sol.
 //
-// Enforced here: in_asset, out_asset, public_asset_id, public_in and public_out
-// are all < 2^64.
+// Enforced here: in_asset, out_asset, public_asset_id, in_value, out_value and
+// public_out are all < 2^64, and public_asset_id == 0 whenever public_out == 0.
 //
 // Left to the contract: chain_id == block.chainid, recipient_address < 2^160,
 // each nullifier[i] unspent, and each out_cm[j] inserted into the commitment
@@ -42,21 +39,16 @@ include "poly_eval.circom";
 // altering any of them changes z and therefore y.
 template Transact(DEPTH, N_IN, N_OUT) {
     // ===== PUBLIC (verifier-visible) =====
-    signal input  z;   // Fiat-Shamir challenge.
-    signal output y;   // PolyEval(coeffs, z).
+    signal input  z;        // Fiat-Shamir challenge.
+    signal output y;        // PolyEval(coeffs, z).
+    signal output digest;   // CoeffDigest(coeffs); commits the witness before z.
 
     // ===== LOGICAL PUBLIC INPUTS (private signals, bound via PolyEval) =====
     signal input merkle_root;
     signal input nullifier[N_IN];
     signal input out_cm[N_OUT];
     signal input public_asset_id;
-    signal input public_in;
     signal input public_out;
-    signal input in_cv[N_IN][2];
-    signal input out_cv[N_OUT][2];
-
-    // Pins (asset, value) into the inserted leaf; forwarded to tree_update_batch.
-    signal input out_cv_dep[N_OUT][2];
 
     // ===== PRIVATE: spent notes =====
     signal input in_asset[N_IN];
@@ -65,8 +57,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
     signal input in_rho[N_IN];
     signal input in_rcm[N_IN];
     signal input in_nsk[N_IN];
-    signal input in_rcv[N_IN];
-    signal input in_rcv_dep[N_IN];
     signal input in_path_elements[N_IN][DEPTH][3];
     signal input in_path_indices[N_IN][DEPTH];
     signal input in_is_dummy[N_IN];
@@ -77,8 +67,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
     signal input out_pk[N_OUT];
     signal input out_rho[N_OUT];
     signal input out_rcm[N_OUT];
-    signal input out_rcv[N_OUT];
-    signal input out_rcv_dep[N_OUT];
 
     // ----- Spent-note slots -----
     component spent[N_IN];
@@ -92,8 +80,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
         spent[i].rho      <== in_rho[i];
         spent[i].rcm      <== in_rcm[i];
         spent[i].nsk      <== in_nsk[i];
-        spent[i].rcv      <== in_rcv[i];
-        spent[i].rcv_dep  <== in_rcv_dep[i];
         spent[i].is_dummy <== in_is_dummy[i];
         for (var d = 0; d < DEPTH; d++) {
             spent[i].path_elements[d][0] <== in_path_elements[i][d][0];
@@ -103,8 +89,6 @@ template Transact(DEPTH, N_IN, N_OUT) {
         }
         spent[i].root      <== merkle_root;
         spent[i].nullifier <== nullifier[i];
-        spent[i].cv[0]     <== in_cv[i][0];
-        spent[i].cv[1]     <== in_cv[i][1];
 
         // is_dummy == 1 ⇒ value == 0.
         in_dz.dummy[i] <== in_is_dummy[i];
@@ -114,15 +98,12 @@ template Transact(DEPTH, N_IN, N_OUT) {
     // At least one input slot must be real.
     //
     // MerkleProofOrDummy skips the root comparison on a dummy slot, so if every
-    // slot is a dummy, merkle_root is unconstrained: a PolyEval coefficient the
-    // prover could set freely to solve the compression equation. With one real
-    // slot the root is the output of a Poseidon chain, and matching a chosen
-    // value requires a second preimage.
+    // slot is a dummy, no spend constraint reads merkle_root. With one real slot
+    // the root is the output of a Poseidon chain over a note the prover owns.
     //
-    // This excludes no valid flow: MASP.withdraw and MASP.transfer require
-    // publicIn == 0, and shielding goes through the deposit escrow and
-    // tree_update_batch, so an all-dummy transact is a no-op with every output
-    // at value 0.
+    // This excludes no valid flow: shielding goes through the deposit escrow
+    // and tree_update_batch, so an all-dummy transact has nothing to spend and
+    // every output at value 0.
     //
     // DummyZeroValue booleanizes is_dummy, so the sum is in [0, N_IN] and a
     // single equality suffices.
@@ -154,29 +135,29 @@ template Transact(DEPTH, N_IN, N_OUT) {
         out_note[j].pk       <== out_pk[j];
         out_note[j].rho      <== out_rho[j];
         out_note[j].rcm      <== out_rcm[j];
-        out_note[j].rcv      <== out_rcv[j];
-        out_note[j].rcv_dep  <== out_rcv_dep[j];
         out_note[j].cm       <== out_cm[j];
-        out_note[j].cv[0]    <== out_cv[j][0];
-        out_note[j].cv[1]    <== out_cv[j][1];
-
-        out_cv_dep[j][0] === out_note[j].cv_dep[0];
-        out_cv_dep[j][1] === out_note[j].cv_dep[1];
     }
 
-    // ----- Transparent bucket: public_in / public_out as points on V^pub -----
-    component pub_gen = HashToAssetGen();
-    pub_gen.asset_id <== public_asset_id;
+    // ----- Transparent bucket -----
+    // Both words match a uint64 on chain, and public_out is a term of the
+    // conservation sums.
+    component rng_pub_asset = RangeCheck64();
+    rng_pub_asset.v <== public_asset_id;
 
-    component pub_in_mul = ValueTimesGen();
-    pub_in_mul.value  <== public_in;
-    pub_in_mul.gen[0] <== pub_gen.gen[0];
-    pub_in_mul.gen[1] <== pub_gen.gen[1];
+    component rng_pub_out = RangeCheck64();
+    rng_pub_out.v <== public_out;
 
-    component pub_out_mul = ValueTimesGen();
-    pub_out_mul.value  <== public_out;
-    pub_out_mul.gen[0] <== pub_gen.gen[0];
-    pub_out_mul.gen[1] <== pub_gen.gen[1];
+    // public_out == 0 ⇒ public_asset_id == 0: a transaction that withdraws
+    // nothing names no asset. Without this a shielded transfer would have to
+    // publish some asset id, and the natural choice is the one it moves.
+    //
+    // The converse needs no constraint. At public_asset_id == 0 the candidate
+    // check for id 0 reads Σ in_value[asset == 0] == Σ out_value[asset == 0]
+    // + public_out; outputs reject id 0 and a real input rejects it, so only
+    // dummies remain on the left, at value 0, and public_out == 0 follows.
+    component pub_out_z = IsZero();
+    pub_out_z.in <== public_out;
+    pub_out_z.out * public_asset_id === 0;
 
     // ----- Value conservation -----
     component vbal = PerAssetValueBalance(N_IN, N_OUT);
@@ -189,45 +170,20 @@ template Transact(DEPTH, N_IN, N_OUT) {
         vbal.out_value[j] <== out_value[j];
     }
     vbal.public_asset_id <== public_asset_id;
-    vbal.public_in       <== public_in;
     vbal.public_out      <== public_out;
 
-    component bal = PerAssetPointBalance(N_IN, N_OUT);
-    for (var i = 0; i < N_IN; i++) {
-        bal.in_cv[i][0] <== in_cv[i][0];
-        bal.in_cv[i][1] <== in_cv[i][1];
-        bal.in_rH[i][0] <== spent[i].rH[0];
-        bal.in_rH[i][1] <== spent[i].rH[1];
-    }
-    for (var j = 0; j < N_OUT; j++) {
-        bal.out_cv[j][0] <== out_cv[j][0];
-        bal.out_cv[j][1] <== out_cv[j][1];
-        bal.out_rH[j][0] <== out_note[j].rH[0];
-        bal.out_rH[j][1] <== out_note[j].rH[1];
-    }
-    bal.pub_in_pt[0]  <== pub_in_mul.out[0];
-    bal.pub_in_pt[1]  <== pub_in_mul.out[1];
-    bal.pub_out_pt[0] <== pub_out_mul.out[0];
-    bal.pub_out_pt[1] <== pub_out_mul.out[1];
-
-    // ----- Public-input compression → (y, z) -----
+    // ----- Public-input compression → (y, digest, z) -----
     component pe = TransactCompressN(N_IN, N_OUT);
     pe.z <== z;
     pe.merkle_root <== merkle_root;
     for (var i = 0; i < N_IN; i++) {
         pe.nullifier[i] <== nullifier[i];
-        pe.in_cv[i][0]  <== in_cv[i][0];
-        pe.in_cv[i][1]  <== in_cv[i][1];
     }
     for (var j = 0; j < N_OUT; j++) {
-        pe.out_cm[j]        <== out_cm[j];
-        pe.out_cv[j][0]     <== out_cv[j][0];
-        pe.out_cv[j][1]     <== out_cv[j][1];
-        pe.out_cv_dep[j][0] <== out_cv_dep[j][0];
-        pe.out_cv_dep[j][1] <== out_cv_dep[j][1];
+        pe.out_cm[j] <== out_cm[j];
     }
     pe.public_asset_id <== public_asset_id;
-    pe.public_in       <== public_in;
     pe.public_out      <== public_out;
     y <== pe.y;
+    digest <== pe.digest;
 }

@@ -12,7 +12,6 @@ import { fileURLToPath } from "node:url";
 import {
     BABYJUB_SUBGROUP_ORDER,
     BN254_FR,
-    H_BASE,
     Jubjub,
     MerkleTree,
     Poseidon,
@@ -26,7 +25,7 @@ export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), ".."
 const LEAN_EXPECTED = path.join(ROOT, "lean", "expected");
 
 /** Version tag carried by every published file; bump only on a shape change. */
-export const SCHEMA = "lelantos.circuits.vectors/1";
+export const SCHEMA = "lelantos.circuits.vectors/2";
 
 export const s = (x: Field | number | bigint): string => x.toString();
 export const pt = (p: Point) => ({ x: s(p[0]), y: s(p[1]) });
@@ -69,8 +68,9 @@ export function sharedConstants(P: Poseidon, J: Jubjub) {
     return {
         bn254Fr: s(BN254_FR),
         babyjubSubgroupOrder: s(BABYJUB_SUBGROUP_ORDER),
+        // The circuits use no curve. Base8 and the subgroup order remain for the
+        // FMD clue, which is computed off-circuit and bound through the challenge.
         babyjubBase8: pt(J.base8),
-        hBase: pt(H_BASE),
         tags: Object.fromEntries(Object.entries(TAGS).map(([k, v]) => [k, s(v)])),
         // depth+1 entries; also hardcoded as EMPTY_SUBTREE in src/lib/common.circom
         // and as CommitmentTree.EMPTY_ROOT (last entry) in the contracts repo.
@@ -84,18 +84,25 @@ export interface Compression {
      * The Fiat-Shamir preimage: every logical public input, in calldata order.
      * `z = keccak256(abiEncodedChallenge) mod r`.
      *
-     * A superset of `coeffs`. The four address words, the FMD clue triples and
-     * the payload digest are hashed but not evaluated: the circuit constrains
-     * none of them, and hashing binds them because changing any word changes
-     * `z`, and hence `y`.
+     * A superset of `coeffs`: the coefficients, then the digest word, then (for
+     * transact) the address words, the intent hash, the FMD clue triples and the
+     * payload digest. Nothing after the coefficients is evaluated. The circuit
+     * has no signal for the transact-only words; hashing binds them because
+     * changing any word changes `z`, which is a public signal.
      */
     challenge: string[];
     abiEncodedChallenge: string;
     /**
-     * The polynomial's coefficients: exactly the slots the circuit pins.
-     * `y = Σ coeffs[k]·z^k`.
+     * The polynomial's coefficients, `y = Σ coeffs[k]·z^k`: the circuit's
+     * coefficient signals. A leading run of `challenge`.
      */
     coeffs: string[];
+    /**
+     * `CoeffDigest(coeffs)`: the Poseidon(5) fold the circuit outputs as its
+     * second public signal. Calldata carries it as the word right after the
+     * coefficients; it is hashed into `z` and never evaluated into `y`.
+     */
+    digest: string;
     zDerivation: "fiat-shamir";
     z: string;
     y: string;

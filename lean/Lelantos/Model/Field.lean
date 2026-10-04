@@ -46,10 +46,10 @@ theorem seven_lt_p : 7 < p := by unfold p; norm_num
 modulo `p`. See `src/lib/balance.circom:11`. -/
 theorem two_pow_64_lt_p : 2 ^ 64 < p := by unfold p; norm_num
 
-/-- `2 ^ 66 < p`: `PerAssetValueBalance` sums at most `N_IN + 1` terms of size `< 2 ^ 64`
-per side, so a three-slot side is bounded by `4 · 2^64 = 2^66`. Used by the small
+/-- `2 ^ 66 < p`: `PerAssetValueBalance` sums at most `max(N_IN, N_OUT + 1)` terms of size
+`< 2 ^ 64` per side, so a three-slot side is bounded by `4 · 2^64 = 2^66`. Used by the small
 completeness shapes; `Transact(11, 4, 6)` needs `two_pow_67_lt_p` below. See
-`src/lib/balance.circom:75-79`. -/
+`src/lib/balance.circom:44-48`. -/
 theorem two_pow_66_lt_p : 2 ^ 66 < p := by unfold p; norm_num
 
 /-- `2 ^ 67 < p`: the same sum at the widest shape the repository instantiates,
@@ -62,12 +62,8 @@ theorem two_pow_67_lt_p : 2 ^ 67 < p := by unfold p; norm_num
 
 /-- `2 ^ 128 < p`: `NoteCommitment` packs `asset_id · 2^64 + value` into one field
 element, so with both fields 64-bit range-checked the packing is injective.
-See `src/lib/note.circom:59`. -/
+See `src/lib/note.circom:93`. -/
 theorem two_pow_128_lt_p : 2 ^ 128 < p := by unfold p; norm_num
-
-/-- `2 ^ 252 < p`: `MulH` decomposes its scalar with `Num2Bits(252)`, so that
-decomposition is also alias-free. See `src/lib/value_commit.circom:37`. -/
-theorem two_pow_252_lt_p : 2 ^ 252 < p := by unfold p; norm_num
 
 instance : NeZero p := ⟨by have := p_pos; omega⟩
 

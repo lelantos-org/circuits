@@ -150,6 +150,26 @@ export async function expectWitnessY(
     return witness;
 }
 
+/**
+ * `expectWitnessY`, and the circuit's second output equals `expectedDigest`.
+ *
+ * Both production circuits output `(y, digest)`: the evaluation, and the
+ * Poseidon commitment to the coefficients that the contract compares against
+ * the calldata digest word.
+ */
+export async function expectWitnessPublic(
+    circuit: CircuitTester,
+    input: CircuitInput,
+    expected: { y: Field; digest: Field },
+): Promise<bigint[]> {
+    const witness = await expectWitnessY(circuit, input, expected.y);
+    expect(readOutput(witness, 1).toString()).to.equal(
+        expected.digest.toString(),
+        "circuit digest must match the reference CoeffDigest",
+    );
+    return witness;
+}
+
 /** Generate the witness and check every constraint. */
 export async function expectAccepts(
     circuit: CircuitTester,
@@ -195,27 +215,28 @@ export async function witnessMatchesRoot(
  * Assert that a witness diverging from the calldata it is proved against cannot
  * be forged into a passing proof.
  *
- * The other assertions in this file derive `(y, z)` from the same object fed to
- * the circuit, so witness and calldata coincide by construction. A prover
- * supplies them separately: `z` comes from the contract's hash over calldata,
- * and the witness need not agree with it. An unpinned coefficient is exploitable
- * through that difference.
+ * The other assertions in this file derive the public signals from the same
+ * object fed to the circuit, so witness and calldata coincide by construction.
+ * A prover supplies them separately: `z` comes from the contract's hash over
+ * calldata, and the witness need not agree with it.
  *
- * `input.z` must already be the calldata challenge and `calldataY` the value the
- * contract compares against; see `lib/batch.ts :: bindFiatShamir`.
+ * `input.z` must already be the calldata challenge, and `calldata` the other two
+ * public signals the contract hands the verifier: its `y` over the calldata
+ * coefficients and the calldata digest word. See `lib/batch.ts ::
+ * bindFiatShamir`.
  *
  * The circuit is sound on this field if either:
  *   - a constraint rejects the divergent witness, or
- *   - it is admitted but yields `y != calldataY`, so the on-chain equality
- *     fails.
+ *   - it is admitted but outputs a `y` or a `digest` different from the
+ *     contract's, so the proof is for other public signals and fails.
  *
- * It is unsound if the witness is admitted and `y == calldataY`: the contract
+ * It is unsound if the witness is admitted and both outputs match: the contract
  * validated one set of values and the proof attests to another (a forgery).
  */
 export async function expectNotForgeable(
     circuit: CircuitTester,
     input: CircuitInput,
-    calldataY: Field,
+    calldata: { y: Field; digest: Field },
     field: string,
 ): Promise<void> {
     let witness: bigint[] | undefined;
@@ -237,17 +258,18 @@ export async function expectNotForgeable(
         return;
     }
 
-    const y = readOutput(witness!);
-    if (y === calldataY) {
+    const y = readOutput(witness!, 0);
+    const digest = readOutput(witness!, 1);
+    if (y === calldata.y && digest === calldata.digest) {
         throw new Error(
             `FORGERY: ${field} diverges from the calldata word it is proved against, yet the ` +
                 "circuit admitted the witness AND emitted the calldata's own y " +
-                `(${calldataY.toString()}).\n` +
+                `(${calldata.y.toString()}) and digest (${calldata.digest.toString()}).\n` +
                 "  The contract will therefore accept a proof attesting to values it never " +
-                "validated. This field is neither a PolyEval coefficient nor pinned by any " +
-                "constraint that reaches one — hashing it into z binds nothing, because the " +
-                "prover reads z before choosing the witness.\n" +
-                "  See src/README.md § 2a and BatchCompress in src/lib/poly_eval.circom.",
+                "validated. Either this field is not a coefficient, or it is not absorbed by " +
+                "the coefficient digest — hashing it into z binds nothing on its own, because " +
+                "the prover reads z before choosing the witness.\n" +
+                "  See src/README.md § 2a and src/lib/poly_eval.circom.",
         );
     }
 }

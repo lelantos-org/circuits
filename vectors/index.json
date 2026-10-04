@@ -1,16 +1,16 @@
 {
-  "schema": "lelantos.circuits.vectors/1",
-  "generator": "@lelantos-org/circuits@0.16.0",
+  "schema": "lelantos.circuits.vectors/2",
+  "generator": "@lelantos-org/circuits@0.17.0",
   "files": {
     "transact-4x6.json": {
-      "sha256": "8df0501741da0575e10c8ed54559cf9bf98251e881f94dbe3d073ab636b307be",
-      "coeffCount": 46,
-      "layoutDigest": "0x9020a342bf8baedc6d2171f2e8aa3a2794ba2d93f8525e17a9cbda5df9ad49d1"
+      "sha256": "57f4582ab1b8818075297e253a0282afe5d604447db5f171d1c94e4f60ffdfcf",
+      "coeffCount": 13,
+      "layoutDigest": "0x2a27471a7ff7bc19b44d7a7567edbe2c382dc1bea4e6e52b23bcab9349c96a9a"
     },
     "tree-update-batch-8.json": {
-      "sha256": "e6e563e5624127c68ff09d8a4fc7c8c60b9c1c4b5a4fc05a16939d87fd732c97",
-      "coeffCount": 52,
-      "layoutDigest": "0x25918d3250dcbe961be9a3958a3e0db9f8a7771992eddc26bbbd1e6a60f7a2df"
+      "sha256": "23b7d88fcbcd05747bc66f56f5463c2f015bd1c5d874cfd50052d6537b7916ed",
+      "coeffCount": 36,
+      "layoutDigest": "0x98865c4f5a08d35ef27c95dca2633f70993a881d7a6df573102919b0bce898ff"
     }
   }
 }

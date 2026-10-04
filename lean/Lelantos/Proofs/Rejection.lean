@@ -8,10 +8,6 @@ contrapositive, that families of malformed transactions have no satisfying assig
 all. Each result takes `TransactSat w` plus a description of the malformation and derives
 `False`, so it rules out a family rather than one hand-built counterexample. These are the
 Lean counterparts of the rejecting cases in `test/transact/`.
-
-`cross_asset_cancellation_rejected` shows that the assignment the Edwards point balance
-accepts (`Lelantos.pointBalance_not_sound`) has no satisfying assignment of the full system.
-Together they establish the defence-in-depth claim at `src/lib/balance.circom:34-41`.
 -/
 
 namespace Lelantos
@@ -21,9 +17,8 @@ variable {depth nIn nOut : ℕ} {w : TxWitness depth nIn nOut}
 /-- Conservation with the sums expanded, at the two-in/two-out shape. -/
 private theorem conservation_2x2 (h : TransactSat w) (hnIn : nIn = 2) (hnOut : nOut = 2)
     (a : F) :
-    w.publicIn.val * indN (w.publicAssetId = a)
-        + ((inValue w 0).val * indN (inAsset w 0 = a)
-          + (inValue w 1).val * indN (inAsset w 1 = a))
+    (inValue w 0).val * indN (inAsset w 0 = a)
+        + (inValue w 1).val * indN (inAsset w 1 = a)
       = w.publicOut.val * indN (w.publicAssetId = a)
         + ((outValue w 0).val * indN (outAsset w 0 = a)
           + (outValue w 1).val * indN (outAsset w 1 = a)) := by
@@ -32,70 +27,47 @@ private theorem conservation_2x2 (h : TransactSat w) (hnIn : nIn = 2) (hnOut : n
   unfold ConservesAtNat at hcons
   simpa [Finset.sum_range_succ, add_assoc] using hcons
 
-/-- `(1 : F)` reads back as the natural number `1`. -/
-private theorem val_one : (1 : F).val = 1 := by
-  have h1 : (1 : F) = ((1 : ℕ) : F) := by norm_num
-  rw [h1, ZMod.val_natCast_of_lt (by have := two_lt_p; omega)]
-
-private theorem zero_ne_one' : (0 : F) ≠ 1 :=
-  zero_ne_one
-
-private theorem two_ne_one' : (2 : F) ≠ 1 := by
-  simpa using natCast_ne_of_lt (m := 2) (n := 1) two_lt_p one_lt_p (by norm_num)
-
-private theorem three_ne_one' : (3 : F) ≠ 1 := by
-  simpa using natCast_ne_of_lt (m := 3) (n := 1)
-    (lt_trans (by norm_num) two_pow_64_lt_p) one_lt_p (by norm_num)
-
 /-! ## Value conservation -/
 
-/-- **Cross-asset cancellation is rejected.** One unit of asset `1` and one unit of asset
-`3` in, two units of asset `2` out, nothing public: this satisfies the Edwards point balance
-exactly, because `V¹ + V³ = 2·V²` (see `Lelantos.pointBalance_not_sound`). The per-asset
-value balance rejects it, because asset ids are compared as field elements rather than as
-curve points.
-
-This is the Lean counterpart of the `F2` case in `test/transact/multi_asset.test.ts`, and
-the reason for `PerAssetValueBalance`. -/
-theorem cross_asset_cancellation_rejected (h : TransactSat w)
-    (hnIn : nIn = 2) (hnOut : nOut = 2)
-    (hin0 : inAsset w 0 = 1) (hin1 : inAsset w 1 = 3)
-    (hv0 : inValue w 0 = 1)
-    (hout0 : outAsset w 0 = 2) (hout1 : outAsset w 1 = 2)
-    (hpub : w.publicAssetId = 0) : False := by
-  classical
-  have hcons := conservation_2x2 h hnIn hnOut 1
-  rw [hin0, hin1, hv0, hout0, hout1, hpub] at hcons
-  -- The public bucket sits at asset `0` and every output at asset `2`, so on the right every
-  -- indicator vanishes; on the left the asset-`1` input contributes one unit.
-  have e0 : indN ((0 : F) = 1) = 0 := if_neg zero_ne_one'
-  have e1 : indN ((1 : F) = 1) = 1 := if_pos rfl
-  have e2 : indN ((2 : F) = 1) = 0 := if_neg two_ne_one'
-  have e3 : indN ((3 : F) = 1) = 0 := if_neg three_ne_one'
-  rw [e0, e1, e2, e3, val_one] at hcons
-  omega
-
-/-- **Minting is rejected.** An asset that appears on no input slot and is not the public
-bucket's asset cannot leave the transaction with a non-zero value. -/
+/-- **Minting is rejected.** An asset that appears on no input slot cannot leave the
+transaction as a note with a non-zero value. -/
 theorem mint_from_nothing_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7)
-    {a : F} (hnotIn : ∀ i, i < nIn → inAsset w i ≠ a) (hnotPub : w.publicAssetId ≠ a)
+    {a : F} (hnotIn : ∀ i, i < nIn → inAsset w i ≠ a)
     {j : ℕ} (hj : j < nOut) (hja : outAsset w j = a) (hpos : outValue w j ≠ 0) : False :=
-  hpos (no_asset_creation hnIn hnOut h a hnotIn hnotPub j hj hja)
+  hpos (no_asset_creation hnIn hnOut h a hnotIn j hj hja)
 
-/-- **Inflation is rejected.** With a single asset `a` on both sides and no public bucket,
-the output total is exactly the input total; claiming more is impossible. -/
+/-- **Withdrawing an asset nobody spent is rejected.** -/
+theorem withdraw_from_nothing_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7)
+    (hnotIn : ∀ i, i < nIn → inAsset w i ≠ w.publicAssetId) (hpos : w.publicOut ≠ 0) : False :=
+  hpos (no_asset_withdrawal hnIn hnOut h hnotIn)
+
+/-- **Inflation is rejected.** With a single asset `a` on both sides, the output total is at
+most the input total; claiming more is impossible. The transparent bucket cannot help: it
+sits on the output side and only takes value out. -/
 theorem inflation_rejected (h : TransactSat w) (hnIn : nIn = 2) (hnOut : nOut = 2)
     {a : F} (hin0 : inAsset w 0 = a) (hin1 : inAsset w 1 = a)
-    (hout0 : outAsset w 0 = a) (hout1 : outAsset w 1 = a) (hpub : w.publicAssetId ≠ a)
+    (hout0 : outAsset w 0 = a) (hout1 : outAsset w 1 = a)
     (hgt : (inValue w 0).val + (inValue w 1).val
             < (outValue w 0).val + (outValue w 1).val) : False := by
   classical
   have hcons := conservation_2x2 h hnIn hnOut a
   rw [hin0, hin1, hout0, hout1] at hcons
   have esame : indN (a = a) = 1 := if_pos rfl
-  have epub : indN (w.publicAssetId = a) = 0 := if_neg hpub
-  rw [esame, epub] at hcons
+  rw [esame] at hcons
   omega
+
+/-! ## The transparent bucket -/
+
+/-- **A transfer that names an asset is rejected.** With nothing withdrawn, the bucket's
+asset id must be `0`, so a shielded transfer cannot be made to publish the asset it moves. -/
+theorem transfer_naming_asset_rejected (h : TransactSat w) (hout : w.publicOut = 0)
+    (hasset : w.publicAssetId ≠ 0) : False :=
+  hasset (publicBucket_zero_asset h hout)
+
+/-- **A withdrawal under asset id 0 is rejected.** Id `0` means "no asset". -/
+theorem withdraw_asset_zero_rejected (h : TransactSat w) (hasset : w.publicAssetId = 0)
+    (hout : w.publicOut ≠ 0) : False :=
+  hout (publicBucket_zero_out h hasset)
 
 /-! ## Structural malformations -/
 
@@ -107,8 +79,7 @@ theorem dummy_with_value_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (hnOut 
   hval ((transact_sound hnIn hnOut h).dummySlots i hi hdummy)
 
 /-- **A zero asset id on an output is rejected**, unconditionally — the check is not gated
-on a dummy flag, unlike the input side. This keeps `packed_av ≥ 2^64` and so keeps the
-commitment preimage separated from the tag-prefixed hashes. -/
+on a dummy flag, unlike the input side. -/
 theorem zero_asset_output_rejected (h : TransactSat w) (hnIn : nIn ≤ 7) (hnOut : nOut ≤ 7)
     {j : ℕ} (hj : j < nOut) (hzero : outAsset w j = 0) : False :=
   ((transact_sound hnIn hnOut h).outputs j hj).assetNonzero hzero
@@ -121,11 +92,46 @@ theorem oversized_value_rejected (h : TransactSat w) {i : ℕ} (hi : i < nIn)
   unfold inValue at hbig
   omega
 
+/-- **An out-of-range asset id is rejected on every input slot, dummies included.** The
+bound is unconditional because the packing inside `NoteCommitment` is injective only under
+it. -/
+theorem oversized_input_asset_rejected (h : TransactSat w) {i : ℕ} (hi : i < nIn)
+    (hbig : 2 ^ 64 ≤ (inAsset w i).val) : False := by
+  have hsmall := spentNote_assetRange (h.spent_sat i hi)
+  unfold inAsset at hbig
+  omega
+
+/-- **An out-of-range asset id is rejected on every output slot.** -/
+theorem oversized_output_asset_rejected (h : TransactSat w) {j : ℕ} (hj : j < nOut)
+    (hbig : 2 ^ 64 ≤ (outAsset w j).val) : False := by
+  have hsmall := (outputNote_sound (h.out_sat j hj)).assetRange
+  unfold outAsset at hbig
+  omega
+
+/-- **An out-of-range transparent bucket is rejected**, in either word. -/
+theorem oversized_public_rejected (h : TransactSat w)
+    (hbig : 2 ^ 64 ≤ w.publicAssetId.val ∨ 2 ^ 64 ≤ w.publicOut.val) : False := by
+  have ha := rangeCheck64_sound h.pub_asset_range
+  have ho := rangeCheck64_sound h.pub_out_range
+  omega
+
 /-- **A spent slot opened against a different root is rejected.** Every input is checked
 against the single advertised root, so a prover cannot mix trees within one transaction. -/
 theorem foreign_root_rejected (h : TransactSat w) {i : ℕ} (hi : i < nIn)
     (hne : (w.spent i).root ≠ w.merkleRoot) : False :=
   hne (h.spent_root i hi)
+
+/-- **A zero challenge is rejected.** At `z = 0` only the first coefficient would reach
+`y`. -/
+theorem zero_challenge_rejected (h : TransactSat w) (hz : w.z = 0) : False :=
+  polyEvalSat_z_ne_zero h.compress hz
+
+/-- **A public digest that is not the digest of the coefficients is rejected.** The
+prover cannot publish a `digest` for one coefficient vector and evaluate another into
+`y`. -/
+theorem wrong_digest_rejected (h : TransactSat w)
+    (hne : w.digest ≠ coeffDigest (txCoeffs w) (piCount nIn nOut)) : False :=
+  hne (transact_digest_public h)
 
 /-- **Two outputs sharing a `rho` are rejected**, so two notes of one transaction cannot
 share a future nullifier. Requires collision resistance, so it is stated against

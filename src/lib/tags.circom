@@ -5,17 +5,19 @@ pragma circom 2.2.3;
 //
 // | Tag         | Value | Use                                                  |
 // |-------------|-------|------------------------------------------------------|
-// | TAG_CM      | 1     | Reserved; NoteCommitment separates via packed_av.     |
+// | TAG_CM      | 1     | cm   = Poseidon(TAG_CM, packed_av, inner)             |
 // | TAG_NF      | 2     | nf   = Poseidon(TAG_NF, nk, rho, cm)                  |
 // | TAG_PK      | 3     | pk   = Poseidon(TAG_PK, ivk)                          |
 // | TAG_IVK     | 4     | ivk  = Poseidon(TAG_IVK, nsk)                         |
 // | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)                   |
 // | TAG_DK      | 6     | dk   = Poseidon(TAG_DK, ivk)          (off-circuit)   |
-// | TAG_ASSET   | 7     | V^t  = Pedersen(TAG_ASSET || asset_id_bits)           |
+// | TAG_ASSET   | 7     | Retired (Pedersen asset generator). Never reuse.      |
 // | TAG_FMD_BIT | 8     | FMD bit derivation, Poseidon(6)       (off-circuit)   |
 // | TAG_NK      | 9     | nk   = Poseidon(TAG_NK, nsk)                          |
-// | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)     |
+// | TAG_LEAF    | 10    | Retired (the leaf is cm itself). Never reuse.         |
 // | TAG_RHO     | 11    | rho  = Poseidon(TAG_RHO, nullifier[0], out_index)     |
+// | TAG_INNER   | 14    | inner = Poseidon(TAG_INNER, pk, rho, rcm)             |
+// | TAG_DIGEST  | 15    | first block of the coefficient digest, Poseidon(5)    |
 //
 // Reserved off-circuit, defined only in sdk/src/crypto/tags.ts. Listed here so
 // the value space stays single-sourced and a new in-circuit tag cannot collide:
@@ -33,11 +35,11 @@ function TAG_PK()     { return 3; }
 function TAG_IVK()    { return 4; }
 function TAG_MERKLE() { return 5; }
 function TAG_DK()     { return 6; }
-function TAG_ASSET()  { return 7; }
 function TAG_FMD_BIT(){ return 8; }
 function TAG_NK()     { return 9; }
-function TAG_LEAF()   { return 10; }
 function TAG_RHO()    { return 11; }
+function TAG_INNER()  { return 14; }
+function TAG_DIGEST() { return 15; }
 
 // 2^64 — the shift used to pack asset_id||value in NoteCommitment.
 function POW_2_64()   { return 18446744073709551616; }

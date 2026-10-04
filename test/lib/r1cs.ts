@@ -104,7 +104,7 @@ export interface R1csView {
  *
  * The occurrence index makes a full sweep affordable. Changing one witness entry
  * can only affect constraints that mention it, so re-checking a single-signal
- * mutation costs `deg(signal)` constraint evaluations rather than all ~100k.
+ * mutation costs `deg(signal)` constraint evaluations rather than all ~70k.
  * Summed over every signal, that is one pass over the non-zeros.
  */
 export async function loadR1cs(r1csPath: string): Promise<R1csView> {

@@ -31,10 +31,25 @@ Modelling the arguments as a `List` rather than a fixed arity also gives cross-a
 separation. This matches circom, which instantiates `Poseidon(3)` and `Poseidon(4)` as
 distinct permutations.
 
+## Arities in use
+
+| Arity | Sites |
+|---|---|
+| 2 | `DeriveIvk`, `DeriveNk`, `DerivePk` |
+| 3 | `NoteCommitment` (`TAG_CM`), `DeriveRho` (`TAG_RHO`) |
+| 4 | `NoteInner` (`TAG_INNER`), `Nullifier` (`TAG_NF`) |
+| 5 | `MerkleLevel4` and `BatchAppend` nodes (`TAG_MERKLE`), `CoeffDigest` blocks (`TAG_DIGEST` on block 0, the previous block's output on the rest) |
+
+Every same-arity pair of sites leads with a different tag, except the later blocks of
+`CoeffDigest`, which lead with a hash output. Separating those from a Merkle node is not a
+collision-resistance statement and is not claimed anywhere in this development.
+
 ## Tags
 
-Mirrors `src/lib/tags.circom:19-31`. These must stay byte-identical to
+Mirrors `src/lib/tags.circom:32-42`. These must stay byte-identical to
 `sdk/src/crypto/tags.ts`; changing any value invalidates every previously issued proof.
+Values 7 (the retired Pedersen asset generator) and 10 (the retired leaf hash) have no
+definition here, as they have none in the circom, and must not be reused.
 -/
 
 namespace Lelantos
@@ -70,18 +85,26 @@ theorem poseidon_collision : PoseidonCollision := by
 
 /-! ## Domain-separation tags (`src/lib/tags.circom`) -/
 
-/-- Reserved; `NoteCommitment` uses the packed `asset_id · 2^64 + value` field instead. -/
+/-- `cm = Poseidon(TAG_CM, packed_av, inner)`. -/
 def TAG_CM : F := 1
 def TAG_NF : F := 2
 def TAG_PK : F := 3
 def TAG_IVK : F := 4
 def TAG_MERKLE : F := 5
 def TAG_DK : F := 6
-def TAG_ASSET : F := 7
 def TAG_FMD_BIT : F := 8
 def TAG_NK : F := 9
-def TAG_LEAF : F := 10
 def TAG_RHO : F := 11
+/-- `inner = Poseidon(TAG_INNER, pk, rho, rcm)`. -/
+def TAG_INNER : F := 14
+/-- Leads block 0 of the coefficient digest (`CoeffDigest`, `src/lib/poly_eval.circom:60`). -/
+def TAG_DIGEST : F := 15
+
+/-- Two small tag values are different field elements. Used by the same-arity separation
+lemmas, where the two preimages differ only in their leading tag. -/
+theorem tag_ne {m n : ℕ} (hm : m < 2 ^ 64) (hn : n < 2 ^ 64) (h : m ≠ n) :
+    ((m : ℕ) : F) ≠ ((n : ℕ) : F) :=
+  natCast_ne_of_lt (lt_trans hm two_pow_64_lt_p) (lt_trans hn two_pow_64_lt_p) h
 
 /-- `POW_2_64`, the shift used to pack `(asset_id, value)` into one field element. -/
 def POW_2_64 : F := 18446744073709551616

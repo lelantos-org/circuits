@@ -45,9 +45,11 @@ The two are **ceremony-paired**. A spend emits `N_OUT = 6` leaves that the batch
 circuit inserts, so they share `DEPTH = 11` and cannot be mixed across versions.
 `MAX_L = 8` rather than 6 because `COUNT_BITS` requires a power of two.
 
-Each circuit has exactly one public input, the Fiat-Shamir challenge `z`, and
-one public output, `y`. circom orders main outputs before main public inputs, so
-the generated verifier takes `_pubSignals = [y, z]`, in that order.
+Each circuit has one public input, the Fiat-Shamir challenge `z`, and two public
+outputs: `y`, the evaluation of its coefficients at `z`, and `digest`, a
+Poseidon commitment to those coefficients. circom orders main outputs before
+main public inputs, so the generated verifier takes
+`_pubSignals = [y, digest, z]`, in that order.
 
 ### Constraint counts
 
@@ -55,40 +57,53 @@ R1CS totals on BN254 (`snarkjs r1cs info`):
 
 | Circuit | Constraints | Wires | Private inputs |
 |---|---:|---:|---:|
-| `Transact(11, 4, 6)` | 100,320 | 100,473 | 323 |
-| `TreeUpdateBatch(11, 8)` | 55,190 | 55,103 | 93 |
+| `Transact(11, 4, 6)` | 69,291 | 69,422 | 247 |
+| `TreeUpdateBatch(11, 8)` | 41,521 | 41,466 | 69 |
 
 snarkjs sizes the FFT domain from `nConstraints + nPubInputs + nOutputs` and
-requires the sum to be at most `domain - 1`, so with one public input and one
-public output the ceiling on the constraint count is `domain - 3`. `Transact`
-sits in **2^17** (ceiling 131,069) and clears it by 30,765. `TreeUpdateBatch`
-sits in **2^16** (ceiling 65,533) and clears it by 10,343. `just budget` pins
+requires the sum to be at most `domain - 1`, so with one public input and two
+public outputs the ceiling on the constraint count is `domain - 4`. `Transact`
+sits in **2^17** (ceiling 131,068) and clears it by 61,777. `TreeUpdateBatch`
+sits in **2^16** (ceiling 65,532) and clears it by 24,011. `just budget` pins
 both to their exact counts and domains in [budget.json](budget.json), so growth
 lands as a reviewable diff rather than a silent doubling of proving time.
 
 The two share a tree depth but not a ptau. `TreeUpdateBatch` inserts its leaves
 in one batched build, so its tree work grows with depth rather than leaf count:
-a depth level costs 2,534 constraints and a leaf slot 3,626. 2^16 therefore
-holds through depth 15 at `MAX_L = 8`; `MAX_L = 16` (84,199) would need 2^17.
+a depth level costs 2,534 constraints and a leaf slot about 1,800. 2^16 therefore
+holds through depth 20 at `MAX_L = 8`, and through `MAX_L = 16` (56,026) at
+depth 11.
 
-## Asset id registration
+## What the circuits bind, in brief
 
-A deposit leaf is pinned only by the Pedersen equality
+A note commits to its asset and value by hash:
 
 ```
-cv_dep == leaf_public_in · V^leaf_asset + rcv · H
+inner = Poseidon(TAG_INNER, pk, rho, rcm)
+cm    = Poseidon(TAG_CM, asset_id · 2^64 + value, inner)
 ```
 
-and every asset generator is a known multiple `m(a) · BASE0` of one base. The
-equality therefore fixes the product `value · m(asset)`, not the pair, so two
-registered ids whose multipliers share a large factor admit a deposit paid in
-one asset and spent as another.
+and `cm` is the commitment-tree leaf. There are no value commitments and no
+curve arithmetic in either circuit.
 
-Run `just asset-ids <ids>` over an id set **before** registering it.
-`AssetRegistry.addAsset` accepts an arbitrary `uint64` and checks nothing here.
-Small sequential ids clear the bound by 18 bits or more; the risk is in
-hash-like ids. See the header of
-[src/tree_update_batch.circom](src/tree_update_batch.circom).
+- A **spend** opens `cm` from the note and proves it is in the tree, so it can
+  claim only the asset and value the leaf was inserted for.
+- A **deposit** publishes `inner` beside its public asset and amount, and
+  `TreeUpdateBatch` hashes the three into the leaf. The binding holds for any
+  set of registered asset ids; id `0` is reserved for "no asset" and must not be
+  registered.
+- A **transfer** publishes no asset id: `public_asset_id` is `0` unless
+  something is withdrawn.
+- Each circuit outputs a Poseidon **digest** of its coefficients as a public
+  signal, and calldata carries the same word. The contract hashes it into `z`
+  and passes it to the verifier, which commits the witness before the challenge
+  exists; that is what makes the compression bind the proof to the calldata. A
+  consumer must hash that word, must not evaluate it, and never recomputes it.
+  See [src/README.md § 2a](src/README.md#2a-public-input-compression).
+
+On a deposit slot the calldata word is `inner`, not the leaf. A consumer that
+rebuilds the tree must compute the leaf; `vectors/tree-update-batch-8.json`
+publishes both per slot.
 
 ## Formal verification
 
@@ -100,24 +115,31 @@ under-constrained-signal class a test suite cannot reach.
 Headline results:
 
 - Per-asset value conservation holds for every asset id, as an exact integer
-  equation over the naturals.
-- Two distinct public-input vectors collide on at most 68 Fiat-Shamir
-  challenges out of `p ≈ 2^253.6`.
-- The Edwards point balance is proved **not** to be a conservation check, so
-  nothing can re-derive one from it.
+  equation over the naturals. The transparent bucket is output-side only, so an
+  asset on no input can be neither created nor withdrawn.
+- `public_out = 0` exactly when `public_asset_id = 0`: the constrained direction
+  and the one that follows from balance.
+- Under Poseidon collision resistance, a circuit's public digest determines its
+  whole coefficient vector; and two distinct coefficient vectors agree at no
+  more than 12 challenges for transact, 35 for the batch. Those are the two
+  ingredients of the calldata-binding argument.
+- A deposit leaf has one `(asset, value, inner)` opening, and a spend that opens
+  it spends exactly that amount of that asset.
 - `TreeUpdateBatch` advances the root by exactly `actual_count` appends, for any
   count.
 
-Conservation and the PolyEval binding assume only that the BN254 scalar field is
+Conservation and the PolyEval results assume only that the BN254 scalar field is
 prime, and nothing about Poseidon. Collision resistance is an explicit
 hypothesis, never an axiom, and a build-time guard rejects any axiom outside
-[lean/expected/axioms.txt](lean/expected/axioms.txt). Every soundness result is
-paired with a satisfying assignment, so none is vacuous.
+[lean/expected/axioms.txt](lean/expected/axioms.txt); with the curve gone, the
+trusted base is primality of the field. Every soundness result is paired with a
+satisfying assignment, so none is vacuous.
 
-Not covered: the `BabyCheck` on `cv_dep`, uniqueness of a
-deposit leaf's opening (see *Asset id registration*), the `EMPTY_SUBTREE`
-constants (the batch result assumes they form the empty-subtree chain, which
-`test/gadgets/merkle.test.ts` checks numerically), and the model-to-source
+Not covered: the step that joins those two ingredients, the standard
+random-oracle argument for a challenge hashed after a commitment, which is not
+formalised; the `EMPTY_SUBTREE` constants (the batch
+result assumes they form the empty-subtree chain, which
+`test/gadgets/merkle.test.ts` checks numerically); and the model-to-source
 correspondence, which is a hand-maintained table. See
 [lean/README.md](lean/README.md) § *What is not proved*.
 
@@ -167,7 +189,7 @@ search reduces to one question — given a direction `v`, which steps `t` keep
 `w + t·v` satisfying? — which each constraint answers exactly, as a quadratic in
 `t` whose constant term vanishes because `w` is honest.
 
-- **Single-signal**: the unit vectors, so all ~100k witness entries, each decided
+- **Single-signal**: the unit vectors, so all ~70k witness entries, each decided
   exactly with everything else held fixed.
 - **Multi-signal**: the null space of the Jacobian restricted to each gadget and
   each constraint. A null vector is a direction whose first-order effect cancels

@@ -1,10 +1,8 @@
-// Per-asset conservation (Sapling-style).
+// Per-asset conservation.
 //
-// Balance is checked as an Edwards point sum, so each asset has its own
-// generator V^asset = Pedersen(TAG_ASSET || asset_id_bits) and conservation
-// holds per asset rather than over scalar totals.
-
-import { expect } from "chai";
+// PerAssetValueBalance compares asset ids as field elements and sums values per
+// id, so conservation holds per asset rather than over scalar totals, and an
+// asset can only cancel against itself.
 
 import { expectAccepts, expectWitnessFails } from "../lib/expect";
 import { ALICE_NSK, BOB_NSK, TIMEOUT_CIRCUIT } from "../lib/constants";
@@ -50,7 +48,7 @@ describe("transact_4x6 / multi-asset", function () {
         await expectWitnessFails(circuit, tx.spend(
             mixedInputs(80n, 120n),
             [tx.note(120n, ALICE_NSK, 9n, ASSET), tx.note(80n, ALICE_NSK, 11n, ASSET_B)],
-        ), "scalar totals matching must not satisfy the per-asset point balance");
+        ), "scalar totals matching must not satisfy per-asset conservation");
     });
 
     it("FAILS when an output asset is swapped for one of equal total value", async () => {
@@ -62,34 +60,23 @@ describe("transact_4x6 / multi-asset", function () {
         ), "an output asset swap must not balance");
     });
 
-    // ===== cross-asset cancellation via the asset-generator DL =====
+    // ===== cross-asset combination =====
     //
-    // HashToAssetGen is circomlib Pedersen over 72 bits, so it is a single
-    // segment and V^a = m(a)·BASE[0] for a publicly computable m(·). m is affine
-    // in the low nibbles of asset_id, so m(1) + m(3) == 2·m(2) exactly, and the
-    // Edwards point balance is satisfied by spending X of asset 1 plus X of
-    // asset 3 to mint 2X of asset 2. PerAssetValueBalance rejects this by
-    // comparing assets as field elements rather than as points.
-    it("FAILS on cross-asset cancellation V^1 + V^3 == 2·V^2", async () => {
+    // X of asset 1 plus X of asset 3 against 2X of asset 2. Under the Pedersen
+    // value commitments this circuit used to carry, the three generators were
+    // known multiples of one base with m(1) + m(3) == 2·m(2), so a point-sum
+    // balance accepted it. Asset ids are compared as field elements here, so no
+    // linear relation between ids balances anything; kept as the regression for
+    // that class.
+    it("FAILS on a cross-asset combination: X of 1 and X of 3 for 2X of 2", async () => {
         const { tx, circuit } = ctx;
         const X = 1000n;
         const spent = tx.plant([tx.note(X, ALICE_NSK, 1n, 1n), tx.note(X, ALICE_NSK, 2n, 3n)], ALICE_NSK);
 
-        // Confirms the point balance is satisfied by the forgery, so the
-        // rejection below is attributable to the per-asset check rather than to
-        // a malformed witness.
-        const J = tx.J;
-        const lhs = J.addPoint(
-            J.mulPointEscalar(J.hashToAssetGen(1n), X),
-            J.mulPointEscalar(J.hashToAssetGen(3n), X),
-        );
-        const rhs = J.mulPointEscalar(J.hashToAssetGen(2n), 2n * X);
-        expect(lhs).to.deep.equal(rhs);
-
         await expectWitnessFails(circuit, tx.spend(
             spent,
             [tx.note(2n * X, ALICE_NSK, 9n, 2n), tx.note(0n, ALICE_NSK, 11n, 2n)],
-        ), "PerAssetValueBalance must reject a point-balanced cross-asset forgery");
+        ), "PerAssetValueBalance must reject value moving between asset ids");
     });
 
     // ===== every slot a different asset =====
@@ -149,7 +136,7 @@ describe("transact_4x6 / multi-asset", function () {
         it("FAILS when two assets are exchanged one for the other", async () => {
             // Outputs swap the labels of assets 102 (50) and 103 (30) while
             // keeping their values, so both rows are off by 20 in opposite
-            // directions and the point balance is untouched.
+            // directions and the scalar total is untouched.
             const outputs = MULTI_ASSET_OUT.map(([asset, value]) =>
                 asset === 102n ? [103n, value] as const :
                 asset === 103n ? [102n, value] as const :
@@ -161,28 +148,39 @@ describe("transact_4x6 / multi-asset", function () {
             );
         });
 
-        it("accepts a deposit into one of the four assets", async () => {
+        it("accepts a withdrawal from one of the four assets", async () => {
             // The public candidate row is no longer the orphan 0 == 0: it
-            // carries asset 101, whose outputs must absorb the extra 5.
+            // carries asset 101, whose outputs give up the 5 withdrawn.
             const outputs = MULTI_ASSET_OUT.map(([asset, value], j) =>
-                j === 0 ? [asset, value + 5n] as const : [asset, value] as const);
+                j === 0 ? [asset, value - 5n] as const : [asset, value] as const);
             await expectAccepts(ctx.circuit, shaped(MULTI_ASSET_IN, outputs, {
                 publicAssetId: 101n,
-                publicIn: 5n,
+                publicOut: 5n,
             }));
         });
 
-        it("FAILS when a deposit is claimed but no output absorbs it", async () => {
+        it("FAILS when a withdrawal is claimed but no output gives it up", async () => {
             await expectWitnessFails(
                 ctx.circuit,
-                shaped(MULTI_ASSET_IN, MULTI_ASSET_OUT, { publicAssetId: 101n, publicIn: 5n }),
-                "public_in must be absorbed by outputs of the public asset",
+                shaped(MULTI_ASSET_IN, MULTI_ASSET_OUT, { publicAssetId: 101n, publicOut: 5n }),
+                "public_out must come out of the outputs of the public asset",
+            );
+        });
+
+        it("FAILS when a withdrawal is funded by a different asset's outputs", async () => {
+            // 5 leaves asset 102's outputs while the bucket names 101.
+            const outputs = MULTI_ASSET_OUT.map(([asset, value]) =>
+                asset === 102n ? [asset, value - 5n] as const : [asset, value] as const);
+            await expectWitnessFails(
+                ctx.circuit,
+                shaped(MULTI_ASSET_IN, outputs, { publicAssetId: 101n, publicOut: 5n }),
+                "the public bucket must balance against its own asset",
             );
         });
 
         it("FAILS on a withdrawal of an asset the transaction does not hold", async () => {
-            // Asset 7 (the default public id) appears in no note, so its
-            // candidate row reads 0 == public_out.
+            // Asset 7 appears in no note, so its candidate row reads
+            // 0 == public_out.
             await expectWitnessFails(
                 ctx.circuit,
                 shaped(MULTI_ASSET_IN, MULTI_ASSET_OUT, { publicAssetId: ASSET, publicOut: 1n }),

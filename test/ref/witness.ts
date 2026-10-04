@@ -4,9 +4,9 @@
 // so the key set is part of the interface: an extra key is as significant as a
 // missing one.
 
-import { pointsJson, type Field, type Point } from "./field.js";
-import type { Jubjub } from "./jubjub.js";
+import type { Field } from "./field.js";
 import type { Poseidon } from "./poseidon.js";
+import { transactDigest } from "./compress.js";
 import { buildNoteCommitment, buildNullifierFromNsk, type Note, type SpentNote } from "./note.js";
 
 /** Per-output FMD clue witness. */
@@ -20,36 +20,39 @@ export interface ClueInputs {
 // index signature, and so satisfy `CircuitInput` in lib/circuit.ts without a cast.
 
 /**
- * The public slots the circuit evaluates: `TransactCompressN`'s coefficients,
- * in `PubInputs.compress(Transact)` order.
+ * The public slots that are circuit signals: `TransactCompressN`'s coefficients
+ * up to the digest, in `PubInputs.compress(Transact)` order.
  *
- * Each is pinned by a constraint elsewhere in `4x6.circom`; that is the
- * membership rule for this set (see `coeffs` in `ref/compress.ts`).
+ * The digest itself is the next coefficient but not an input signal: the
+ * circuit computes it from these. See `TransactBinding.digest`.
  */
 export type CircomCoeffInputs = {
     merkle_root: string;
     nullifier: string[];
     out_cm: string[];
     public_asset_id: string;
-    public_in: string;
     public_out: string;
-    in_cv: string[][];
-    out_cv: string[][];
-    /** Per-output value commitment anchoring (asset, value) into the Merkle leaf. */
-    out_cv_dep: string[][];
 };
 
 /**
- * Logical public inputs that are **not** circuit signals.
+ * Logical public inputs that are **not** circuit input signals.
  *
- * The circuit constrains none of them, so as PolyEval coefficients they would be
- * free variables a prover could use to solve `y = Σ c_k z^k`. They are bound by
- * being hashed into the Fiat-Shamir challenge: changing one changes `z`, hence
- * `y`, and the proof fails. `flatten` includes them and `coeffs` does not;
- * `toCircomInput` carries them alongside the witness and `circuitSignals` drops
- * them before witness calculation.
+ * `digest` is the calldata copy of the coefficient digest. The circuit takes no
+ * such input: it recomputes the digest from the coefficient signals and
+ * evaluates its own. `flatten` and `coeffs` read this field, so a calldata
+ * view can carry a digest the witness does not produce.
+ *
+ * The circuit constrains none of the others, so as PolyEval coefficients they
+ * would be free variables a prover could use to solve `y = Σ c_k z^k`. They are
+ * bound by being hashed into the Fiat-Shamir challenge: changing one changes
+ * `z`, hence `y`, and the proof fails. `flatten` includes them and `coeffs`
+ * does not.
+ *
+ * `toCircomInput` carries all of these alongside the witness and
+ * `circuitSignals` drops them before witness calculation.
  */
 export type TransactBinding = {
+    digest: string;
     recipient_address: string;
     chain_id: string;
     payer_address: string;
@@ -77,8 +80,6 @@ export type CircomTransactInput = CircomCoeffInputs & {
     in_rho: string[];
     in_rcm: string[];
     in_nsk: string[];
-    in_rcv: string[];
-    in_rcv_dep: string[];
     in_path_elements: string[][][];
     in_path_indices: string[][];
     in_is_dummy: string[];
@@ -88,8 +89,6 @@ export type CircomTransactInput = CircomCoeffInputs & {
     out_pk: string[];
     out_rho: string[];
     out_rcm: string[];
-    out_rcv: string[];
-    out_rcv_dep: string[];
 };
 
 /**
@@ -115,19 +114,13 @@ export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
         nullifier: w.nullifier,
         out_cm: w.out_cm,
         public_asset_id: w.public_asset_id,
-        public_in: w.public_in,
         public_out: w.public_out,
-        in_cv: w.in_cv,
-        out_cv: w.out_cv,
-        out_cv_dep: w.out_cv_dep,
         in_asset: w.in_asset,
         in_value: w.in_value,
         in_pk: w.in_pk,
         in_rho: w.in_rho,
         in_rcm: w.in_rcm,
         in_nsk: w.in_nsk,
-        in_rcv: w.in_rcv,
-        in_rcv_dep: w.in_rcv_dep,
         in_path_elements: w.in_path_elements,
         in_path_indices: w.in_path_indices,
         in_is_dummy: w.in_is_dummy,
@@ -136,14 +129,11 @@ export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
         out_pk: w.out_pk,
         out_rho: w.out_rho,
         out_rcm: w.out_rcm,
-        out_rcv: w.out_rcv,
-        out_rcv_dep: w.out_rcv_dep,
     };
 }
 
 export interface BuildOpts {
     publicAssetId: Field;
-    publicIn: Field;
     publicOut: Field;
     inputs: SpentNote[];
     outputs: Note[];
@@ -151,7 +141,7 @@ export interface BuildOpts {
     merkleRoot: Field;
     recipientAddress?: Field;
     chainId?: Field;
-    /** Pulled by `transferFrom` on deposit; bound in-SNARK so a relayer cannot redirect sources. */
+    /** Who may drive a satellite that consumes the spend; bound through the challenge. */
     payerAddress?: Field;
     /** Must equal `msg.sender` of the on-chain `transact` call; blocks relayer front-running. */
     relayerAddress?: Field;
@@ -173,8 +163,8 @@ export interface BuildOpts {
  * Arity is taken from the argument lengths rather than hardcoded, so `nIn` and
  * `nOut` may differ.
  */
-export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): TransactWitnessBundle {
-    const { inputs, outputs, publicAssetId, publicIn, publicOut, merkleRoot } = opts;
+export function toCircomInput(P: Poseidon, opts: BuildOpts): TransactWitnessBundle {
+    const { inputs, outputs, publicAssetId, publicOut, merkleRoot } = opts;
 
     if (inputs.length === 0) throw new Error("toCircomInput: need at least one input");
     if (outputs.length === 0) throw new Error("toCircomInput: need at least one output");
@@ -188,31 +178,27 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
     const relayerAddress = opts.relayerAddress ?? 0n;
     const intentHash = opts.intentHash ?? 0n;
 
-    const outCm = outputs.map((o) => buildNoteCommitment(P, o));
-    const inCv: Point[] = inputs.map((i) => J.commit(i.asset, i.value, i.rcv));
-    const outCv: Point[] = outputs.map((o) => J.commit(o.asset, o.value, o.rcv));
-    // cv_dep anchors (asset, value, rcv_dep) into the Merkle leaf:
-    //   leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
-    const outCvDep: Point[] = outputs.map((o) => J.commit(o.asset, o.value, o.rcvDep));
-
     const z = opts.z ?? 1n;
+
+    const coeffSignals: CircomCoeffInputs = {
+        merkle_root: merkleRoot.toString(),
+        nullifier: inputs.map((i) => i.nf.toString()),
+        out_cm: outputs.map((o) => buildNoteCommitment(P, o).toString()),
+        public_asset_id: publicAssetId.toString(),
+        public_out: publicOut.toString(),
+    };
 
     return {
         z: z.toString(),
-        merkle_root: merkleRoot.toString(),
-        nullifier: inputs.map((i) => i.nf.toString()),
-        out_cm: outCm.map((c) => c.toString()),
-        public_asset_id: publicAssetId.toString(),
-        public_in: publicIn.toString(),
-        public_out: publicOut.toString(),
-        in_cv: pointsJson(inCv),
-        out_cv: pointsJson(outCv),
+        ...coeffSignals,
+        // What an honest prover writes into calldata: the digest of the
+        // signals above, which is the value the circuit computes.
+        digest: transactDigest(coeffSignals).toString(),
         recipient_address: recipientAddress.toString(),
         chain_id: chainId.toString(),
         payer_address: payerAddress.toString(),
         relayer_address: relayerAddress.toString(),
         intent_hash: intentHash.toString(),
-        out_cv_dep: pointsJson(outCvDep),
 
         in_asset: inputs.map((i) => i.asset.toString()),
         in_value: inputs.map((i) => i.value.toString()),
@@ -220,8 +206,6 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
         in_rho: inputs.map((i) => i.rho.toString()),
         in_rcm: inputs.map((i) => i.rcm.toString()),
         in_nsk: inputs.map((i) => i.nsk.toString()),
-        in_rcv: inputs.map((i) => i.rcv.toString()),
-        in_rcv_dep: inputs.map((i) => i.rcvDep.toString()),
         in_path_elements: inputs.map((i) =>
             i.pathElements.map((level) => level.map((e) => e.toString())),
         ),
@@ -233,41 +217,12 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
         out_pk: outputs.map((o) => o.pk.toString()),
         out_rho: outputs.map((o) => o.rho.toString()),
         out_rcm: outputs.map((o) => o.rcm.toString()),
-        out_rcv: outputs.map((o) => o.rcv.toString()),
-        out_rcv_dep: outputs.map((o) => o.rcvDep.toString()),
 
         out_clue_bits: opts.outputClues.map((c) => c.clueBits.toString()),
         out_clue_Rx: opts.outputClues.map((c) => c.clueRx.toString()),
         out_clue_Ry: opts.outputClues.map((c) => c.clueRy.toString()),
 
         out_aux_digest: opts.outputAuxDigest.toString(),
-    };
-}
-
-/** Blinders for a dummy input slot. */
-export interface DummyBlinders {
-    /** Spend-time value-commitment blinder. */
-    rcv: Field;
-    /** Deposit-anchor blinder. Unconstrained here: the leaf check is skipped. */
-    rcvDep: Field;
-}
-
-// Domain separators for the blinder derivation. Outside the TAG_* table in
-// tags.circom, as these never enter a circuit preimage.
-const DUMMY_RCV_DOMAIN = 0x647563n; // "duc"
-const DUMMY_RCVDEP_DOMAIN = 0x647564n; // "dud"
-
-// Keep the result under 2^252, the width MulH's Num2Bits(RCV_BITS) enforces on rcv.
-const BLINDER_MASK = (1n << 252n) - 1n;
-
-/**
- * Blinders for a dummy input slot, derived from `rho` and distinct per dummy.
- * For tests and vector generation only.
- */
-export function deterministicDummyBlinders(P: Poseidon, rho: Field): DummyBlinders {
-    return {
-        rcv: P.hash([DUMMY_RCV_DOMAIN, rho]) & BLINDER_MASK,
-        rcvDep: P.hash([DUMMY_RCVDEP_DOMAIN, rho]) & BLINDER_MASK,
     };
 }
 
@@ -279,28 +234,14 @@ export function deterministicDummyBlinders(P: Poseidon, rho: Field): DummyBlinde
  * be the commitment SpentNote recomputes from the dummy's zero fields: the
  * circuit feeds it into the nullifier, so a placeholder 0 would fail.
  *
- * `blinders` defaults to a derivation from `rho`. Blinders must differ between
- * dummies: `cv = 0·gen + rcv·H` with a shared `rcv` is the same point in every
- * transaction and identifies the slot as a dummy. They must also be
- * reproducible, since the published vectors contain them. Not suitable for
- * production key material.
+ * Everything but `rho` is zero, so the nullifier is a function of `rho` alone
+ * and `rho` is what hides the slot: a wallet samples it uniformly. The values
+ * used here are small and reproducible, since the published vectors contain
+ * them. Not suitable for production.
  */
-export function dummyInputAt(
-    P: Poseidon,
-    depth: number,
-    rho: Field,
-    blinders: DummyBlinders = deterministicDummyBlinders(P, rho),
-): SpentNote {
+export function dummyInputAt(P: Poseidon, depth: number, rho: Field): SpentNote {
     const nsk = 0n;
-    const note: Note = {
-        asset: 0n,
-        value: 0n,
-        pk: 0n,
-        rho,
-        rcm: 0n,
-        rcv: blinders.rcv,
-        rcvDep: blinders.rcvDep,
-    };
+    const note: Note = { asset: 0n, value: 0n, pk: 0n, rho, rcm: 0n };
     const cm = buildNoteCommitment(P, note);
     const nf = buildNullifierFromNsk(P, nsk, rho, cm);
     const pathElements: Field[][] = [];
@@ -317,34 +258,26 @@ export function dummyInputAt(
     };
 }
 
-// Domain separator for padding-output blinders, alongside the dummy-input pair
-// above. Distinct from both, so a padding output at slot k and a dummy input at
-// rho = k never derive the same blinder.
+// Domain separator for a padding output's `rcm`. Outside the TAG_* table in
+// tags.circom, as it never enters a circuit preimage as a tag.
 const PAD_OUT_DOMAIN = 0x706f75n; // "pou"
 
 /**
  * Zero-value output slot, padding a bundle that produces fewer notes than N_OUT.
  *
- * `slot` is the output index the note occupies and seeds the blinders, which
- * must be non-zero and pairwise distinct:
+ * `slot` is the output index the note occupies and seeds `rcm`, which must be
+ * non-zero and differ between slots. An output's `rho` is publicly derivable
+ * (`DeriveRho` over `nullifier[0]`), so `rcm` is the only secret in `cm`: with
+ * a known `rcm` anyone can recompute a padding slot's `cm` from `asset`,
+ * `pk = 0` and `value = 0`, which reveals the transaction's true output count.
  *
- *   - `cv = value·gen + rcv·H` and `cv_dep = value·gen + rcv_dep·H` are both
- *     published, `cv` per spend and `cv_dep` inside the Merkle leaf. At
- *     value = 0 and rcv = 0 both collapse to the Edwards identity (0, 1), the
- *     sentinel `src/4x6.circom` requires a padding slot not to publish; it
- *     reveals the transaction's true output count.
- *   - `rcv == rcv_dep` equates the spend-time `cv` with the leaf's `cv_dep`,
- *     which identifies the spent leaf
- *     (`src/lib/value_commit.circom :: ValueCommitPair`).
- *
- * Deterministic so the published vectors reproduce. Not suitable for production
- * key material; a wallet samples these uniformly.
+ * Deterministic so the published vectors reproduce. Not suitable for
+ * production; a wallet samples `rcm` uniformly.
  *
  * `pk = 0`: a padding output is unspendable by construction, and the value is
  * hashed into `cm` rather than published.
  */
 export function dummyOutput(P: Poseidon, slot: number, asset: Field = 1n): Note {
-    const seed = P.hash([PAD_OUT_DOMAIN, BigInt(slot)]);
-    const { rcv, rcvDep } = deterministicDummyBlinders(P, seed);
-    return { asset, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv, rcvDep };
+    const rcm = P.hash([PAD_OUT_DOMAIN, BigInt(slot)]);
+    return { asset, value: 0n, pk: 0n, rho: 0n, rcm };
 }

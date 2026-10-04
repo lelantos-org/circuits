@@ -12,7 +12,7 @@
 // checking satisfaction with `lib/r1cs.ts` rather than the wasm. Three searches
 // run:
 //
-//   * `sweepSingleSignal` decides exactly, for each of the ~100k witness
+//   * `sweepSingleSignal` decides exactly, for each of the ~70k witness
 //     entries, whether a second value is admissible on its own.
 //   * `sweepGroups` covers signals that must move together (a pair moving in
 //     step, a hint and the value it feeds) by walking the null space of the
@@ -38,7 +38,7 @@ import { formatReport, sweepSingleSignal } from "../lib/underconstrained";
 import { explain, partitionExplained } from "../lib/explain";
 import { buildTxBuilder, TxBuilder, DEFAULT_ASSET as ASSET } from "../lib/transact";
 import { circuitSignals, type TransactWitnessBundle } from "../ref/witness";
-import { ALICE_NSK, BOB_NSK, DEPTH, TIMEOUT_HEAVY, TWO_252 } from "../lib/constants";
+import { ALICE_NSK, BOB_NSK, DEPTH, N_IN, N_OUT, TIMEOUT_HEAVY } from "../lib/constants";
 import { ASSET_B, CIRCUIT } from "../transact/setup";
 import { arbBalancedSplit, arbNsk, MAX_VALUE, fcParamsFor } from "./arbitraries";
 
@@ -69,12 +69,14 @@ describe("underconstrained_4x6 [fuzz]", function () {
     it("the detector sees the decompositions the circuit is known to contain", () => {
         const hist = logBitGroupCensus(suite.ctx);
 
-        expect(hist.get(252), "expected 20 Num2Bits(252): one per blinder, " +
-            "rcv and rcv_dep over N_IN + N_OUT slots").to.equal(20);
+        expect(hist.get(64), "expected 22 Num2Bits(64): value and asset id on each of " +
+            "the N_IN + N_OUT note slots, plus public_asset_id and public_out")
+            .to.equal(2 * (N_IN + N_OUT) + 2);
         expect(hist.get(2), "expected 44 Num2Bits(2): one path-index digit per " +
-            "level per input, N_IN * DEPTH").to.equal(44);
-        expect(Math.max(...hist.keys()), "the widest decomposition should be MulH's")
-            .to.equal(252);
+            "level per input, N_IN * DEPTH").to.equal(N_IN * DEPTH);
+        expect(Math.max(...hist.keys()), "the widest decomposition should be a 64-bit " +
+            "range check: the circuit has no curve arithmetic")
+            .to.equal(64);
     });
 
     // An explainer that accepted everything would make every witness-level test
@@ -122,17 +124,9 @@ describe("underconstrained_4x6 [fuzz]", function () {
         await assertNoSecond("balanced", tx.balanced());
     });
 
-    // Not an all-dummy bundle: `Transact` asserts `all_dummy.out === 0`
-    // (src/lib/transact.circom), so an all-dummy bundle has no honest witness.
-    // One real input alongside `public_in` is the shape of a shielding spend.
-    it("the deposit shape has no second witness", async () => {
-        await assertNoSecond("deposit", tx.spend(
-            tx.oneRealOneDummy(1000n, ALICE_NSK),
-            [tx.note(1500n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-            { publicIn: 500n },
-        ));
-    });
-
+    // One real input and the rest dummy. Not an all-dummy bundle: `Transact`
+    // asserts `all_dummy.out === 0` (src/lib/transact.circom), so an all-dummy
+    // bundle has no honest witness.
     it("the withdraw shape has no second witness", async () => {
         await assertNoSecond("withdraw", tx.spend(
             tx.oneRealOneDummy(1000n, ALICE_NSK),
@@ -141,14 +135,14 @@ describe("underconstrained_4x6 [fuzz]", function () {
         ));
     });
 
-    // Both public buckets non-zero: `pub_eq` compares the public asset against
-    // every slot's, so this witness leaves the fewest of those comparisons
-    // trivially zero.
-    it("a shape with both public buckets non-zero has no second witness", async () => {
-        await assertNoSecond("publicInAndOut", tx.spend(
+    // A whole note withdrawn: every output is zero-valued, so the public bucket
+    // is the only non-zero term on the right of its candidate row, and
+    // `pub_out_z`, the IsZero behind the bucket constraint, sits at out = 0.
+    it("a shape withdrawing a whole note has no second witness", async () => {
+        await assertNoSecond("withdrawAll", tx.spend(
             tx.oneRealOneDummy(1000n, ALICE_NSK),
-            [tx.note(1400n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
-            { publicIn: 700n, publicOut: 300n },
+            [tx.note(0n, ALICE_NSK, 9n)],
+            { publicOut: 1000n },
         ));
     });
 
@@ -171,14 +165,15 @@ describe("underconstrained_4x6 [fuzz]", function () {
         await assertNoSecond("fourAssets", tx.fullShapeMultiAsset());
     });
 
-    // Range ceilings, where a Num2Bits sits one bit from rejecting: values at
-    // 2^64 - 1 and blinders at 2^252 - 1. A decomposition whose top digit is the
-    // only set one exercises constraints the mid-range witnesses never reach.
-    it("a shape at the value and blinder ceilings has no second witness", async () => {
-        const maxRcv = TWO_252 - 1n;
-        const wide = { ...tx.note(MAX_VALUE, ALICE_NSK, 1n), rcv: maxRcv, rcvDep: maxRcv - 1n };
-        const outA = { ...tx.note(MAX_VALUE, ALICE_NSK, 9n), rcv: maxRcv - 2n, rcvDep: maxRcv - 3n };
-        await assertNoSecond("ceilings", tx.spend(tx.plant([wide], ALICE_NSK), [outA]));
+    // Range ceilings, where a Num2Bits sits one bit from rejecting: a value and
+    // an asset id at 2^64 - 1. A decomposition with every digit set exercises
+    // constraints the mid-range witnesses never reach.
+    it("a shape at the value and asset-id ceilings has no second witness", async () => {
+        const asset = MAX_VALUE;
+        await assertNoSecond("ceilings", tx.spend(
+            tx.plant([tx.note(MAX_VALUE, ALICE_NSK, 1n, asset)], ALICE_NSK),
+            [tx.note(MAX_VALUE, ALICE_NSK, 9n, asset)],
+        ));
     });
 
     // All values zero: a real input of value 0 spending to outputs of value 0.

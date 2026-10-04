@@ -35,6 +35,7 @@ import {
     BN254_FR,
     FMD_DEFAULT_GAMMA,
     type Field,
+    coeffDigest,
 } from "./helpers";
 import { prefillLeaf } from "./lib/batch";
 
@@ -296,11 +297,12 @@ describe("reference / snark compression", () => {
     // a mismatch to the encoding; recomputing it here checks the published value.
     //
     // Each case carries two vectors: `challenge` is every logical public input
-    // and is what `z` hashes; `coeffs` is the subset the circuit pins and is what
-    // `y` evaluates. They differ for `transact` (70 hashed, 46 evaluated) and
-    // coincide for `tree_update_batch` (52 and 52). Transact's extra 24 words are
-    // not circuit signals, so only `z` binds them; every batch word is a signal
-    // and must be evaluated. See src/README.md § 2a.
+    // and is what `z` hashes; `coeffs` is the leading run `y` evaluates. The
+    // word after the coefficients is the digest, a public signal of its own:
+    // `transact` hashes 38 and evaluates 13, `tree_update_batch` hashes 37 and
+    // evaluates 36. Transact's other 24 words are not circuit signals, so only
+    // `z` binds them; every batch input is a signal and must be evaluated. See
+    // src/README.md § 2a.
     //
     // Driven from index.json, so a shape change (a new circuit, or a different
     // MAX_L) is covered without editing this file.
@@ -313,10 +315,10 @@ describe("reference / snark compression", () => {
 
     // ===== a challenge-only field must be one the circuit cannot see =====
     //
-    // A word in the challenge preimage but not the coefficient vector is not
-    // bound on its own: `z` is a circuit input the prover reads before choosing a
-    // witness, so hashing a field into it binds that field only if something
-    // else already pins it (src/README.md § 2a).
+    // A word in the challenge preimage but not the coefficient vector is bound
+    // only if the circuit holds no copy of it: `z` is a circuit input the prover
+    // reads before choosing a witness, so hashing a signal into it binds nothing
+    // (src/README.md § 2a).
     //
     // Omitting a word from the coefficients is sound only when the word is not a
     // circuit signal, so no witness copy exists to disagree with calldata. Only
@@ -369,6 +371,18 @@ describe("reference / snark compression", () => {
                 ).to.equal(vec.compression.y);
                 // Recorded separately by the generator: what the compiled circuit emitted.
                 expect(vec.circuitOutput.y, `${where}: circuit y`).to.equal(vec.compression.y);
+                expect(vec.circuitOutput.digest, `${where}: circuit digest`).to.equal(
+                    vec.compression.digest,
+                );
+                // The digest commits exactly the coefficients, and is the
+                // preimage word that follows them.
+                expect(coeffDigest(coeffs).toString(), `${where}: digest of coeffs`).to.equal(
+                    vec.compression.digest,
+                );
+                expect(challenge[coeffs.length].toString(), `${where}: digest word position`)
+                    .to.equal(vec.compression.digest);
+                expect(challenge.slice(0, coeffs.length), `${where}: coefficient prefix`)
+                    .to.deep.equal(coeffs);
             }
         });
     }

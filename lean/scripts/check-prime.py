@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Discharge the two arithmetic axioms in the Lean development.
+"""Discharge the one arithmetic axiom in the Lean development.
 
-`Lelantos.p_prime` and `Lelantos.ell_prime` are axioms because Mathlib's `norm_num`
-primality extension uses trial division and cannot certify 254-bit or 251-bit numbers.
-This script checks them externally and cross-checks the constants against the values
-the circuit toolchain uses.
+`Lelantos.p_prime` is an axiom because Mathlib's `norm_num` primality extension uses
+trial division and cannot certify a 254-bit number. This script checks it externally
+and cross-checks the size bounds the proofs consume.
 
-For `p`, a Lucas certificate is checked: the full factorization of `p - 1` must multiply
-out, and a base `a` of multiplicative order exactly `p - 1` is exhibited. This proves `p`
+A Lucas certificate is checked: the full factorization of `p - 1` must multiply out,
+and a base `a` of multiplicative order exactly `p - 1` is exhibited. This proves `p`
 prime given the primality of the factors, which are certified by trial division when
 small enough and by Miller-Rabin otherwise; the report states the method for each.
 
@@ -15,7 +14,7 @@ The factorization is recorded rather than computed, because trial division of `p
 a practical bound leaves a 173-bit composite cofactor. Every recorded factor is
 re-verified on each run, and any certification failure sets a non-zero exit status.
 
-For `ell` only Miller-Rabin is run; `ell - 1`'s factorization is not recorded here.
+Neither circuit contains curve arithmetic, so there is no subgroup order to check.
 
 Run:  python3 lean/scripts/check-prime.py
 """
@@ -37,11 +36,6 @@ P_MINUS_1_FACTORS = (
 # Factors at most this large are certified prime by exhaustive trial division rather than
 # by Miller-Rabin.
 DETERMINISTIC_LIMIT = 2 * 10 ** 15
-
-# Baby Jubjub prime-order subgroup order -- Lelantos/Model/Jubjub.lean :: ell
-# Equal to the full curve order divided by the cofactor 8.
-BABYJUB_ORDER = 21888242871839275222246405745257275088614511777268538073601725287587578984328
-ELL = 2736030358979909402780800718157159386076813972158567259200215660948447373041
 
 
 def is_probable_prime(n: int, rounds: int = 64) -> bool:
@@ -144,24 +138,12 @@ def main() -> int:
         print("  FAIL: no primality certificate for p -- only the probabilistic test stands")
         ok = False
 
-    print(f"\nell = {ELL}")
-    print(f"  bits            : {ELL.bit_length()}")
-    print(f"  Miller-Rabin    : {is_probable_prime(ELL)}")
-    if not is_probable_prime(ELL):
-        print("  FAIL: ell is composite -- Lelantos.ell_prime is FALSE")
-        ok = False
-
     print("\nconstant cross-checks")
-    cofactor_ok = BABYJUB_ORDER == 8 * ELL
-    print(f"  babyjub order == 8 * ell : {cofactor_ok}")
-    ok = ok and cofactor_ok
-
     size_checks = {
         "2^64  < p": 2 ** 64 < P,
         "2^66  < p": 2 ** 66 < P,
         "2^67  < p": 2 ** 67 < P,
         "2^128 < p": 2 ** 128 < P,
-        "2^252 < p": 2 ** 252 < P,
         "p < 2^254": P < 2 ** 254,
     }
     for label, val in size_checks.items():

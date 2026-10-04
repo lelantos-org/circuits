@@ -14,17 +14,20 @@
 # Two layouts are dumped, the transact shapes and `BatchCompress(MAX_L)`, and they
 # differ in kind.
 #
-# The 46-slot transact dump is the polynomial, not the challenge preimage.
-# `PubInputs.sol` hashes 70 words to derive `z` and evaluates only these 46. The five
-# address words, the FMD clue triples and the payload digest are bound through the
-# challenge because the circuit does not constrain them; an unconstrained coefficient
-# would be a free variable a prover could use to solve `y = Σ c_k z^k`. The calldata
-# prefix is 50 words, which fixes the offsets of the uint64 and address words
-# `compress` re-masks in assembly.
+# The 13-slot transact dump is the polynomial, not the challenge preimage.
+# `PubInputs.sol` hashes 38 words to derive `z` and evaluates only these 13, the
+# logical public inputs that are signals of the circuit. The digest of those thirteen
+# is a public output of the circuit: its calldata word is hashed into `z` and passed
+# to the verifier, and it is not evaluated, so it has no line in the dump. The five
+# address and chain words, the FMD clue triples and the payload digest are hashed
+# into `z` only, because they are not signals of the circuit. The calldata prefix is
+# 19 words (`src/4x6.circom`), which fixes the offsets of the uint64 and address
+# words `compress` re-masks in assembly.
 #
-# The batch dump has no such split: all `4 + 6*MAX_L` words are signals of
-# `tree_update_batch.circom`, so all 52 are coefficients and must be evaluated for
-# soundness. `test/formal/batch_layout_parity.test.ts` asserts the same against the
+# The batch dump has no challenge-only words: all `4 + 4*MAX_L` words are signals of
+# `tree_update_batch.circom`, so all 36 are coefficients. Its digest is likewise a
+# public output, hashed (37 words in all) and not evaluated, with no line in the
+# dump. `test/formal/batch_layout_parity.test.ts` asserts the same against the
 # published vector, with this file as the Lean reference.
 #
 # Regenerate after an intentional layout change:  lean/scripts/dump-layout.sh --update

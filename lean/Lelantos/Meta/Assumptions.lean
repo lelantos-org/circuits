@@ -17,32 +17,19 @@ Run `lake env lean Lelantos/Meta/Assumptions.lean` to print the current dependen
 | Axiom | Why it is not a theorem | How to discharge |
 |---|---|---|
 | `p_prime` | `p` is 254 bits; Mathlib's `norm_num` primality extension is trial-division based and there is no Pocklington tactic | `python3 lean/scripts/check-prime.py` |
-| `ell_prime` | same, 251 bits | same script |
 
-Both are also checked structurally: the script verifies `babyjub_order = 8 · ell` and every
-size bound (`2^64`, `2^66`, `2^128`, `2^252 < p`) that the proofs consume.
+The script also checks every size bound (`2^64`, `2^66`, `2^67`, `2^128 < p`) that the
+proofs consume. Those are theorems here, decided by `norm_num`; the script repeats them so
+the constant is cross-checked outside Lean.
 
 ## Cryptographic
 
-| Axiom | Content | Status |
-|---|---|---|
-| `coords` / `coords_injective` | distinct subgroup elements have distinct affine coordinates | True of any affine embedding of a curve group. Reaches no headline theorem — see below |
-| `babyAdd` / `babyAdd_spec` | circomlib `BabyAdd` computes the group law | Packages the completeness of the twisted Edwards addition law on Baby Jubjub (`a` square, `d` non-square), which makes the two `<--` divisions at `babyjub.circom:45,48` well-constrained |
-| `escalarMul` / `escalarMul_spec` | `EscalarMulAny` / `FixedBaseMul` compute `k • P` | Gadget semantics; one uninterpreted symbol covers both, so the choice of fixed-base gadget is not visible here |
-| `H`, `BASE0` | the two Pedersen bases | Constants |
-| `assetMul` | `HashToAssetGen` is a known multiple of `BASE0` | Models a weakness (known discrete logs) — see `pointBalance_not_sound` |
-| `assetMul_arith` | `assetMul 1 + assetMul 3 = 2 · assetMul 2` | Follows from circomlib's signed 4-bit window encoding mapping asset ids 1,2,3 to multipliers 2,3,4; checked at runtime by `test/transact/multi_asset.test.ts` |
+None. Neither circuit contains curve arithmetic, so there is no group law, no
+scalar-multiplication gadget and no generator to axiomatise. The only cryptographic object
+is Poseidon, and it is not an axiom either — see below.
 
 `propext`, `Classical.choice` and `Quot.sound` are Lean's own; they are not assumptions
 about the circuit.
-
-`coords_injective` appears in no entry of `lean/expected/axioms.txt`. Its only consumer is
-`perAssetPointBalance_group`, which reads the point equation back as a group equality and
-has no consumers, because `pointBalance_not_sound` shows nothing may be derived from the
-point equation. The counterexample goes the other way, through
-`perAssetPointBalance_of_group`, which needs `babyAdd_spec` and not injectivity. If the axiom
-appears in a positive theorem's axiom set, some proof derives conservation from the point
-balance; treat that diff as a bug, not as an expectation to regenerate.
 
 ## Poseidon is not in that table
 
@@ -53,94 +40,140 @@ every theorem, `transact_sound` included, vacuous. An axiom asserting
 
 Collision resistance is an explicit hypothesis `¬ PoseidonCollision` on the theorems that
 need it, and `Lelantos.poseidon_collision` proves that hypothesis unsatisfiable. So
-`nullifier_binds_cm`, `noteCommitment_inj`, `merkleMember_inj` and `Lelantos.TxBinding` are
-assumed rather than proved: they carry no axiom because they carry the assumption in their
-statement. A non-vacuous treatment needs a concrete-security formulation (explicit
-adversary, advantage bound) and is out of scope; `lean/README.md` lists it under what is
-not proved.
+`nullifier_binds_cm`, `noteCommitment_inj`, `merkleMember_inj`, `digest_inj`,
+`txCoeffs_determined_by_digest`, `transact_calldata_binding`,
+`batchCoeffs_determined_by_digest`, `batch_calldata_binding`,
+`batch_deposit_opening_unique`, `batch_new_root_determined` and `Lelantos.TxBinding` are
+assumed rather than proved: they carry no axiom because they
+carry the assumption in their statement. A non-vacuous treatment needs a concrete-security
+formulation (explicit adversary, advantage bound) and is out of scope; `lean/README.md`
+lists it under what is not proved.
 
 `transact_sound`, conservation, the range checks and `PolyEval` are independent of it.
+
+## What the binding of calldata assumes, and what is in no statement
+
+Both circuits output `(y, digest, z)`. The contract reads the digest word `d` from calldata,
+derives `z = keccak(coefficients, d, challenge-only words) mod r`, computes `y` over the
+calldata coefficients, and verifies against `(y, d, z)`. That a proof verifies only for the
+calldata its witness describes is a commit-then-challenge Fiat-Shamir argument with two
+assumptions:
+
+* **Poseidon(5) is collision resistant.** This is the † hypothesis, `¬ PoseidonCollision`,
+  carried in the statement of `digest_inj`, `transact_calldata_binding`,
+  `txCoeffs_determined_by_digest`, `batch_calldata_binding` and
+  `batchCoeffs_determined_by_digest`. It makes the digest a commitment to one coefficient
+  vector.
+* **keccak256 behaves as a random oracle.** This is in no statement here. Nothing in this
+  development models keccak256 or a prover.
+
+Proved: the digest is the `CoeffDigest` of the coefficient vector (`transact_digest_public`,
+`batch_digest_public`, unconditional); the digest binds the vector (the † results above);
+distinct vectors agree on at most `N − 1` challenges (`polyEval_binding`,
+`transact_pi_binding`, `batch_pi_binding`, unconditional), 12 for the transact layout and
+35 for the batch layout.
+
+Not formalised: the forking / random-oracle step that turns those two facts into "no forged
+calldata verifies except with negligible probability". It is the standard Fiat-Shamir step
+and it is prose, in `lean/README.md` and in the "Why the compression binds" section of
+`Lelantos.Circuit.Transact`.
 
 ## Obligations, not assumptions
 
 `Lelantos.ContractObligations` records what the transact circuit cannot enforce and the
 contract must: nullifier freshness, distinctness of the nullifiers *within* one
-transaction, `z` being the challenge of this witness's coefficient vector, the `chain_id` /
-`recipient_address` checks, and the aux-digest recomputation. `Lelantos.BatchContractObligations`
-is the same ledger for `tree_update_batch.circom`: the challenge, plus the live root, the
-committed leaf count, the payload's leaf count and the escrow record behind each leaf. No
-theorem here assumes any field of either; they are listed to separate the circuit's
-guarantees from the system's.
+transaction, the three conditions the compression needs (the calldata digest word is passed
+to the verifier unmodified as the `digest` public signal; it is in the keccak preimage of
+`z`; every coefficient is in the keccak preimage of `z`), the `chain_id` /
+`recipient_address` checks, and the aux-digest recomputation.
+`Lelantos.BatchContractObligations` is the same ledger for `tree_update_batch.circom`: the
+same three conditions, plus the live root, the committed leaf count, the payload's leaf
+count, the per-slot `is_deposit` flag and the escrow record behind each leaf. No theorem
+here assumes any field of either; they are listed to separate the circuit's guarantees from
+the system's.
 
 Most fields are stubs (`True`, naming a check without stating it) because what they range
 over — a nullifier set, an EVM `block.chainid`, a keccak preimage, the live accumulator, an
 escrow digest — has no counterpart in this development. Three are stated in full:
-`challenge_binds_witness` on both structures, without which the compressed public input
-carries no information, and `nullifiers_distinct`, which relates two fields of the same
-witness. A stub is a claim made outside Lean; a stated field is an assumption, not a
-result.
+`digest_passed_unmodified` on both structures, which relates the witness's public digest to
+the calldata word, and `nullifiers_distinct`, which relates two fields of the same witness.
+A stub is a claim made outside Lean; a stated field is an assumption, not a result.
 
 ## Notable non-dependencies
 
-`perAssetValueBalance_nat` and `polyEval_binding` depend on `p_prime` alone and use no
-cryptographic assumption: conservation in `PerAssetValueBalance` is integer arithmetic,
-not a group argument.
+Every theorem listed below depends on `p_prime` and Lean's own axioms, or on less. That
+includes `transact_sound`, which used to reach the curve gadget axioms through the value
+commitments it described; there are none now.
 
-`polyEval_forge`, which describes what an unpinned coefficient would allow an attacker,
-also reduces to `p_prime` alone: the forgery is one linear equation. It is the reason the
-layout carries only pinned slots.
-
-`transact_sound` additionally depends on `babyAdd_spec` and `escalarMul_spec`, because
-`SpentReal.cvOpens` / `OutputWellFormed.cvOpens` state what `cv` commits to, which is a
-statement about the curve gadgets. The split into `TxWellFormed` and `TxBinding` keeps it
-free of hash assumptions.
+`polyEval_forge`, which describes what a coefficient chosen after the challenge can do,
+reduces to `p_prime` alone: it is one linear equation. `polyEval_binding`,
+`transact_digest_public` and `batch_digest_public` do too.
 -/
 
+-- `src/4x6.circom`: soundness, conservation, the compression.
 #print axioms Lelantos.transact_sound
 #print axioms Lelantos.transact4x6_sound
 #print axioms Lelantos.perAssetValueBalance_nat
 #print axioms Lelantos.perAssetValueBalance_all_assets
+#print axioms Lelantos.no_asset_creation
+#print axioms Lelantos.no_asset_withdrawal
+#print axioms Lelantos.publicBucket_zero_asset
+#print axioms Lelantos.publicBucket_zero_out
+#print axioms Lelantos.polyEval_sound
 #print axioms Lelantos.polyEval_binding
 #print axioms Lelantos.polyEval_forge
 #print axioms Lelantos.polyEval_not_binding
+#print axioms Lelantos.coeffDigest_sound
+#print axioms Lelantos.transact_digest_public
+#print axioms Lelantos.transact_pi_binding
+#print axioms Lelantos.transact_pi_binding_slot
+#print axioms Lelantos.transact_calldata_pi_binding
+#print axioms Lelantos.piSlot_slotIndex
 #print axioms Lelantos.slotIndex_piSlot
-#print axioms Lelantos.polyEval_sound
-#print axioms Lelantos.pointBalance_not_sound
+-- Per-slot and per-gadget soundness.
 #print axioms Lelantos.spentNote_sound
 #print axioms Lelantos.outputNote_sound
 #print axioms Lelantos.merkleProofOrDummy_sound
-#print axioms Lelantos.nullifier_binds_cm
-#print axioms Lelantos.packAV_inj
 #print axioms Lelantos.num2Bits_sound
 #print axioms Lelantos.pathIndexSelectors_sound
+#print axioms Lelantos.packAV_inj
+#print axioms Lelantos.slots_inj
+-- Hash binding: conditional on `¬ PoseidonCollision`, carried in the statement.
+#print axioms Lelantos.nullifier_binds_cm
+#print axioms Lelantos.noteInner_inj
+#print axioms Lelantos.noteCommitment_inj
+#print axioms Lelantos.noteCm_inj
+#print axioms Lelantos.noteCommitment_ne_deriveRho
+#print axioms Lelantos.noteInner_ne_nullifier
+#print axioms Lelantos.noteCommitment_ne_merkleNode
 #print axioms Lelantos.merkleMember_inj
 #print axioms Lelantos.merkleNode_inj
-#print axioms Lelantos.leafHash_inj
-#print axioms Lelantos.slots_inj
-#print axioms Lelantos.noteCommitment_inj
-#print axioms Lelantos.noteCommitment_ne_leafHash
-#print axioms Lelantos.no_asset_creation
-#print axioms Lelantos.transact_pi_binding
-#print axioms Lelantos.transactSat_satisfiable
-#print axioms Lelantos.transact4x6Sat_satisfiable
-#print axioms Lelantos.batchSat_satisfiable
-#print axioms Lelantos.batchSat_partial_batch
-#print axioms Lelantos.batchSat_nonzero_frontier
-#print axioms Lelantos.transactSat_spend_satisfiable
-#print axioms Lelantos.transactSat_twoAsset_satisfiable
-#print axioms Lelantos.cross_asset_cancellation_rejected
-#print axioms Lelantos.inflation_rejected
-#print axioms Lelantos.mint_from_nothing_rejected
-#print axioms Lelantos.transact_pi_binding_slot
-#print axioms Lelantos.piSlot_slotIndex
-#print axioms Lelantos.spentNoteSat_real_satisfiable
-#print axioms Lelantos.spentReal_witness
+#print axioms Lelantos.digest_inj
+#print axioms Lelantos.digestBlock_zero_ne_merkleNode
+#print axioms Lelantos.transact_calldata_binding
+#print axioms Lelantos.txCoeffs_determined_by_digest
+#print axioms Lelantos.slotValue_determined_by_digest
 #print axioms Lelantos.transact_binding
 #print axioms Lelantos.transact4x6_binding
-#print axioms Lelantos.valueCommit_opens
-#print axioms Lelantos.outputNote_cvDep_same_value
--- `src/tree_update_batch.circom`. The chain results rest on `p_prime` alone; only the
--- deposit binding reaches the curve gadgets, and none of them touches a hash assumption.
+-- Non-vacuity and rejection.
+#print axioms Lelantos.transactSat_satisfiable
+#print axioms Lelantos.transact4x6Sat_satisfiable
+#print axioms Lelantos.transactSat_spend_satisfiable
+#print axioms Lelantos.transactSat_withdraw_satisfiable
+#print axioms Lelantos.transactSat_twoAsset_satisfiable
+#print axioms Lelantos.spentNoteSat_real_satisfiable
+#print axioms Lelantos.spentReal_witness
+#print axioms Lelantos.batchSat_satisfiable
+#print axioms Lelantos.batchSat_partial_batch
+#print axioms Lelantos.batchSat_deposit_and_spend
+#print axioms Lelantos.batchSat_nonzero_frontier
+#print axioms Lelantos.inflation_rejected
+#print axioms Lelantos.mint_from_nothing_rejected
+#print axioms Lelantos.transfer_naming_asset_rejected
+#print axioms Lelantos.withdraw_asset_zero_rejected
+#print axioms Lelantos.wrong_digest_rejected
+-- `src/tree_update_batch.circom`. Everything rests on `p_prime` alone; the † results carry
+-- their hash assumption in the statement.
 #print axioms Lelantos.batch_count_range
 #print axioms Lelantos.batch_active_spec
 #print axioms Lelantos.batch_padding_zero
@@ -149,9 +182,20 @@ free of hash assumptions.
 #print axioms Lelantos.batch_old_root
 #print axioms Lelantos.batch_advances_by_count
 #print axioms Lelantos.batch_advances_at_positions
+#print axioms Lelantos.batch_deposit_leaf
+#print axioms Lelantos.batch_spend_leaf
+#print axioms Lelantos.batch_no_value_under_zero
+#print axioms Lelantos.batch_deposit_opening_unique
+#print axioms Lelantos.batch_deposit_spend_binds
 #print axioms Lelantos.batch_new_root_determined
+#print axioms Lelantos.batch_compression
+#print axioms Lelantos.batch_digest_public
+#print axioms Lelantos.batch_calldata_binding
+#print axioms Lelantos.batchCoeffs_determined_by_digest
+#print axioms Lelantos.batchSlotValue_determined_by_digest
+#print axioms Lelantos.batch_pi_binding
+#print axioms Lelantos.batch_calldata_pi_binding
 #print axioms Lelantos.batchPiSlot_batchSlotIndex
-#print axioms Lelantos.batch_deposit_opens
 #print axioms Lelantos.InsertsTo.unique
 #print axioms Lelantos.batchAppend_sound
 #print axioms Lelantos.batchAppend_old_root

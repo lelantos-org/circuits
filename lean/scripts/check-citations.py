@@ -15,7 +15,7 @@ Checks 1 and 2 detect renamed, deleted or shortened sources. Check 3 detects spa
 that shifted because lines were inserted above them while remaining in range.
 
 An *anchor* is an identifier inside backticks on the citing line (for example
-`` `acc[0] <== 0` ``, `` `HashToAssetGen` ``, `` `is_deposit` ``) that also occurs in
+`` `acc[0] <== 0` ``, `` `NoteCommitment` ``, `` `is_deposit` ``) that also occurs in
 the cited file. An anchor must occur within the cited span; otherwise the span has
 moved. A citation with no anchors receives checks 1 and 2 only.
 
@@ -104,8 +104,8 @@ def unresolvable(citation: Citation, source_cache: dict[str, list[str]],
     found = anchors(citation, lines)
     if not found:
         return None
-    # A doc line may carry several spans, e.g. `` `:71-78, 119-120` `` for a gadget
-    # instantiated in one block and bound to an output in another. Its quotations
+    # A doc line may carry several spans, e.g. `` `:72, 93-94` `` for a gadget
+    # instantiated in one place and wired in another. Its quotations
     # describe the spans jointly, so anchors are matched against their union.
     spans = group if group is not None else [(citation.lo, citation.hi)]
     span = "\n".join("\n".join(lines[lo - 1 : hi]) for lo, hi in spans)

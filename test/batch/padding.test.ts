@@ -1,11 +1,10 @@
 // Zeroing constraints and count bounds.
 //
-// Section 3 of tree_update_batch.circom asserts (1 - active[k]) * X === 0 for
-// every per-leaf field of an inactive slot; section 4 also zeroes the two
+// Step 4 of tree_update_batch.circom asserts (1 - active[k]) * X === 0 for
+// every per-leaf field of an inactive slot; step 1 also zeroes the two
 // deposit-only fields on an active spend leaf. `actual_count - 1` is decomposed
 // in COUNT_BITS bits, bounding the count to [1, MAX_L].
 
-import { BN254_FR } from "../helpers";
 import { rebindFiatShamir, type BatchWitness } from "../lib/batch";
 import { MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
 import { expectBatchRejects, useBatchCircuit } from "./setup";
@@ -25,36 +24,36 @@ describe("tree_update_batch / padding, counts and spend-leaf zeroing", function 
         field: string;
         /** Write the non-zero value into the inactive slot. */
         poison: (w: BatchWitness) => void;
-        /**
-         * Whether the field is a PolyEval coefficient. All are except `rcv`, and
-         * those rows need Fiat-Shamir re-derived: otherwise a stale `z` rejects
-         * the witness before the padding constraint is reached.
-         */
-        polyEvalBound?: boolean;
     }
 
     const PADDING_CASES: PaddingCase[] = [
-        { field: "cm",             poison: w => { w.cms[1] = 0xbadcafen; } },
-        // Step 6 shifts an inactive slot's y by 1 and runs BabyCheck over
-        // (x, y + 1), so this row trips that too: no x other than 0 puts (x, 1)
-        // on the curve, and the padding constraint cannot be isolated here.
-        { field: "cv_dep_x",       poison: w => { w.cvDep[1] = [1n, w.cvDep[1][1]]; } },
-        // y = -2 shifts to (0, -1), which is on the curve, so BabyCheck stays
-        // satisfied and the rejection is attributable to the padding constraint
-        // alone.
-        { field: "cv_dep_y",       poison: w => { w.cvDep[1] = [0n, BN254_FR - 2n]; } },
+        { field: "cms",            poison: w => { w.cms[1] = 0xbadcafen; } },
+        // The next two write the field on a slot whose is_deposit is 0, so the
+        // spend-slot zeroing of step 1 rejects them as well; `as a deposit`
+        // below sets is_deposit with them, which that step permits, and leaves
+        // the padding constraint as the only one that can reject.
         { field: "leaf_asset",     poison: w => { w.leafAsset[1] = 42n; } },
         { field: "leaf_public_in", poison: w => { w.leafPublicIn[1] = 99n; } },
         { field: "is_deposit",     poison: w => { w.isDeposit[1] = 1; } },
-        { field: "rcv",            poison: w => { w.rcv[1] = 7n; }, polyEvalBound: false },
+        {
+            field: "leaf_asset, as a deposit",
+            poison: w => { w.isDeposit[1] = 1; w.leafAsset[1] = 42n; },
+        },
+        {
+            field: "leaf_asset and leaf_public_in, as a deposit",
+            poison: w => { w.isDeposit[1] = 1; w.leafAsset[1] = 42n; w.leafPublicIn[1] = 99n; },
+        },
     ];
 
-    for (const { field, poison, polyEvalBound = true } of PADDING_CASES) {
+    for (const { field, poison } of PADDING_CASES) {
         it(`padding: non-zero ${field} in inactive slot is rejected`, async () => {
             const { batch, circuit } = ctx;
             const w = batch.single({ val: 9n, isDeposit: 1 });
             poison(w);
-            if (polyEvalBound) rebindFiatShamir(w);
+            // Every row is a PolyEval coefficient, so Fiat-Shamir is re-derived:
+            // otherwise a stale `z` rejects the witness before the padding
+            // constraint is reached.
+            rebindFiatShamir(w);
             await expectBatchRejects(
                 circuit,
                 w,
@@ -73,9 +72,8 @@ describe("tree_update_batch / padding, counts and spend-leaf zeroing", function 
         w.actualCount = 0;
         // Zero out the would-be-active slot fields so only the count check fires.
         w.cms[0] = 0n;
-        w.cvDep[0] = [0n, 0n];
         w.leafAsset[0] = 0n; w.leafPublicIn[0] = 0n;
-        w.isDeposit[0] = 0; w.rcv[0] = 0n;
+        w.isDeposit[0] = 0;
         rebindFiatShamir(w);
         await expectBatchRejects(circuit, w, "Num2Bits(COUNT_BITS) must reject actual_count - 1 = -1");
     });
@@ -99,12 +97,13 @@ describe("tree_update_batch / padding, counts and spend-leaf zeroing", function 
         await expectBatchRejects(circuit, w, "is_deposit must be constrained boolean");
     });
 
-    // ===== spend-leaf field zeroing (section 4) =====
+    // ===== spend-leaf field zeroing (step 1) =====
     //
-    // Section 4 zeroes the two deposit-only fields on an active spend leaf, so a
+    // Step 1 zeroes the two deposit-only fields on an active spend leaf, so a
     // relayer cannot push a nonzero leaf_asset or leaf_public_in into the public
-    // inputs of a batch that carries no deposit. The padding rows above do not
-    // reach these constraints because section 3 rejects inactive slots first.
+    // inputs of a batch that carries no deposit. Neither field reaches a spend
+    // leaf, so nothing else would pin them. These run on an active slot, where
+    // the padding constraint is satisfied and cannot be what rejects.
 
     it("FAILS on a nonzero leaf_asset in an active spend leaf", async () => {
         const { batch, circuit } = ctx;

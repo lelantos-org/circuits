@@ -1,7 +1,8 @@
 // Honest batches the circuit must accept, across leaf count, deposit/spend mix
 // and start position, and the capacity bound at the end of the tree.
 //
-// Leaf format: leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
+// A leaf is a note commitment: the word a spend supplies, or the hash this
+// circuit builds from a deposit's public amount and its `inner`.
 
 import { ARITY, BATCH_DEPTH, MAX_L, TIMEOUT_HEAVY } from "../lib/constants";
 import type { LeafWitness } from "../lib/batch";
@@ -12,7 +13,7 @@ describe("tree_update_batch / honest shapes and capacity", function () {
 
     const ctx = useBatchCircuit();
 
-    it("honest deposit: 1 active leaf, isDeposit=1, binding verifies", async () => {
+    it("honest deposit: 1 active leaf, isDeposit=1, the leaf is built from the public amount", async () => {
         const { batch, circuit } = ctx;
         const leaf = batch.leafWith({
             asset: 7n,
@@ -20,17 +21,16 @@ describe("tree_update_batch / honest shapes and capacity", function () {
             pk: 0xabcn,
             rho: 1n,
             rcm: 3n,
-            rcvDep: 5n,
             isDeposit: 1,
         });
         await expectBatchAccepts(circuit, batch.honest(0, [leaf]));
     });
 
-    it("honest spend: 2 active leaves, isDeposit=0, binding skipped", async () => {
+    it("honest spend: 2 active leaves, isDeposit=0, each cm inserted as it stands", async () => {
         const { batch, circuit } = ctx;
         const leaves = [
-            batch.leafWith({ asset: 7n, val: 100n, pk: 0xdadn, rho: 11n, rcm: 33n, rcvDep: 55n, isDeposit: 0 }),
-            batch.leafWith({ asset: 7n, val: 50n, pk: 0xdadn, rho: 22n, rcm: 44n, rcvDep: 66n, isDeposit: 0 }),
+            batch.leafWith({ asset: 7n, val: 100n, pk: 0xdadn, rho: 11n, rcm: 33n, isDeposit: 0 }),
+            batch.leafWith({ asset: 7n, val: 50n, pk: 0xdadn, rho: 22n, rcm: 44n, isDeposit: 0 }),
         ];
         await expectBatchAccepts(circuit, batch.honest(0, leaves));
     });

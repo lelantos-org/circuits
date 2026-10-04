@@ -9,7 +9,7 @@ import {
     Jubjub,
     MerkleTree,
     Poseidon,
-    buildLeaf,
+    buildInner,
     buildNoteCommitment,
     buildNullifierFromNsk,
     buildRho,
@@ -21,6 +21,7 @@ import {
     abiEncodeCoeffs,
     circuitSignals,
     coeffs,
+    digestPrefix,
     fiatShamirZ,
     flatten,
     hornerEval,
@@ -28,7 +29,6 @@ import {
     FMD_DEFAULT_GAMMA,
     type Field,
     type Note,
-    type Point,
     type SpentNote,
 } from "../../test/ref/index.js";
 import { loadCircuit, readOutput, srcPath } from "../../test/lib/circuit.js";
@@ -50,9 +50,17 @@ interface TransactCase {
     /** One entry per input slot; a null entry becomes a dummy slot. */
     inputs: ({ nsk: bigint; value: bigint } | null)[];
     outputs: { nsk: bigint; value: bigint }[];
-    publicIn: bigint;
+    /** Withdrawn from the pool, in `asset`. Zero for a transfer. */
     publicOut: bigint;
     asset: bigint;
+}
+
+/**
+ * The transparent bucket's asset id: the circuit requires 0 when nothing is
+ * withdrawn, so a transfer does not publish the asset it moves.
+ */
+function publicAssetOf(c: TransactCase): bigint {
+    return c.publicOut === 0n ? 0n : c.asset;
 }
 
 interface TransactShape {
@@ -71,26 +79,23 @@ interface TransactShape {
     cases: TransactCase[];
 }
 
-/** A real input's leaf preimage, published so the SDK can rebuild the tree. */
+/** A real input's leaf, published so the SDK can rebuild the tree. */
 interface RealLeafMeta {
     slot: number;
+    /** The note commitment, which is the tree leaf. */
     cm: Field;
-    cvDep: Point;
-    leaf: Field;
     leafIndex: number;
     nsk: bigint;
 }
 
-/** A dummy slot's derived blinders, published so the SDK can reproduce them. */
+/** A dummy slot's `rho`, published so the SDK can reproduce its nullifier. */
 interface DummyMeta {
     slot: number;
     rho: Field;
-    rcv: Field;
-    rcvDep: Field;
 }
 
 // Value conservation the circuit enforces, per asset:
-//   sum(input values) + public_in == sum(output values) + public_out
+//   sum(input values) == sum(output values) + public_out
 export const TRANSACT_SHAPES: TransactShape[] = [
     {
         id: "4x6",
@@ -102,14 +107,16 @@ export const TRANSACT_SHAPES: TransactShape[] = [
         // the denomination ladder in one spend; four inputs because an input
         // slot costs roughly 3.4x an output slot.
         //
-        // These vectors pin the 70-word challenge preimage, whose leading 46
+        // These vectors pin the 38-word challenge preimage, whose leading 13
         // coefficients the Lean development proves against, as a byte-exact
-        // target for the `PubInputs.compress` overload. Its 51-word calldata
+        // target for the `PubInputs.compress` overload. Its 19-word calldata
         // prefix fixes every word `compress` re-masks in assembly.
         cases: [
             {
                 name: "internal-4in6out-balanced",
-                description: "Four real inputs, six real outputs, no public flow.",
+                description:
+                    "Four real inputs, six real outputs, nothing withdrawn: "
+                    + "public_asset_id is 0.",
                 inputs: [
                     { nsk: 11n, value: 100n },
                     { nsk: 12n, value: 50n },
@@ -124,13 +131,12 @@ export const TRANSACT_SHAPES: TransactShape[] = [
                     { nsk: 25n, value: 15n },
                     { nsk: 26n, value: 5n },
                 ],
-                publicIn: 0n,
                 publicOut: 0n,
                 asset: 7n,
             },
             {
-                name: "deposit-3in6out-public-in",
-                description: "One dummy input slot; value enters the pool via public_in.",
+                name: "transfer-3in6out-one-dummy",
+                description: "One dummy input slot; three real notes transferred.",
                 inputs: [
                     { nsk: 11n, value: 100n },
                     { nsk: 12n, value: 50n },
@@ -140,20 +146,19 @@ export const TRANSACT_SHAPES: TransactShape[] = [
                 outputs: [
                     { nsk: 21n, value: 60n },
                     { nsk: 22n, value: 50n },
-                    { nsk: 23n, value: 40n },
-                    { nsk: 24n, value: 30n },
+                    { nsk: 23n, value: 30n },
+                    { nsk: 24n, value: 20n },
                     { nsk: 25n, value: 15n },
-                    { nsk: 26n, value: 10n },
+                    { nsk: 26n, value: 0n },
                 ],
-                publicIn: 30n,
                 publicOut: 0n,
                 asset: 7n,
             },
             {
                 name: "withdraw-4in6out-public-out",
                 description:
-                    "Value leaves via public_out, with change split across six slots — "
-                    + "the decomposition the six-output shape exists for.",
+                    "Value leaves via public_out under the note's asset id, with change "
+                    + "split across six slots: the decomposition the six-output shape exists for.",
                 inputs: [
                     { nsk: 11n, value: 100n },
                     { nsk: 12n, value: 100n },
@@ -168,7 +173,6 @@ export const TRANSACT_SHAPES: TransactShape[] = [
                     { nsk: 25n, value: 10n },
                     { nsk: 26n, value: 10n },
                 ],
-                publicIn: 0n,
                 publicOut: 150n,
                 asset: 7n,
             },
@@ -189,26 +193,27 @@ function validateCase(shape: TransactShape, c: TransactCase): void {
     }
     const inSum = c.inputs.reduce((a, i) => a + (i?.value ?? 0n), 0n);
     const outSum = c.outputs.reduce((a, o) => a + o.value, 0n);
-    if (inSum + c.publicIn !== outSum + c.publicOut) {
+    if (inSum !== outSum + c.publicOut) {
         throw new Error(
-            `${shape.id}/${c.name}: unbalanced — in ${inSum} + publicIn ${c.publicIn} != ` +
+            `${shape.id}/${c.name}: unbalanced — in ${inSum} != ` +
                 `out ${outSum} + publicOut ${c.publicOut}`,
         );
     }
 }
 
-/** Note derivation shared with `TxBuilder.note`: blinders are rho + 1..3. */
+/** Note derivation shared with `TxBuilder.note`: rcm is rho + 1. */
 function note(P: Poseidon, asset: Field, nsk: bigint, value: bigint, rho: Field): Note {
-    return { asset, value, pk: derivePk(P, nsk), rho, rcm: rho + 1n, rcv: rho + 2n, rcvDep: rho + 3n };
+    return { asset, value, pk: derivePk(P, nsk), rho, rcm: rho + 1n };
 }
 
 /**
  * Insert every real input into `tree`, in slot order.
  *
  * Returns the spent notes with empty proofs, since the root is not yet frozen,
- * plus the leaf preimages the published `intermediates` block exposes.
+ * plus the leaves the published `intermediates` block exposes. The leaf is the
+ * note commitment itself.
  */
-function insertRealInputs(P: Poseidon, J: Jubjub, tree: MerkleTree, c: TransactCase) {
+function insertRealInputs(P: Poseidon, tree: MerkleTree, c: TransactCase) {
     const spent: SpentNote[] = [];
     const realMeta: RealLeafMeta[] = [];
 
@@ -216,9 +221,7 @@ function insertRealInputs(P: Poseidon, J: Jubjub, tree: MerkleTree, c: TransactC
         if (!inp) return;
         const n = note(P, c.asset, inp.nsk, inp.value, BigInt(1000 * (i + 1)));
         const cm = buildNoteCommitment(P, n);
-        const cvDep = J.valueCommit(n.value, J.hashToAssetGen(n.asset), n.rcvDep);
-        const leaf = buildLeaf(P, cm, cvDep);
-        const leafIndex = tree.insert(leaf);
+        const leafIndex = tree.insert(cm);
         spent.push({
             ...n,
             nsk: inp.nsk,
@@ -229,7 +232,7 @@ function insertRealInputs(P: Poseidon, J: Jubjub, tree: MerkleTree, c: TransactC
             pathIndices: [],
             isDummy: false,
         });
-        realMeta.push({ slot: i, cm, cvDep, leaf, leafIndex, nsk: inp.nsk });
+        realMeta.push({ slot: i, cm, leafIndex, nsk: inp.nsk });
     });
 
     return { spent, realMeta };
@@ -243,11 +246,8 @@ function fillSlots(P: Poseidon, depth: number, c: TransactCase, finalizedReal: S
     const inputs: SpentNote[] = c.inputs.map((inp, i) => {
         if (inp) return finalizedReal[realCursor++];
         const rho = BigInt(90000 + i);
-        // Blinders come from a deterministic derivation over rho; read them back
-        // off the result rather than recomputing the derivation here.
-        const dummy = dummyInputAt(P, depth, rho);
-        dummyMeta.push({ slot: i, rho, rcv: dummy.rcv, rcvDep: dummy.rcvDep });
-        return dummy;
+        dummyMeta.push({ slot: i, rho });
+        return dummyInputAt(P, depth, rho);
     });
 
     return { inputs, dummyMeta };
@@ -258,21 +258,22 @@ function fillSlots(P: Poseidon, depth: number, c: TransactCase, finalizedReal: S
  * challenge preimage, hash that into the real z, then rebuild. `z` is a public
  * input, so it cannot be part of what derives it.
  *
- * `flatten` and `coeffs` differ (70 words hashed, 46 evaluated); the split is
- * required for soundness. See `coeffs` in test/ref/compress.ts.
+ * The coefficient digest is fixed in the first pass: it is a function of the
+ * coefficient signals alone and is itself a word of the preimage.
+ *
+ * `flatten` and `coeffs` differ (38 words hashed, 13 evaluated). See `coeffs`
+ * in test/ref/compress.ts.
  */
 function buildWitness(
     P: Poseidon,
-    J: Jubjub,
     c: TransactCase,
     inputs: SpentNote[],
     outputs: Note[],
     clueList: ReturnType<ReturnType<typeof deterministicClueGen>["next"]>[],
     merkleRoot: Field,
 ) {
-    const base = toCircomInput(P, J, {
-        publicAssetId: c.asset,
-        publicIn: c.publicIn,
+    const base = toCircomInput(P, {
+        publicAssetId: publicAssetOf(c),
         publicOut: c.publicOut,
         inputs,
         outputs,
@@ -299,6 +300,7 @@ function buildWitness(
 function compressionOf(
     challenge: Field[],
     polyCoeffs: Field[],
+    digest: string,
     z: Field,
     y: Field,
 ): Compression {
@@ -306,6 +308,7 @@ function compressionOf(
         challenge: challenge.map(s),
         abiEncodedChallenge: hex(abiEncodeCoeffs(challenge)),
         coeffs: polyCoeffs.map(s),
+        digest,
         zDerivation: "fiat-shamir",
         z: s(z),
         y: s(y),
@@ -325,15 +328,14 @@ export async function buildTransactVectors(shape: TransactShape) {
         const clues = deterministicClueGen(P, J);
         const tree = new MerkleTree(P, shape.depth);
 
-        const { spent, realMeta } = insertRealInputs(P, J, tree, c);
+        const { spent, realMeta } = insertRealInputs(P, tree, c);
         const merkleRoot = tree.root();
         const finalizedReal = spent.map((sn) => ({ ...sn, ...tree.proof(sn.leafIndex) }));
         const { inputs, dummyMeta } = fillSlots(P, shape.depth, c, finalizedReal);
 
         // Output rho is forced to the derivation the circuit enforces. Only
-        // `rho` is replaced: rcm/rcv/rcvDep are rho + k, and a derived rho is a
-        // full-width Poseidon output, so deriving the blinders from it would put
-        // rcv above the Num2Bits(RCV_BITS) width MulH enforces.
+        // `rho` is replaced; `rcm` stays the small reproducible value `note`
+        // gave it.
         const nf0 = inputs[0].nf;
         const outputs: Note[] = c.outputs.map((o, j) => ({
             ...note(P, c.asset, o.nsk, o.value, BigInt(3000 * (j + 1))),
@@ -342,7 +344,7 @@ export async function buildTransactVectors(shape: TransactShape) {
         const clueList = outputs.map(() => clues.next());
 
         const { witnessInput, challenge, coeffs: polyCoeffs, z, y } =
-            buildWitness(P, J, c, inputs, outputs, clueList, merkleRoot);
+            buildWitness(P, c, inputs, outputs, clueList, merkleRoot);
 
         // The compiled circuit is the oracle for `y`, not the TypeScript Horner
         // evaluation. `circuitSignals` drops the challenge-only fields: they are
@@ -350,11 +352,18 @@ export async function buildTransactVectors(shape: TransactShape) {
         // rejects a key the circuit does not declare.
         const w = await circuit.calculateWitness(circuitSignals(witnessInput), true);
         await circuit.checkConstraints(w);
-        const circuitY = readOutput(w);
+        const circuitY = readOutput(w, 0);
+        const circuitDigest = readOutput(w, 1);
         if (circuitY !== y) {
             throw new Error(
                 `${c.name}: circuit y (${circuitY}) != reference PolyEval y (${y}). ` +
                     `The layout in test/ref/compress.ts disagrees with TransactCompressN.`,
+            );
+        }
+        if (s(circuitDigest) !== witnessInput.digest) {
+            throw new Error(
+                `${c.name}: circuit digest (${circuitDigest}) != reference CoeffDigest ` +
+                    `(${witnessInput.digest}).`,
             );
         }
         if (polyCoeffs.length !== layout.length) {
@@ -379,36 +388,43 @@ export async function buildTransactVectors(shape: TransactShape) {
                     nk: s(deriveNk(P, nsk)),
                     pk: s(derivePk(P, nsk)),
                 })),
-                assetGens: [{ assetId: s(c.asset), gen: pt(J.hashToAssetGen(c.asset)) }],
+                // Every note commits in two steps:
+                //   inner = Poseidon(TAG_INNER, pk, rho, rcm)
+                //   cm    = Poseidon(TAG_CM, asset·2^64 + value, inner)
+                // and cm is the tree leaf.
                 inputs: inputs.map((n, i) => ({
                     slot: i,
                     isDummy: n.isDummy,
+                    inner: s(buildInner(P, n)),
                     cm: s(n.cm),
                     nf: s(n.nf),
-                    cv: pt(J.valueCommit(n.value, J.hashToAssetGen(n.asset), n.rcv)),
-                    cvDep: pt(J.valueCommit(n.value, J.hashToAssetGen(n.asset), n.rcvDep)),
                     leafIndex: n.leafIndex,
                 })),
                 realLeaves: realMeta.map((m) => ({
                     slot: m.slot,
-                    cm: s(m.cm),
-                    cvDep: pt(m.cvDep),
-                    leaf: s(m.leaf),
+                    leaf: s(m.cm),
                     leafIndex: m.leafIndex,
                 })),
                 dummies: dummyMeta.map((d) => ({
                     slot: d.slot,
                     rho: s(d.rho),
-                    rcv: s(d.rcv),
-                    rcvDep: s(d.rcvDep),
                 })),
                 outputs: outputs.map((o, j) => ({
                     slot: j,
                     rho: s(o.rho),
+                    inner: s(buildInner(P, o)),
                     cm: s(buildNoteCommitment(P, o)),
-                    cv: pt(J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcv)),
-                    cvDep: pt(J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcvDep)),
                 })),
+                // The second public signal: a Poseidon(5) fold over the
+                // coefficients, four per block, zero-padded,
+                //   h_0     = Poseidon(TAG_DIGEST, w[0..3])
+                //   h_{b+1} = Poseidon(h_b, w[4b+4 .. 4b+7])
+                // The circuit outputs it; calldata carries the same value right
+                // after the coefficients, hashed into z and not evaluated.
+                digest: {
+                    absorbed: digestPrefix(witnessInput).map(s),
+                    value: witnessInput.digest,
+                },
                 merkle: {
                     // Per-shape depth rather than the global `DEPTH` constant,
                     // which may differ from the shape's instantiation.
@@ -437,8 +453,8 @@ export async function buildTransactVectors(shape: TransactShape) {
                 },
             },
             witness: witnessInput,
-            compression: compressionOf(challenge, polyCoeffs, z, y),
-            circuitOutput: { y: s(circuitY) },
+            compression: compressionOf(challenge, polyCoeffs, witnessInput.digest, z, y),
+            circuitOutput: { y: s(circuitY), digest: s(circuitDigest) },
         });
     }
 
@@ -449,14 +465,16 @@ export async function buildTransactVectors(shape: TransactShape) {
             template: `Transact(${shape.depth}, ${shape.nIn}, ${shape.nOut})`,
             source: shape.source,
             shape: { depth: shape.depth, nIn: shape.nIn, nOut: shape.nOut },
-            coeffCount: 4 + 3 * shape.nIn + 5 * shape.nOut,
-            challengeWords: 10 + 3 * shape.nIn + 8 * shape.nOut,
+            coeffCount: 3 + shape.nIn + shape.nOut,
+            challengeWords: 10 + shape.nIn + 4 * shape.nOut,
+            // The verifier's `_pubSignals`, in order.
+            publicSignals: ["y", "digest", "z"],
             layout,
             layoutDigest: layoutDigest(layout),
-            // No in-circuit constraint binds these, so they are neither signals
-            // nor coefficients: they enter the challenge preimage and bind
-            // through `z`. As coefficients they would be free variables a prover
-            // could use to solve `y = Σ c_k z^k` after reading `z`.
+            // The circuit has no signal for these, so they are not coefficients:
+            // they enter the challenge preimage and bind through `z`. `digest`
+            // is not listed: it is hashed too, but the verifier compares it as a
+            // public signal against the circuit's own output.
             challengeOnly: [
                 "recipient_address",
                 "chain_id",

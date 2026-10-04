@@ -16,8 +16,8 @@
 // is not reachable by these searches, by construction:
 //
 //   * The searches walk straight lines from an honest witness. That forgery is
-//     a differently shaped witness (`is_deposit` cleared, the whole `active_dep`
-//     chain gated off), not a null direction from a deposit witness.
+//     a differently shaped witness (`is_deposit` cleared, so the word is the
+//     leaf), not a null direction from a deposit witness.
 //   * `severity: "break"` means "some moving entry is an output or a public
 //     input". The forgery holds `y` and `z` fixed, so even if found it would be
 //     graded `malleable`.
@@ -58,20 +58,20 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
     const gadgets = useGadgets();
     let batch: BatchBuilder;
     before(() => {
-        batch = new BatchBuilder(gadgets.P, gadgets.J);
+        batch = new BatchBuilder(gadgets.P);
     });
 
     it("the detector sees the decompositions the circuit is known to contain", () => {
         const hist = logBitGroupCensus(suite.ctx);
 
-        expect(hist.get(252), "expected one Num2Bits(252) per leaf slot: MulH's blinder " +
-            "decomposition, MAX_L of them").to.equal(MAX_L);
+        expect(hist.get(252), "expected no Num2Bits(252): the batch circuit carries " +
+            "no curve arithmetic").to.equal(undefined);
         expect(hist.get(64), "expected two Num2Bits(64) per leaf slot: the leaf_asset and " +
             "leaf_public_in range checks, 2 * MAX_L of them").to.equal(2 * MAX_L);
         expect(hist.get(3), "expected one Num2Bits(COUNT_BITS) for actual_count - 1")
             .to.equal(1);
-        expect(Math.max(...hist.keys()), "the widest decomposition should be MulH's")
-            .to.equal(252);
+        expect(Math.max(...hist.keys()), "the widest decomposition should be a range check's")
+            .to.equal(64);
     });
 
 
@@ -105,9 +105,10 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
     });
 
     it("a single spend leaf has no second witness", async () => {
-        // The deposit binding is gated off, so `cv_dep` carries only BabyCheck
-        // and `leaf_asset`/`leaf_public_in` only their zeroings: the fewest
-        // constraints on any active slot.
+        // The word is the leaf, and `leaf_asset`/`leaf_public_in` carry only
+        // their zeroings. The deposit hash is still computed, over zeros and the
+        // word, and then not selected: `dep_cm` is pinned by its own hash
+        // whether or not anything reads it.
         await assertNoSecond(
             "oneSpend",
             batch.single({ val: 1000n, isDeposit: 0 }),
@@ -120,15 +121,15 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
         await assertNoSecond("partialBatch", batch.honest(0, batch.seededMany(3, () => 1)));
     });
 
-    it("a full flush of principal/fee pairs at fbps = 0 has no second witness", async () => {
-        // Every fee note has zero value, so every odd slot's deposit binding is
-        // degenerate and `leaf_asset` there is pinned only by step 6a. Without
-        // 6a this witness would expose four free 64-bit coefficients.
+    it("a full flush of principal/fee pairs with zero fees has no second witness", async () => {
+        // Every fee note has zero value at asset 0, so every odd slot has both
+        // `IsZero(leaf_asset)` and its product with `leaf_public_in` at zero:
+        // the witness with the most vanishing terms in step 5.
         //
         // Also the all-slots-active case. The search results depend on the
         // witness only through which slots are active (each inactive slot adds
-        // one free IsZero hint), so a separate full batch would sweep 113k
-        // entries for the same finding set.
+        // one free IsZero hint), so a separate full batch would sweep the whole
+        // witness again for the same finding set.
         await assertNoSecond("fbps0Flush", batch.honest(0, batch.depositPairs(MAX_L)));
     });
 
@@ -161,14 +162,21 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
     });
 
     it("a single zero-value fee note has no second witness", async () => {
-        // The degenerate slot in isolation: at leaf_public_in == 0 the binding
-        // reduces to cv_dep == rcv·H and the asset generator drops out, so
-        // `leaf_asset` is pinned only by step 6a's canonicalisation to 0. 6a is
-        // per-slot with no reference to a neighbour, so a zero-value leaf is
-        // valid at any slot.
+        // A zero-value leaf at asset 0 beside a valued one. Every constraint is
+        // per-slot, so a zero-value leaf is valid at any slot.
         await assertNoSecond(
             "zeroValueFee",
             batch.honest(0, batch.depositPairs(2)),
+        );
+    });
+
+    it("a zero-value deposit leaf at a non-zero asset has no second witness", async () => {
+        // The asset is an input of the leaf hash at any value, so nothing about
+        // it is free here: this is the shape the old Pedersen binding left with
+        // an unpinned 64-bit coefficient.
+        await assertNoSecond(
+            "zeroValueNamedAsset",
+            batch.honest(0, [batch.seeded(0, 1), batch.seeded(1, 1, 0n, 7n)]),
         );
     });
 
@@ -185,10 +193,10 @@ describe("underconstrained_tree_update_batch [fuzz]", function () {
                 fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
                 fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
                 async (count, prefill, flags, worthless) => {
-                    // Any interleaving is satisfiable: step 6a is per-slot and
-                    // refers to no neighbour. A deposit leaf is drawn with zero
-                    // value at asset 0 on half the draws, at any slot, since the
-                    // degenerate-binding case 6a handles is not tied to parity.
+                    // Any interleaving is satisfiable: every constraint is
+                    // per-slot and refers to no neighbour. A deposit leaf is
+                    // drawn with zero value at asset 0 on half the draws, at
+                    // any slot.
                     const leaves = Array.from({ length: count }, (_, i) =>
                         flags[i] === 1 && worthless[i] === 1
                             ? batch.seeded(i, 1, 0n, 0n)

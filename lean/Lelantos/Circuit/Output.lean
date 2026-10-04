@@ -1,4 +1,4 @@
-import Lelantos.Gadgets.ValueCommit
+import Lelantos.Gadgets.Balance
 import Lelantos.Gadgets.Note
 
 /-!
@@ -10,16 +10,14 @@ key and is unconstrained; the circuit proves nothing about who can later spend t
 
 It proves:
 
-* `asset_id ≠ 0` unconditionally (in `SpentNote` the check is gated on `1 - is_dummy`),
-  which keeps `packed_av ≥ 2^64` and so keeps the `cm` preimage domain-separated from
-  tag-prefixed hashes.
+* `value` and `asset_id` are 64-bit, which `NoteCommitment`'s packing needs;
+* `asset_id ≠ 0` unconditionally (in `SpentNote` the check is gated on `1 - is_dummy`):
+  id 0 means "no asset";
+* the public `cm` is the commitment of the slot's own five note fields.
 
-* `cv` and `cv_dep` are built from the same range-checked bit array and the same
-  generator, structurally, since both come out of one `ValueCommitPair`
-  (`src/lib/output.circom:59-66`) — so they cannot open to different
-  `(asset, value)` pairs. That is `outputNote_cvDep_binds`, the transact half of
-  deposit binding. The value-inflation checks in `tree_update_batch.circom` are not
-  covered by this module.
+`cm` is the leaf `tree_update_batch.circom` inserts for this slot. There is no value
+commitment: the only thing an output publishes is `cm`, and what hides `(asset, value)`
+inside it is `rcm` alone, since an output's `rho` is publicly derivable.
 -/
 
 namespace Lelantos
@@ -31,69 +29,40 @@ structure OutputSlot where
   pk : F
   rho : F
   rcm : F
-  rcv : F
-  rcvDep : F
-  /-- Binding inputs supplied by the caller. -/
+  /-- Binding input supplied by the caller. -/
   cm : F
-  cv : Pt
-  /-- Exported. -/
-  cvDep : Pt
-  rH : Pt
   /-- Intermediates. -/
+  inner : F
   valueBits : ℕ → F
   assetBits : ℕ → F
-  rcvBits : ℕ → F
-  rcvDepBits : ℕ → F
-  gen : Pt
-  vT : Pt
-  vTDep : Pt
-  rHDep : Pt
   assetInv : F
   assetIsZero : F
 
 /-- The constraint system of `OutputNote()`, in source order. Fields are named, as in
 `SpentNoteSat`, so the fidelity table can be checked against them row by row. -/
 structure OutputNoteSat (o : OutputSlot) : Prop where
-  /-- `src/lib/output.circom:36-42` — `cm` binds the note. -/
-  cm_def : noteCommitment o.assetId o.value o.pk o.rho o.rcm = o.cm
-  /-- `:45-46` — value range. -/
+  /-- `src/lib/output.circom:24-25` — `rng_value`: the value is 64-bit. -/
   value_range : RangeCheck64Sat o.value o.valueBits
-  /-- `:49-50` — `IsZero(asset_id)`. -/
+  /-- `:27-28` — `rng_asset`: the asset id is 64-bit. -/
+  asset_range : RangeCheck64Sat o.assetId o.assetBits
+  /-- `:31-32` — `IsZero(asset_id)`. -/
   asset_isZero : IsZeroSat o.assetId o.assetInv o.assetIsZero
-  /-- `:51` — unconditional non-zero asset id, unlike `SpentNote`'s gated check. -/
+  /-- `:33` — unconditional non-zero asset id, unlike `SpentNote`'s gated check. -/
   asset_nonzero : o.assetIsZero = 0
-  /-- `:56-57` — `HashToAssetGen`, which also enforces `asset_id < 2^64`. -/
-  asset_bits : Num2BitsSat 64 o.assetId o.assetBits
-  /-- `:56-57` — …and its output point. -/
-  gen_def : o.gen = coords (assetGen o.assetId)
-  /-- `:59-66, 68-69` — value commitment (`ValueCommitPair.cv`, bound to the `cv` input),
-  with `rH` exported at `:71-72`. -/
-  cv_sat : ValueCommitSat o.valueBits o.gen o.rcv o.rcvBits o.vT o.rH o.cv
-  /-- `:59-66, 74-75` — deposit value commitment (`ValueCommitPair.cv_dep`), sharing the
-  same bits and generator structurally. -/
-  cv_dep_sat : ValueCommitSat o.valueBits o.gen o.rcvDep o.rcvDepBits o.vTDep o.rHDep o.cvDep
+  /-- `:36-39` — `inner = NoteInner(pk, rho, rcm)`. -/
+  inner_def : o.inner = noteInner o.pk o.rho o.rcm
+  /-- `:41-45` — `cm_h = NoteCommitment(asset_id, value, inner)`, bound to the `cm` input. -/
+  cm_def : noteCommitment o.assetId o.value o.inner = o.cm
 
 /-- What an output slot establishes. -/
 structure OutputWellFormed (o : OutputSlot) : Prop where
   assetNonzero : o.assetId ≠ 0
   valueRange : o.value.val < 2 ^ 64
   assetRange : o.assetId.val < 2 ^ 64
-  commitment : noteCommitment o.assetId o.value o.pk o.rho o.rcm = o.cm
-  /-- `cv` and `cv_dep` share the value·generator term, so they open to the same
-  `(asset, value)`. -/
-  cvDepBinds : o.vT = o.vTDep
-  /-- **`cv` opens to this note's own value under this note's own asset generator.**
-  The scalar is `value`, the range-checked signal that `cm` also binds. -/
-  cvOpens : o.cv = coords ((o.value.val : ZMod ell) • assetGen o.assetId
-    + (o.rcv.val : ZMod ell) • H)
-  /-- `cv_dep` opens likewise, differing only in its blinding factor. -/
-  cvDepOpens : o.cvDep = coords ((o.value.val : ZMod ell) • assetGen o.assetId
-    + (o.rcvDep.val : ZMod ell) • H)
+  /-- The published commitment is the commitment of this slot's own note. -/
+  commitment : noteCm o.assetId o.value o.pk o.rho o.rcm = o.cm
 
 theorem outputNote_sound {o : OutputSlot} (h : OutputNoteSat o) : OutputWellFormed o := by
-  have hvc := h.cv_sat
-  have hvcd := h.cv_dep_sat
-  rw [h.gen_def] at hvc hvcd
   have hnz : o.assetId ≠ 0 := by
     intro hzero
     have hz := h.asset_nonzero
@@ -102,29 +71,7 @@ theorem outputNote_sound {o : OutputSlot} (h : OutputNoteSat o) : OutputWellForm
   exact
     { assetNonzero := hnz
       valueRange := rangeCheck64_sound h.value_range
-      assetRange := (num2Bits_sound (le_of_lt two_pow_64_lt_p) h.asset_bits).2
-      commitment := h.cm_def
-      cvDepBinds := by rw [hvc.1, hvcd.1]
-      cvOpens := valueCommit_opens h.value_range hvc
-      cvDepOpens := valueCommit_opens h.value_range hvcd }
-
-/-- **Deposit binding, transact half.** The exported `cv_dep` carries the same
-`value · V^asset` term as `cv`, so an output cannot advertise one value on-chain and
-deposit another. -/
-theorem outputNote_cvDep_binds {o : OutputSlot} (h : OutputNoteSat o) :
-    o.vT = o.vTDep := (outputNote_sound h).cvDepBinds
-
-/-- **Deposit binding, in terms of the note.** `cv` and `cv_dep` open to the same
-`(asset_id, value)`, the note's own, differing only in the blinding factor.
-
-`outputNote_cvDep_binds` equates two scalar-multiplication intermediates (`vT = vTDep`),
-which holds because both gadgets receive the same bit array. This version names the
-committed value, so the statement is about the note rather than the wiring. -/
-theorem outputNote_cvDep_same_value {o : OutputSlot} (h : OutputNoteSat o) :
-    ∃ r r' : ZMod ell,
-      o.cv = coords ((o.value.val : ZMod ell) • assetGen o.assetId + r • H) ∧
-      o.cvDep = coords ((o.value.val : ZMod ell) • assetGen o.assetId + r' • H) :=
-  ⟨(o.rcv.val : ZMod ell), (o.rcvDep.val : ZMod ell),
-    (outputNote_sound h).cvOpens, (outputNote_sound h).cvDepOpens⟩
+      assetRange := rangeCheck64_sound h.asset_range
+      commitment := by rw [noteCm, ← h.inner_def]; exact h.cm_def }
 
 end Lelantos

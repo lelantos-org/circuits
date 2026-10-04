@@ -10,7 +10,7 @@
 // only for the layouts that separate it from its neighbours.
 //
 // Driving this through `transact_4x6` is what makes such coverage unaffordable:
-// a trial there costs a tree, N_IN authentication paths and a 100k-constraint
+// a trial there costs a tree, N_IN authentication paths and a 70k-constraint
 // witness. Here a trial is a field-array witness over ~1k constraints.
 // `transact/multi_asset.test.ts` carries the end-to-end shapes.
 
@@ -26,10 +26,10 @@ import { arbBalancedAssetShape, fcParamsFor, type AssetBalanceShape } from "./ar
 const fcParams = fcParamsFor("BALANCE");
 const arbShape = arbBalancedAssetShape(N_IN, N_OUT);
 
-/** Slot count the perturbation properties index into: 4 in, 6 out, 2 buckets. */
-const SLOTS = N_IN + N_OUT + 2;
+/** Slot count the perturbation properties index into: 4 in, 6 out, 1 bucket. */
+const SLOTS = N_IN + N_OUT + 1;
 
-/** `shape` with `+1` on slot `k`, numbered inputs, then outputs, then buckets. */
+/** `shape` with `+1` on slot `k`, numbered inputs, then outputs, then the bucket. */
 function bump(shape: AssetBalanceShape, k: number): AssetBalanceShape {
     const out: AssetBalanceShape = {
         ...shape,
@@ -38,7 +38,6 @@ function bump(shape: AssetBalanceShape, k: number): AssetBalanceShape {
     };
     if (k < N_IN) out.inValue[k] += 1n;
     else if (k < N_IN + N_OUT) out.outValue[k - N_IN] += 1n;
-    else if (k === N_IN + N_OUT) out.publicIn += 1n;
     else out.publicOut += 1n;
     return out;
 }
@@ -56,7 +55,7 @@ describe("PerAssetValueBalance [fuzz]", function () {
         }), fcParams);
     });
 
-    // One unit, anywhere: every value slot and both transparent buckets sit on
+    // One unit, anywhere: every value slot and the transparent bucket sit on
     // some candidate row, and no other slot can absorb the difference.
     it("rejects a single extra unit in any slot", async () => {
         await fc.assert(fc.asyncProperty(

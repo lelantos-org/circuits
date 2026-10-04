@@ -10,37 +10,4 @@ outCm 3
 outCm 4
 outCm 5
 publicAssetId
-publicIn
 publicOut
-inCvX 0
-inCvY 0
-inCvX 1
-inCvY 1
-inCvX 2
-inCvY 2
-inCvX 3
-inCvY 3
-outCvX 0
-outCvY 0
-outCvX 1
-outCvY 1
-outCvX 2
-outCvY 2
-outCvX 3
-outCvY 3
-outCvX 4
-outCvY 4
-outCvX 5
-outCvY 5
-outCvDepX 0
-outCvDepY 0
-outCvDepX 1
-outCvDepY 1
-outCvDepX 2
-outCvDepY 2
-outCvDepX 3
-outCvDepY 3
-outCvDepX 4
-outCvDepY 4
-outCvDepX 5
-outCvDepY 5

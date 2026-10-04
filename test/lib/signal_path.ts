@@ -1,5 +1,5 @@
 // Address one entry of a circom input object by the name the circom uses:
-// `merkle_root`, `in_rcv[2]`, `in_path_elements[0][3][1]`.
+// `merkle_root`, `in_rcm[2]`, `in_path_elements[0][3][1]`.
 //
 // Tamper and divergence cases change exactly one entry of an honest witness.
 // Writing the path as a string keeps the row readable and greppable against the

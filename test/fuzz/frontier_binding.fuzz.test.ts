@@ -89,10 +89,10 @@ describe(`frontier binding [fuzz, depth=${DEPTH}, MAX_L=${MAX_L}]`, function () 
             arbTamperLevel,
             // Which of the 3 filled slots at the chosen level to perturb.
             fc.integer({ min: 0, max: 2 }),
-            // isDeposit per active leaf (Pedersen binding path vs spend skip).
-            // Per-leaf rather than per-batch: step 6a is a per-slot constraint
-            // with no reference to a neighbour, so any interleaving of deposit
-            // and spend leaves is satisfiable.
+            // isDeposit per active leaf (leaf built from the public amount vs
+            // the word inserted as it stands). Per-leaf rather than per-batch:
+            // every constraint is per-slot with no reference to a neighbour, so
+            // any interleaving of deposit and spend leaves is satisfiable.
             fc.array(fc.constantFrom<0 | 1>(0, 1), { minLength: MAX_L, maxLength: MAX_L }),
             async ({ digits, k, level }, slotIdx, depositFlags) => {
                 const startIndex = startIndexFromEdgeDigits(digits);

@@ -14,8 +14,8 @@ recorded rather than forbidden, but every one must be known.
 
 A constraint line is **transcribed** when a citation of at most `NARROW` (20) lines
 contains it. Citations of that width name one constraint or one contiguous wiring
-block abstracted by a single model field (e.g. `:225-243`, the nineteen
-`pe.<x> <== …` lines behind `PolyEvalSat`). Wider citations name a template
+block abstracted by a single model field (e.g. `:176-187`, the `pe.<x> <== …` lines
+behind `TransactSat.compress`). Wider citations name a template
 (`merkle.circom:19-72`, `batch_append.circom:107-249`); the model field describes the
 template as a whole and is not evidence for any individual line.
 
@@ -24,10 +24,9 @@ citation. It is pinned in `expected/coverage.txt` and diffed, as `check-axioms.s
 pins the trusted base, so a new untranscribed constraint appears in review to be
 cited or accepted.
 
-Some parts of the circuit are intentionally covered only by a pointer or not at all:
-`fixed_base_mul.circom` is modelled by the `escalarMul` axiom pair, and
-`EmptySubtreeHashes` is a free parameter in Lean. The generated expectation file
-records these instead of a hand-maintained allowlist.
+One part of the circuit is intentionally not covered at all: `EmptySubtreeHashes` is a
+free parameter in Lean. The generated expectation file records it instead of a
+hand-maintained allowlist.
 
 Run:  python3 lean/scripts/check-coverage.py             # check, from lean/
       python3 lean/scripts/check-coverage.py --update    # accept a new residue
@@ -51,8 +50,9 @@ EXPECTED = os.path.join(LEAN, "expected", "coverage.txt")
 # Top-level circuits whose transitive closure is the circuit under proof.
 ROOTS = ["src/4x6.circom", "src/tree_update_batch.circom"]
 
-# circomlib includes resolve outside the repo; those templates are modelled as axioms
-# (`Lelantos.Meta.Assumptions`) and have no Lean counterpart.
+# circomlib includes resolve outside the repo. Poseidon is an opaque function in Lean,
+# and `Num2Bits`, `IsZero`, `IsEqual` and `LessThan` are transcribed from circomlib by
+# hand (`Model/Bits.lean`, `Gadgets/Comparators.lean`); none is in this closure.
 INCLUDE = re.compile(r'^\s*include\s+"(?P<path>[^"]+)"')
 
 # circom's constraint-emitting operators. `<--` assigns without constraining (as does

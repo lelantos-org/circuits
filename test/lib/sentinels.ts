@@ -17,8 +17,6 @@ export interface Sentinels {
     at(name: string): bigint;
     /** `[at("<field> 0"), ...]` for `n` slots. */
     scalars(field: string, n: number): bigint[];
-    /** `[[at("<field>X i"), at("<field>Y i")], ...]` for `n` slots. */
-    points(field: string, n: number): bigint[][];
 }
 
 /**
@@ -44,6 +42,5 @@ export function sentinels(names: readonly string[], base: number, label: string)
         map,
         at,
         scalars: (field, n) => Array.from({ length: n }, (_, i) => at(`${field} ${i}`)),
-        points: (field, n) => Array.from({ length: n }, (_, i) => [at(`${field}X ${i}`), at(`${field}Y ${i}`)]),
     };
 }

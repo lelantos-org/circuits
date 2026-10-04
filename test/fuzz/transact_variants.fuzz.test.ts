@@ -7,7 +7,7 @@
 //     rebuild after swapping slots must verify. A raw JSON swap does not,
 //     because output rho is bound to (nullifier[0], out_index) and slot order
 //     feeds that derivation (the rho-uniqueness defence in transact/rho.test.ts).
-//   - public-value boundary: publicIn / publicOut at 2^64 - 1 and at 2^64.
+//   - value boundary: note values and publicOut at 2^64 - 1 and at 2^64.
 //   - path-element perturbation: mutating a random level of one input's Merkle
 //     authentication path must reject, since the Poseidon image no longer
 //     matches `merkle_root`.
@@ -61,15 +61,25 @@ describe("transact_4x6 variants [fuzz]", function () {
         ), fcParams);
     });
 
-    it("public-value boundary: publicIn = 2^64 - 1 balanced witness passes", async () => {
-        // One input at MAX_VALUE, outputs summing to MAX_VALUE, publicIn =
-        // publicOut = 0 (transfer only). Pins Num2Bits(64) acceptance at the
-        // upper boundary.
+    it("value boundary: a note at 2^64 - 1 transfers", async () => {
+        // One input at MAX_VALUE, outputs summing to MAX_VALUE, nothing
+        // withdrawn. Pins Num2Bits(64) acceptance at the upper boundary.
         const split = { v1: MAX_VALUE, v2: 0n, o1: MAX_VALUE, o2: 0n };
         await ctx.circuit.calculateWitness(ctx.tx.transfer(split, ALICE_NSK, BOB_NSK), true);
     });
 
-    it("public-value boundary: input value = 2^64 (overflow) rejects", async () => {
+    it("value boundary: publicOut = 2^64 - 1 withdraws a whole note", async () => {
+        // The transparent bucket at its ceiling: RangeCheck64 on public_out must
+        // accept it, and the candidate row reads MAX_VALUE == 0 + MAX_VALUE.
+        const { tx, circuit } = ctx;
+        await circuit.calculateWitness(tx.spend(
+            tx.oneRealOneDummy(MAX_VALUE, ALICE_NSK),
+            [tx.note(0n, ALICE_NSK, 9n)],
+            { publicOut: MAX_VALUE },
+        ), true);
+    });
+
+    it("value boundary: input value = 2^64 (overflow) rejects", async () => {
         // The SDK or the circuit must reject the range violation; both enforce
         // the same invariant, so either rejection passes.
         const overflow = 1n << 64n;

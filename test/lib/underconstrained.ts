@@ -35,7 +35,7 @@
 // ===== the two searches =====
 //
 // Single-signal (`sweepSingleSignal`) walks the unit vectors, one per witness
-// entry, and decides for all ~100k whether any second value is admissible with
+// entry, and decides for all ~70k whether any second value is admissible with
 // everything else held fixed. It is exhaustive and cheap, because changing one
 // entry can only affect constraints that mention it.
 //

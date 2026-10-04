@@ -62,7 +62,7 @@ describe("transact_4x6 / rho and nullifier binding", function () {
     it("FAILS when two outputs share a rho, even with cm rebound", async () => {
         // Recomputing out_cm[1] against the shared rho keeps the commitment
         // binding satisfied, leaving DeriveRho as the only constraint that can
-        // reject. cv and cv_dep are rho-independent.
+        // reject.
         const { tx, circuit } = ctx;
         const outB = tx.note(75n, ALICE_NSK, 11n);
         const input = tx.spend(tx.twoRealInputs([100n, 50n], ALICE_NSK), [tx.note(75n, ALICE_NSK, 9n), outB]);

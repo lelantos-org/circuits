@@ -1,9 +1,9 @@
 // Note commitment, nullifier, rho derivation, and key derivation.
 // Mirrors src/lib/note.circom.
 
-import { POW_2_64, type Field, type Point } from "./field.js";
+import { POW_2_64, type Field } from "./field.js";
 import type { Poseidon } from "./poseidon.js";
-import { TAG_IVK, TAG_LEAF, TAG_NF, TAG_NK, TAG_PK, TAG_RHO } from "./tags.js";
+import { TAG_CM, TAG_INNER, TAG_IVK, TAG_NF, TAG_NK, TAG_PK, TAG_RHO } from "./tags.js";
 
 export interface Note {
     asset: Field;
@@ -11,10 +11,8 @@ export interface Note {
     /** Poseidon(TAG_PK, ivk) — the cm-binding pubkey. */
     pk: Field;
     rho: Field;
+    /** Hiding randomness; the only secret in a published `inner` or `cm`. */
     rcm: Field;
-    rcv: Field;
-    /** Pedersen blinder for the deposit-anchor commitment cv_dep. */
-    rcvDep: Field;
 }
 
 export interface SpentNote extends Note {
@@ -36,29 +34,37 @@ export interface NoteCommitInput {
 }
 
 /**
- * cm = Poseidon(asset·2^64 + value, pk, rho, rcm).
+ * inner = Poseidon(TAG_INNER, pk, rho, rcm). Mirrors NoteInner in
+ * src/lib/note.circom.
  *
- * Arity-4 and untagged: the arity plus the (asset, value) packing provide the
- * domain separation. Mirrors NoteCommitment in src/lib/note.circom. Soundness
- * requires asset < 2^64 and value < 2^64; the circuit range-checks both, and
- * this function enforces the same bounds off-circuit.
+ * The half of a note that stays private on every path. A deposit publishes it
+ * beside its public (asset, value).
  */
-export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
-    if (n.asset >= POW_2_64) throw new Error("asset must fit in 64 bits");
-    if (n.value >= POW_2_64) throw new Error("value must fit in 64 bits");
-    const packedAv = n.asset * POW_2_64 + n.value;
-    return P.hash([packedAv, n.pk, n.rho, n.rcm]);
+export function buildInner(P: Poseidon, n: { pk: Field; rho: Field; rcm: Field }): Field {
+    return P.hash([TAG_INNER, n.pk, n.rho, n.rcm]);
 }
 
 /**
- * leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
+ * cm = Poseidon(TAG_CM, asset·2^64 + value, inner), from an `inner` already
+ * built. This is the form tree_update_batch computes for a deposit leaf.
  *
- * The commitment-tree leaf, as built by tree_update_batch.circom and
- * recomputed by spent.circom. `cv_dep` binds (asset, value) to the leaf, so a
- * spend cannot substitute either.
+ * Soundness requires asset < 2^64 and value < 2^64; the circuit range-checks
+ * both, and this function enforces the same bounds off-circuit.
  */
-export function buildLeaf(P: Poseidon, cm: Field, cvDep: Point): Field {
-    return P.hash([TAG_LEAF, cm, cvDep[0], cvDep[1]]);
+export function commitWithInner(P: Poseidon, asset: Field, value: Field, inner: Field): Field {
+    if (asset >= POW_2_64) throw new Error("asset must fit in 64 bits");
+    if (value >= POW_2_64) throw new Error("value must fit in 64 bits");
+    return P.hash([TAG_CM, asset * POW_2_64 + value, inner]);
+}
+
+/**
+ * cm = Poseidon(TAG_CM, asset·2^64 + value, Poseidon(TAG_INNER, pk, rho, rcm)).
+ *
+ * Mirrors NoteInner + NoteCommitment in src/lib/note.circom. cm is also the
+ * commitment-tree leaf: there is no separate leaf hash.
+ */
+export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
+    return commitWithInner(P, n.asset, n.value, buildInner(P, n));
 }
 
 /**

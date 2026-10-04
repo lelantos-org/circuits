@@ -2,12 +2,9 @@ pragma circom 2.2.3;
 
 include "lib/batch_append.circom";
 include "lib/poly_eval.circom";
-include "lib/tags.circom";
-include "lib/asset_gen.circom";
-include "lib/value_commit.circom";
+include "lib/note.circom";
 include "lib/balance.circom";
-include "../node_modules/circomlib/circuits/poseidon.circom";
-include "../node_modules/circomlib/circuits/babyjub.circom";
+include "../node_modules/circomlib/circuits/comparators.circom";
 
 // Relayer proof that advances the commitment tree from old_root to new_root by
 // inserting actual_count leaves at start_index.
@@ -16,33 +13,28 @@ include "../node_modules/circomlib/circuits/babyjub.circom";
 // batch carries either a spend's N_OUT output leaves or a run of deposits (two
 // leaves each). Trailing slots must be zero.
 //
-// leaf_k = Poseidon(TAG_LEAF, cms[k], cv_dep[k][0], cv_dep[k][1]), where cv_dep
-// is the depositor's or spender's Pedersen value commitment. spent.circom
-// recomputes the same leaf, binding (asset, value) across the two proofs.
+// A leaf is a note commitment,
 //
-// Per-leaf deposit binding, applied when is_deposit[k] == 1:
-//   cv_dep[k] == leaf_public_in[k]·V^leaf_asset[k] + rcv[k]·H
+//   cm = Poseidon(TAG_CM, asset_id·2^64 + value, inner),
+//   inner = Poseidon(TAG_INNER, pk, rho, rcm),
 //
-// Deposits have no transact proof, so this circuit binds the leaf. The binding
-// is per leaf, not aggregate: a sum fixes Σvalue only modulo the subgroup order
-// l, which lets a depositor place 2^63·V^A in one leaf, absorb
-// (public_in − 2^63) mod l in a second, abandoned leaf, and hold a valid 2^63
-// note for a one-unit deposit.
+// and the word in cms[k] is read by is_deposit[k]:
 //
-// The binding alone is not injective in (asset, value). HashToAssetGen is
-// circomlib Pedersen over a 72-bit message, so V^a = m(a)·BASE0 for a publicly
-// computable m(a) of about 2^85 (src/README.md § 5), and the equality pins the
-// product value·m(asset), not the pair. Two registered ids whose multipliers
-// share a large factor admit v·m(a) == v'·m(a') with both values in the 64-bit
-// range, so a depositor could pay v of one asset while committing cms[k] to
-// (a', v') and spend the leaf as the other. Separation of the registered id set
-// rules this out: run `just asset-ids <ids>` to check the bound before
-// registration, since AssetRegistry.addAsset accepts an arbitrary uint64.
+//   is_deposit[k] == 0   cms[k] is the cm a transact proof bound as out_cm. It
+//                        is the leaf. The transact circuit proved conservation
+//                        for it; nothing is opened here.
+//   is_deposit[k] == 1   cms[k] is the depositor's `inner`. The leaf is
+//                        Poseidon(TAG_CM, leaf_asset[k]·2^64 + leaf_public_in[k],
+//                        cms[k]): this circuit builds cm from the public amount.
 //
-// is_deposit[k] == 0 skips the binding; the transact circuit proves conservation
-// for spends. On a deposit leaf, asset id 0 is rejected when the leaf carries
-// value (SpentNote refuses id 0, so the leaf would be unspendable) and required
-// when it does not (step 6a).
+// Deposits have no transact proof, so this circuit binds the leaf. SpentNote
+// recomputes cm from the note it opens and proves that cm is in the tree, so a
+// deposit leaf can be spent only as leaf_public_in units of leaf_asset: the
+// packing is injective under the two 64-bit range checks, and a second opening
+// is a Poseidon collision. Nothing depends on which ids are registered.
+//
+// The binding is per leaf. There is no aggregate, so no split between leaves
+// is available to a depositor.
 //
 // PolyEval coefficient layout; must match
 // PubInputs.sol :: compress(TreeUpdateBatch):
@@ -51,20 +43,19 @@ include "../node_modules/circomlib/circuits/babyjub.circom";
 //   [2]                            start_index
 //   [3]                            actual_count
 //   [4 .. 3 + MAX_L]               cms
-//   [4 + MAX_L .. 3 + 3·MAX_L]     cv_dep flattened as (x0, y0, x1, y1, ...)
-//   [4 + 3·MAX_L .. 3 + 4·MAX_L]   leaf_asset
-//   [4 + 4·MAX_L .. 3 + 5·MAX_L]   leaf_public_in
-//   [4 + 5·MAX_L .. 3 + 6·MAX_L]   is_deposit
-// Total = 4 + 6·MAX_L (52 for MAX_L = 8). The challenge preimage and the
-// coefficient vector are the same words; every word is constrained, so every
-// word is evaluated.
+//   [4 + MAX_L .. 3 + 2·MAX_L]     leaf_asset
+//   [4 + 2·MAX_L .. 3 + 3·MAX_L]   leaf_public_in
+//   [4 + 3·MAX_L .. 3 + 4·MAX_L]   is_deposit
+// Total = 4 + 4·MAX_L (36 for MAX_L = 8). Every word is a signal of this
+// circuit, so every word is evaluated: hashing a signal into z without
+// evaluating it binds nothing, since the prover reads z before choosing a
+// witness and can supply one that disagrees with the calldata z was hashed
+// from.
 //
-// The deposit-binding fields are coefficients, not challenge-only words. They
-// are signals of this circuit, and hashing a signal into z binds nothing: the
-// prover reads z before choosing a witness and can supply one that disagrees
-// with the calldata z was hashed from. Only a constraint pins them: the deposit
-// binding (step 6) and its degenerate case (step 6a). See BatchCompress in
-// lib/poly_eval.circom and src/README.md § 2a.
+// The public signals are (y, digest, z), in that order. digest is the
+// CoeffDigest of the 36 coefficients; the contract takes it from calldata,
+// hashes it into z after the coefficients, and passes it to the verifier. See
+// BatchCompress in lib/poly_eval.circom and src/README.md § 2a.
 //
 // The tree logic (count and activity, position and capacity, frontier, both
 // roots) is in lib/batch_append.circom and documented in its header. A prover
@@ -84,58 +75,87 @@ include "../node_modules/circomlib/circuits/babyjub.circom";
 //      previous one.
 //   2. actual_count pinned to the emitting operation: exactly TRANSACT_OUT
 //      leaves on the spend path.
-//   3. cms[k] and cv_dep[k] forwarded from the paired transact proof, not taken
-//      from the relayer, for every output slot of that spend.
+//   3. cms[k] forwarded from the paired transact proof's out_cm, not taken from
+//      the relayer, for every output slot of that spend; and, on a deposit
+//      slot, the `inner` the depositor escrowed.
 //   4. is_deposit[k] pinned per active slot, not taken from the relayer: 1 on
 //      every leaf of a deposit batch, 0 on every leaf of a spend batch. The
-//      circuit constrains it only to be boolean and it gates the deposit
-//      binding, so a relayer setting it to 0 on a deposit leaf inserts a leaf
-//      whose cv_dep is constrained only by BabyCheck. MASP._drainDeposit and
-//      MASP._validateRequest enforce this over every active slot.
-//   5. publicIn != 0 on every principal deposit, so a leaf that carries value
-//      also carries an asset the binding pins. The circuit accepts a zero-value
-//      deposit leaf and canonicalises its leaf_asset to 0 (step 6a), which is
-//      sound because that asset reaches nothing. MASP enforces this via
-//      `MustHaveDeposit` in _validateDeposit.
-//   6. leaf_asset[k] == 0 on every zero-value deposit leaf, matching step 6a.
-//      MASP._drainDeposit sets it for the fee note it emits; a non-zero asset on
-//      a zero-value leaf makes the batch unprovable.
+//      circuit constrains it only to be boolean, and it selects how cms[k]
+//      becomes a leaf. Both mistakes verify:
+//        cleared on a deposit leaf   the depositor's word is inserted as it
+//                                    stands. A depositor who escrowed a cm of
+//                                    its choosing in place of `inner` holds a
+//                                    note of any value for a one-unit deposit.
+//        set on a spend leaf         the leaf is the hash of out_cm under
+//                                    (leaf_asset, leaf_public_in). It has no
+//                                    opening, so the spend's outputs are burned.
+//      MASP._drainDeposit and MASP._validateRequest enforce this over every
+//      active slot.
+//   5. leaf_asset[k] and leaf_public_in[k] taken from the contract's own record
+//      of the deposit, since they are the amount the leaf is minted for.
+//
+// The circuit refuses value under asset id 0 on a deposit leaf (step 5): id 0
+// means "no asset", SpentNote refuses it on a real note, and such a leaf would
+// be unspendable. A zero-value deposit leaf may name any id, 0 included; the
+// fee note of a zero-fee deposit does.
 //
 template TreeUpdateBatch(DEPTH, MAX_L) {
     // ===== PUBLIC =====
     signal input  z;
     signal output y;
+    signal output digest;   // CoeffDigest of the logical public inputs below
 
     // ===== LOGICAL PUBLIC INPUTS =====
     signal input old_root;
     signal input new_root;
     signal input start_index;
     signal input actual_count;            // 1..MAX_L, counted in leaves
-    signal input cms[MAX_L];              // padding (k >= actual_count) must be 0
-    signal input cv_dep[MAX_L][2];        // per-cm value commitment; padding zero
+    signal input cms[MAX_L];              // cm (spend) or inner (deposit); padding 0
     signal input leaf_asset[MAX_L];       // per-leaf publicAssetId; deposits only
     signal input leaf_public_in[MAX_L];   // per-leaf publicIn; deposits only
-    signal input is_deposit[MAX_L];       // 1 enables the deposit binding check
+    signal input is_deposit[MAX_L];       // 1: build the leaf from the public amount
 
     // ===== PRIVATE =====
     signal input frontier_in[DEPTH][3];
-    signal input rcv[MAX_L];              // rcv_dep of leaf k
 
-    // 1. leaf_k = Poseidon(TAG_LEAF, cm_k, cv_dep_k_x, cv_dep_k_y).
-    component leaf_h[MAX_L];
-    signal leaves[MAX_L];
+    // 1. Booleanize is_deposit[k] and zero the deposit-only fields on spend
+    //    leaves, so a relayer cannot place a nonzero leaf_asset or
+    //    leaf_public_in into the public inputs of a batch carrying no deposit.
+    //    Neither field reaches a spend leaf.
     for (var k = 0; k < MAX_L; k++) {
-        leaf_h[k] = Poseidon(4);
-        // Hoisted through a `var`; see tags.circom.
-        var tag = TAG_LEAF();
-        leaf_h[k].inputs[0] <== tag;
-        leaf_h[k].inputs[1] <== cms[k];
-        leaf_h[k].inputs[2] <== cv_dep[k][0];
-        leaf_h[k].inputs[3] <== cv_dep[k][1];
-        leaves[k] <== leaf_h[k].out;
+        is_deposit[k] * (1 - is_deposit[k]) === 0;
+        (1 - is_deposit[k]) * leaf_asset[k]     === 0;
+        (1 - is_deposit[k]) * leaf_public_in[k] === 0;
     }
 
-    // 2. Tree append: actual_count in [1, MAX_L], the activity prefix, the run
+    // 2. The leaf. On a deposit slot it is the note commitment over the public
+    //    amount and the depositor's `inner`; on a spend slot it is cms[k].
+    //
+    //    Both fields are range-checked on every slot: NoteCommitment's packing
+    //    is injective only under the two bounds, and that injectivity is the
+    //    deposit binding.
+    component rng_asset[MAX_L];
+    component rng_public_in[MAX_L];
+    component dep_cm[MAX_L];
+    signal dep_delta[MAX_L];
+    signal leaves[MAX_L];
+    for (var k = 0; k < MAX_L; k++) {
+        rng_asset[k] = RangeCheck64();
+        rng_asset[k].v <== leaf_asset[k];
+
+        rng_public_in[k] = RangeCheck64();
+        rng_public_in[k].v <== leaf_public_in[k];
+
+        dep_cm[k] = NoteCommitment();
+        dep_cm[k].asset_id <== leaf_asset[k];
+        dep_cm[k].value    <== leaf_public_in[k];
+        dep_cm[k].inner    <== cms[k];
+
+        dep_delta[k] <== is_deposit[k] * (dep_cm[k].cm - cms[k]);
+        leaves[k] <== cms[k] + dep_delta[k];
+    }
+
+    // 3. Tree append: actual_count in [1, MAX_L], the activity prefix, the run
     //    within tree capacity, the frontier pin, and the roots before and after.
     //    See lib/batch_append.circom.
     component append = BatchAppend(DEPTH, MAX_L);
@@ -152,112 +172,30 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     old_root === append.old_root;
     new_root === append.new_root;
 
-    // 3. Zero every field of an inactive leaf. These fields feed PolyEval, so
-    //    unconstrained inactive slots would be free coefficients.
+    // 4. Zero every field of an inactive leaf. BatchAppend ignores an inactive
+    //    slot's leaf, so nothing else would give these words a meaning.
     for (var k = 0; k < MAX_L; k++) {
         (1 - append.active[k]) * cms[k]            === 0;
-        (1 - append.active[k]) * cv_dep[k][0]      === 0;
-        (1 - append.active[k]) * cv_dep[k][1]      === 0;
         (1 - append.active[k]) * leaf_asset[k]     === 0;
         (1 - append.active[k]) * leaf_public_in[k] === 0;
         (1 - append.active[k]) * is_deposit[k]     === 0;
-        (1 - append.active[k]) * rcv[k]            === 0;
     }
 
-    // 4. Booleanize is_deposit[k] and zero the deposit-only fields on spend
-    //    leaves, so a relayer cannot place a nonzero leaf_asset or
-    //    leaf_public_in into the public inputs of a batch carrying no deposit.
+    // 5. No value under asset id 0. SpentNote refuses id 0 on a real note, so a
+    //    leaf minted there would be unspendable, and the deposit path inserts
+    //    leaves without a transact proof to catch it.
+    //
+    //    Ungated: steps 1 and 4 force leaf_public_in[k] to zero on spend and
+    //    inactive slots, where the product vanishes whatever the asset is.
+    //    A zero-value deposit leaf is unaffected and may name any id.
+    component leaf_asset_z[MAX_L];
     for (var k = 0; k < MAX_L; k++) {
-        is_deposit[k] * (1 - is_deposit[k]) === 0;
-        (1 - is_deposit[k]) * leaf_asset[k]     === 0;
-        (1 - is_deposit[k]) * leaf_public_in[k] === 0;
+        leaf_asset_z[k] = IsZero();
+        leaf_asset_z[k].in <== leaf_asset[k];
+        leaf_asset_z[k].out * leaf_public_in[k] === 0;
     }
 
-    // 5. cv_dep lies on Baby-Jubjub. For spend leaves this is the only per-point
-    //    cv_dep constraint here; an off-curve point yields a note no on-curve
-    //    ValueCommit can respend. Inactive slots hold the off-curve (0, 0), so
-    //    (1 - active) shifts y to check (0, 1) instead.
-    component cv_on_curve[MAX_L];
-    for (var k = 0; k < MAX_L; k++) {
-        cv_on_curve[k] = BabyCheck();
-        cv_on_curve[k].x <== cv_dep[k][0];
-        cv_on_curve[k].y <== cv_dep[k][1] + (1 - append.active[k]);
-    }
-
-    // 6. Per-leaf deposit binding, gated by append.active[k]·is_deposit[k]. The
-    //    equality pins cv_dep[k] to leaf_public_in units of leaf_asset.
-    component asset_gen[MAX_L];
-    component pub_in_mul[MAX_L];
-    component rH_mul[MAX_L];
-    component expected[MAX_L];
-    component leaf_asset_nz[MAX_L];
-    signal active_dep[MAX_L];
-
-    component pub_in_nz[MAX_L];
-    for (var k = 0; k < MAX_L; k++) {
-        active_dep[k] <== append.active[k] * is_deposit[k];
-
-        leaf_asset_nz[k] = IsZero();
-        leaf_asset_nz[k].in <== leaf_asset[k];
-
-        asset_gen[k] = HashToAssetGen();
-        asset_gen[k].asset_id <== leaf_asset[k];
-
-        // leaf_public_in · V^asset, with leaf_public_in range-checked to 64 bits.
-        pub_in_mul[k] = ValueTimesGen();
-        pub_in_mul[k].value  <== leaf_public_in[k];
-        pub_in_mul[k].gen[0] <== asset_gen[k].gen[0];
-        pub_in_mul[k].gen[1] <== asset_gen[k].gen[1];
-
-        // expected = leaf_public_in·V^asset + rcv·H
-        rH_mul[k] = MulH();
-        rH_mul[k].scalar <== rcv[k];
-
-        expected[k] = BabyAdd();
-        expected[k].x1 <== pub_in_mul[k].out[0];
-        expected[k].y1 <== pub_in_mul[k].out[1];
-        expected[k].x2 <== rH_mul[k].out[0];
-        expected[k].y2 <== rH_mul[k].out[1];
-
-        active_dep[k] * (cv_dep[k][0] - expected[k].xout) === 0;
-        active_dep[k] * (cv_dep[k][1] - expected[k].yout) === 0;
-
-        pub_in_nz[k] = IsZero();
-        pub_in_nz[k].in <== leaf_public_in[k];
-
-        // 6a. Pin leaf_asset[k] where the equality above degenerates.
-        //
-        // ValueTimesGen(0, gen) is the identity for every gen, so at
-        // leaf_public_in[k] == 0 the equality reduces to cv_dep[k] == rcv[k]·H
-        // and does not constrain leaf_asset[k]. That coefficient would carry
-        // only a 64-bit range check, which bounds but does not pin it: four
-        // such leaves (as in a `fbps = 0` flush) give 4 × 64 = 256 free bits
-        // against a 254-bit modulus, solvable as a small CVP instance.
-        //
-        // One constraint enforces `asset == 0 iff value == 0` per slot:
-        //   value != 0  the equality pins the asset under discrete-log
-        //               hardness, and the asset must be != 0: SpentNote refuses
-        //               id 0, so the leaf would be unspendable, and the deposit
-        //               path inserts leaves without a transact proof.
-        //   value == 0  the asset carries no information (cv_dep is rcv·H, and
-        //               the asset reaches neither the note commitment nor the
-        //               leaf hash), so it is canonicalised to 0.
-        //
-        // The active_dep[k] gate is not needed for soundness (steps 3 and 4 zero
-        // both fields on inactive and spend slots) but keeps the two IsZero
-        // outputs distinct signals. Ungated, --O1 substitutes one for the other
-        // and folds the `.in`/`.out` pair that `lib/explain.ts :: isZeroHint`
-        // reads to check its precondition, leaving the `inv` hints unexplained.
-        // The gate costs sixteen constraints.
-        //
-        // The zero-value case must remain provable: a flush at fbps = 0 mints a
-        // zero-value fee note, which `MASP._validateDeposit` permits. The
-        // constraint references no other slot, so it does not depend on how a
-        // consumer lays out deposits across the batch.
-        active_dep[k] * (leaf_asset_nz[k].out - pub_in_nz[k].out) === 0;
-    }
-
-    // 7. Public-input compression → (y, z).
+    // 6. Public-input compression → (y, digest, z).
     component pe = BatchCompress(MAX_L);
     pe.z <== z;
     pe.old_root <== old_root;
@@ -266,13 +204,12 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
     pe.actual_count <== actual_count;
     for (var k = 0; k < MAX_L; k++) {
         pe.cms[k] <== cms[k];
-        pe.cv_dep[k][0] <== cv_dep[k][0];
-        pe.cv_dep[k][1] <== cv_dep[k][1];
         pe.leaf_asset[k] <== leaf_asset[k];
         pe.leaf_public_in[k] <== leaf_public_in[k];
         pe.is_deposit[k] <== is_deposit[k];
     }
     y <== pe.y;
+    digest <== pe.digest;
 }
 
 // DEPTH = 11 must match the transact circuits and the on-chain CommitmentTree
@@ -283,12 +220,12 @@ template TreeUpdateBatch(DEPTH, MAX_L) {
 // batch (MASP.sol pins `actualCount` to exactly that on the spend path). Only
 // flushBatch uses the remaining capacity, carrying four two-leaf deposits.
 //
-// Budget: BatchAppend cost grows with depth rather than leaf count, so a leaf
-// slot's cost is dominated by its deposit binding. Run `just budget` for the
+// Budget: BatchAppend cost grows with depth rather than leaf count, and a leaf
+// slot costs one Poseidon(3) and two range checks. Run `just budget` for the
 // measured count and domain.
 //
 // Changing either parameter requires a new ceremony and a contract change,
-// since the public-input layout is 4 + 6·MAX_L.
+// since the coefficient layout is 4 + 4·MAX_L.
 component main {
     public [ z ]
 } = TreeUpdateBatch(11, 8);

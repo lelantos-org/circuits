@@ -10,7 +10,6 @@ import {
     buildRho,
     toCircomInput,
     deterministicClueGen,
-    buildLeaf,
     circuitSignals,
     dummyInputAt,
     dummyOutput,
@@ -18,6 +17,7 @@ import {
     flatten,
     coeffs,
     hornerEval,
+    transactDigest,
     type TransactWitnessBundle,
     type ClueInputs,
     type Field,
@@ -45,10 +45,13 @@ export interface TxBuildArgs {
     inputs: SpentNote[];
     outputs: Note[];
     merkleRoot: Field;
-    /** Defaults to DEFAULT_ASSET. Pass 0n explicitly for the all-dummy zero tx. */
+    /**
+     * Defaults to the only value the circuit accepts for `publicOut`: 0n for a
+     * transfer (`publicOut == 0`), DEFAULT_ASSET for a withdrawal. Pass it
+     * explicitly to withdraw another asset or to build a rejected witness.
+     */
     publicAssetId?: Field;
-    /** Both default to 0n, the shielded-to-shielded case. */
-    publicIn?: bigint;
+    /** Defaults to 0n, the shielded-to-shielded case. */
     publicOut?: bigint;
     outputClues?: ClueInputs[];
     outputAuxDigest?: Field;
@@ -72,19 +75,15 @@ export class TxBuilder {
             pk: derivePk(this.P, ownerNsk),
             rho,
             rcm: rho + 1n,
-            rcv: rho + 2n,
-            rcvDep: rho + 3n,
         };
     }
 
     // Insert a note into `tree`, returning a SpentNote with an empty proof;
-    // `finalize` populates path and indices once the root is frozen. Leaf
-    // format: Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y), the deposit anchor
-    // pinning (asset, value) to the leaf.
+    // `finalize` populates path and indices once the root is frozen. The leaf
+    // is the note commitment itself.
     insert(tree: MerkleTree, n: Note, nsk: Field): SpentNote {
         const cm = commit(this.P, n);
-        const cvDep = this.J.commit(n.asset, n.value, n.rcvDep);
-        const idx = tree.insert(buildLeaf(this.P, cm, cvDep));
+        const idx = tree.insert(cm);
         return {
             ...n, nsk, cm,
             nf: nullifier(this.P, nsk, n.rho, cm),
@@ -98,8 +97,7 @@ export class TxBuilder {
         return { ...sn, pathElements, pathIndices };
     }
 
-    // Build the JSON object the circuit consumes. The public asset generator is
-    // derived in-circuit from publicAssetId.
+    // Build the JSON object the circuit consumes.
     //
     // Output rho is forced to the derivation the circuit enforces,
     // rho = Poseidon(TAG_RHO, nullifier[0], out_index), overriding any note.rho
@@ -117,12 +115,13 @@ export class TxBuilder {
             ? padClues(args.outputClues, outputs.length, this.clues)
             : outputs.map(() => this.clues.next());
         const outputAuxDigest = args.outputAuxDigest ?? TEST_AUX_DIGEST;
-        const input = toCircomInput(this.P, this.J, {
+        const publicOut = args.publicOut ?? 0n;
+        const input = toCircomInput(this.P, {
             ...args,
             inputs,
-            publicAssetId: args.publicAssetId ?? DEFAULT_ASSET,
-            publicIn: args.publicIn ?? 0n,
-            publicOut: args.publicOut ?? 0n,
+            // The circuit requires asset 0 when nothing is withdrawn.
+            publicAssetId: args.publicAssetId ?? (publicOut === 0n ? 0n : DEFAULT_ASSET),
+            publicOut,
             outputs,
             outputClues,
             outputAuxDigest,
@@ -168,7 +167,7 @@ export class TxBuilder {
      * owner for every note, or one per note.
      *
      * The base of every factory below; call it directly for pre-shaped notes (a
-     * second asset, a blinder at its ceiling, mixed owners).
+     * second asset, mixed owners).
      */
     plant(notes: Note[], nsk: Field | readonly Field[]): Scenario {
         const owners = typeof nsk === "bigint" ? notes.map(() => nsk) : nsk;
@@ -291,8 +290,8 @@ export class TxBuilder {
      * must be rejected. `test/gadgets/balance.test.ts` sweeps the gadget itself,
      * which is where the exhaustive cases live; this is the end-to-end shape.
      *
-     * `publicAssetId` is left at its default, which no note declares: the
-     * public candidate row is then `0 == 0`, the orphan case.
+     * `publicAssetId` is left at its default, 0 for a transfer, which no note
+     * declares: the public candidate row is then `0 == 0`, the orphan case.
      *
      *   asset 101: in 100          -> out 60 + 40
      *   asset 102: in  50          -> out 50
@@ -419,15 +418,21 @@ function assertFullShapeValues(): void {
 }
 
 /**
- * Re-derive the Fiat-Shamir challenge `z` from the witness in its current state.
+ * Re-derive the calldata digest and the Fiat-Shamir challenge `z` from the
+ * witness in its current state: what an honest prover submits for it.
  *
  * Mirrors `lib/batch.ts :: rebindFiatShamir`. Call after mutating a
- * PolyEval-bound field when the test needs the challenge to describe the
+ * PolyEval-bound field when the test needs the calldata to describe the
  * witness it is evaluating; a tamper test expecting a constraint to fire does
- * not, since `z` carries no constraint of its own and a stale one only moves
- * the `y` the circuit outputs.
+ * not, since neither word carries a constraint of its own and a stale one only
+ * moves the `y` the circuit outputs.
+ *
+ * The digest is refreshed first because it is a word of the challenge
+ * preimage. The circuit takes no digest input and always outputs its own, so a
+ * stale `digest` here is a calldata view that disagrees with the witness.
  */
 export function rebindFiatShamir(input: TransactWitnessBundle): TransactWitnessBundle {
+    input.digest = transactDigest(input).toString();
     return bindFiatShamir(input, calldataView(input));
 }
 
@@ -445,14 +450,20 @@ export function calldataView(w: TransactWitnessBundle): TransactWitnessBundle {
 
 /**
  * Bind `z` to a calldata view that may differ from the witness `w`, and return
- * `w`. `calldataY` computes the `y` the contract compares against.
+ * `w`. `calldataPublic` computes the other two public signals the contract
+ * hands the verifier.
  *
  * `rebindFiatShamir` combines two roles that are separate in deployment:
  * deriving the challenge and choosing the witness. `MASP` hashes its calldata
- * into `z` and compares its own `y`; the prover then picks any witness
- * satisfying the R1CS at that `z`. `z` is a circuit input known before the
- * witness is chosen, so Schwartz-Zippel does not apply and a word is bound only
- * if a constraint pins it (src/README.md § 2a).
+ * into `z`, compares its own `y`, and passes the calldata digest word to the
+ * verifier; the prover then picks any witness satisfying the R1CS at that `z`.
+ * `z` is a circuit input known before the witness is chosen; the digest public
+ * signal is what commits the witness's coefficients before it
+ * (src/README.md § 2a).
+ *
+ * The view's `digest` is used as it stands. A divergence case that rewrites a
+ * coefficient chooses whether to leave the digest stale or recompute it for
+ * the rewritten coefficients; neither may verify.
  *
  * Mirrors `lib/batch.ts :: bindFiatShamir`. Use this to test whether the prover
  * can diverge from the contract's calldata, and `rebindFiatShamir` to test
@@ -477,6 +488,17 @@ export function calldataY(calldata: TransactWitnessBundle, z: Field = BigInt(cal
 }
 
 /**
+ * The public signals the contract hands the verifier beside `z`, for a calldata
+ * view at the bound challenge: its own `y`, and its digest word as given.
+ */
+export function calldataPublic(
+    calldata: TransactWitnessBundle,
+    z: Field = BigInt(calldata.z),
+): { y: Field; digest: Field } {
+    return { y: calldataY(calldata, z), digest: BigInt(calldata.digest) };
+}
+
+/**
  * Top up `inputs` to `N_IN` with dummies, distinct by `rho` so their nullifiers
  * differ.
  *
@@ -498,8 +520,8 @@ function padInputs(P: Poseidon, depth: number, inputs: SpentNote[]): SpentNote[]
 /**
  * Top up `outputs` to `N_OUT` with value-0 notes.
  *
- * Each padding note is seeded by the slot it lands in, so no two share a
- * blinder and none commits to the identity point; see `dummyOutput`.
+ * Each padding note's `rcm` is seeded by the slot it lands in; see
+ * `dummyOutput`.
  */
 function padOutputs(P: Poseidon, outputs: Note[]): Note[] {
     if (outputs.length > N_OUT) {
@@ -533,10 +555,11 @@ export interface Scenario {
  * calculator sees them.
  *
  * `TxBuilder.build` emits a `TransactWitnessBundle`: the circuit's signals plus
- * `recipient_address`, `chain_id`, `payer_address`, `relayer_address`,
+ * `digest`, `recipient_address`, `chain_id`, `payer_address`, `relayer_address`,
  * `intent_hash`, the clue triples and `out_aux_digest`. Those are logical public
- * inputs but not signals of this circuit; they reach the proof through the
- * Fiat-Shamir challenge, not through `PolyEval`.
+ * inputs but not input signals of this circuit: the circuit outputs its own
+ * digest, and the rest reach the proof through the Fiat-Shamir challenge, not
+ * through `PolyEval`.
  *
  * The wasm calculator rejects an unknown key ("Signal recipient_address not
  * found"), and `expectWitnessFails` classifies that as a test bug rather than a

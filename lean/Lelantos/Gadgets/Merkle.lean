@@ -30,7 +30,7 @@ This is what the slot arithmetic in `MerkleLevel4` computes. -/
 def slots (t : ℕ) (cur : F) (sib : ℕ → F) : ℕ → F := fun k =>
   if k = t then cur else if k < t then sib k else sib (k - 1)
 
-/-- The constraint system of `MerkleLevel4` — `src/lib/merkle.circom:19-72`. -/
+/-- The constraint system of `MerkleLevel4` — `src/lib/merkle.circom:19-75`. -/
 structure MerkleLevel4Sat (cur : F) (sib : ℕ → F) (idx : F) (b s c : ℕ → F) (out : F) : Prop where
   /-- `:26-27` — the one-hot selector for this level's path index. -/
   selectors : PathIndexSelectorsSat idx b s
@@ -42,7 +42,7 @@ structure MerkleLevel4Sat (cur : F) (sib : ℕ → F) (idx : F) (b s c : ℕ →
   c2_def : c 2 = s 2 * cur + (s 0 + s 1) * sib 1 + s 3 * sib 2
   /-- `:60-64` — `c3 = s3·cur + (1-s3)·sib[2]`. -/
   c3_def : c 3 = s 3 * cur + (1 - s 3) * sib 2
-  /-- `:66-71` — `out = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
+  /-- `:66-74` — `out = Poseidon(TAG_MERKLE, c0, c1, c2, c3)`. -/
   out_def : out = merkleNode c
 
 /-- **Soundness of `MerkleLevel4`.** The slot arithmetic is insertion of `cur` at
@@ -70,13 +70,13 @@ theorem merkleLevel4_sound {cur idx out : F} {sib b s c : ℕ → F}
   rw [hout, merkleNode, merkleNode, key 0 (by norm_num), key 1 (by norm_num),
     key 2 (by norm_num), key 3 (by norm_num)]
 
-/-- The constraint system of `MerkleRoot(depth)` — `src/lib/merkle.circom:75-99`.
+/-- The constraint system of `MerkleRoot(depth)` — `src/lib/merkle.circom:78-99`.
 `cur` is the chain of intermediate nodes, `pe` / `pi` the path elements and indices. -/
 structure MerkleRootSat (depth : ℕ) (leaf : F) (pe : ℕ → ℕ → F) (pi : ℕ → F)
     (b s c : ℕ → ℕ → F) (cur : ℕ → F) (root : F) : Prop where
-  /-- `:83` — the chain starts at the leaf. -/
+  /-- `:86` — the chain starts at the leaf. -/
   base : cur 0 = leaf
-  /-- `:85-93` — one `MerkleLevel4` per level. -/
+  /-- `:88-96` — one `MerkleLevel4` per level. -/
   level : ∀ d, d < depth →
     MerkleLevel4Sat (cur d) (pe d) (pi d) (b d) (s d) (c d) (cur (d + 1))
   /-- `:98` — the root is the top of the chain. -/

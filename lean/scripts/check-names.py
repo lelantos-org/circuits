@@ -18,7 +18,7 @@ A backticked token is checked when it is unambiguously a Lean name:
 
 Other tokens are not checked. A bare `lowerCamel` word may be a signal or a
 definition, and a dotted name under a head this development does not declare
-(`Or.inr`, `ValueCommitPair.cv`) belongs to Lean or to circom. Broader rules would
+(`Or.inr`, `NoteCommitment.cm`) belongs to Lean or to circom. Broader rules would
 produce many false positives.
 
 `IGNORE` lists tactic and tool names the rules cannot classify.
@@ -48,7 +48,7 @@ IGNORE = {
     "norm_num", "push_cast", "split_ifs", "push_neg", "field_simp", "linear_combination",
     "interval_cases", "ring_nf", "simp_all", "omega", "positivity", "decide", "linarith",
     "circom_tester", "lake", "snarkjs", "run_cmd", "sorryAx", "collectAxioms",
-    "node_modules", "toolchain", "check_asset_ids", "layout_parity", "pubsignal_order",
+    "node_modules", "toolchain", "layout_parity", "pubsignal_order",
     "batch_layout_parity", "multi_asset", "tree_update_batch", "snark_compression",
     "just_picus", "picus_all",
 }
@@ -191,7 +191,7 @@ def is_claim(token: str, names: set[str], circom: set[str]) -> bool:
     head, _, rest = token.partition(".")
     if rest:
         # `Upper.lower`: a field or namespaced result, only under a head this development
-        # declares. `Or.inr` belongs to Lean and `ValueCommitPair.cv` to circom.
+        # declares. `Or.inr` belongs to Lean and `NoteCommitment.cm` to circom.
         return head in names and not CAPITALISED.match(rest)
     if CAPITALISED.match(token) or "_" not in token:
         # A bare capitalised token may be a circom template or a Lean structure, and a

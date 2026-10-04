@@ -4,8 +4,8 @@
 // The suites in this directory cover:
 //   - `shapes`           honest batches: counts, odd counts, deposit/spend mixes,
 //                        start positions straddling every level, capacity
-//   - `deposit_binding`  cv_dep = leaf_public_in · V^leaf_asset + rcv · H, the
-//                        range checks on its operands, and step 6a
+//   - `deposit_binding`  the leaf a deposit slot builds from its public amount,
+//                        the two range checks, and what is_deposit selects
 //   - `frontier`         both roots and the frontier they are rebuilt from
 //   - `padding`          inactive-slot zeroing, spend-leaf zeroing, count bounds
 //   - `divergent`        a witness that disagrees with the calldata it is proved
@@ -21,7 +21,7 @@
 import { srcPath, type CircuitTester } from "../lib/circuit";
 import { BatchBuilder, type BatchWitness } from "../lib/batch";
 import { treeUpdateBatchInputJson } from "../lib/inputs";
-import { expectNotForgeable, expectWitnessFails, expectWitnessY } from "../lib/expect";
+import { expectNotForgeable, expectWitnessFails, expectWitnessPublic } from "../lib/expect";
 import { pendingCtx, useCircuit, type CircuitCtx } from "../lib/harness";
 import { ARITY, BATCH_DEPTH } from "../lib/constants";
 
@@ -49,14 +49,17 @@ export function useBatchCircuit(): BatchCtx {
         pendingCtx<Pick<BatchCtx, "batch">>(["batch"], "useBatchCircuit"),
     ));
     before(() => {
-        ctx.batch = new BatchBuilder(ctx.P, ctx.J);
+        ctx.batch = new BatchBuilder(ctx.P);
     });
     return ctx;
 }
 
-/** Every constraint holds and the circuit's `y` equals the reference `w.y`. */
+/**
+ * Every constraint holds, and the circuit's two outputs equal the reference
+ * `w.y` and the calldata digest `w.digest`.
+ */
 export function expectBatchAccepts(circuit: CircuitTester, w: BatchWitness): Promise<bigint[]> {
-    return expectWitnessY(circuit, treeUpdateBatchInputJson(w), w.y);
+    return expectWitnessPublic(circuit, treeUpdateBatchInputJson(w), w);
 }
 
 /** A constraint rejects `w`; `message` names the one expected to. */
@@ -69,5 +72,5 @@ export function expectBatchRejects(circuit: CircuitTester, w: BatchWitness, mess
  * must not attest to it; see `expectNotForgeable`.
  */
 export function expectBatchNotForgeable(circuit: CircuitTester, w: BatchWitness, field: string): Promise<void> {
-    return expectNotForgeable(circuit, treeUpdateBatchInputJson(w), w.y, field);
+    return expectNotForgeable(circuit, treeUpdateBatchInputJson(w), w, field);
 }

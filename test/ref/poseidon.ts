@@ -2,7 +2,8 @@
 // `Poseidon(n)` template.
 //
 // poseidon-lite exports one fixed-arity function per width and returns bigints.
-// Arities in use: 4 (TAG_LEAF), 5 (TAG_MERKLE nodes), 6 (FMD).
+// Arities in use: 2 (keys), 3 (cm, rho), 4 (inner, nf), 5 (Merkle nodes and the
+// coefficient digest), 6 (FMD).
 
 import {
     poseidon1,

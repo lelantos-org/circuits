@@ -42,7 +42,8 @@ interface ArtifactCheck {
 /// changes.
 const FILES: ArtifactCheck[] = [
     /// 4x6 = `Transact(11, 4, 6)`, the only published transact shape, on ptau-17
-    /// at 100,320 constraints (76.5% of the 2^17 domain).
+    /// at 69,291 constraints (52.9% of the 2^17 domain). Measured: the wasm is
+    /// about 3.9 MB and the zkey about 33 MB.
     {
         name: "4x6.wasm",
         path: resolve(BUILD, "4x6.wasm"),
@@ -53,7 +54,7 @@ const FILES: ArtifactCheck[] = [
         name: "4x6_final.zkey",
         path: resolve(BUILD, "4x6_final.zkey"),
         minBytes: 25_000_000,
-        maxBytes: 80_000_000,
+        maxBytes: 45_000_000,
     },
     {
         name: "4x6_verification_key.json",

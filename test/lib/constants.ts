@@ -49,16 +49,10 @@ export const MAX_L = 8;
  */
 export const COUNT_BITS = 3;
 
-/** Blinder width — `RCV_BITS()` in `src/lib/value_commit.circom`. */
-export const RCV_BITS = 252n;
-
 // ===== range bounds the circuit enforces =====
 
 /** The asset_id / value bound; tamper tests set a field to exactly this to trip Num2Bits(64). */
 export const TWO_64 = 1n << 64n;
-
-/** One past the blinder range, for the Num2Bits(RCV_BITS) rejection tests. */
-export const TWO_252 = 1n << RCV_BITS;
 
 // ===== named actors =====
 //

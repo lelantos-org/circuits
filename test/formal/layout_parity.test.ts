@@ -37,14 +37,17 @@ const LAYOUT_FILE = "lean/expected/layout-4x6.txt";
 // Every shape that ships both a Lean layout dump and a published vector.
 const SHIPPED_SHAPES = ["4x6"] as const;
 
-// The polynomial's slots, which is what the Lean model lays out.
-const COEFF_COUNT = 4 + 3 * N_IN + 5 * N_OUT;
+// The polynomial's slots, which is what the Lean model lays out: the circuit's
+// coefficient signals.
+const COEFF_COUNT = 3 + N_IN + N_OUT;
 
-// The challenge preimage: a superset, adding the five unpinned struct words, the
-// clue triples and the aux digest. These are logical public inputs bound through
-// `z` rather than `y`, so they are outside the Lean layout by construction (see
-// `TRANSACT_COEFFS` in PubInputs.sol and `coeffs` in ref/compress.ts).
-const CHALLENGE_WORDS = 10 + 3 * N_IN + 8 * N_OUT;
+// The challenge preimage: a superset, adding the digest word, the five struct
+// words the circuit has no signal for, the clue triples and the aux digest.
+// The digest is compared by the verifier as a public signal of its own; the
+// rest are bound through `z` alone. None is evaluated into `y`, so all are
+// outside the Lean layout by construction (see `TRANSACT_COEFFS` in
+// PubInputs.sol and `coeffs` in ref/compress.ts).
+const CHALLENGE_WORDS = 10 + N_IN + 4 * N_OUT;
 
 // Distinct sentinel per logical field, so a transposition shows up as a
 // mismatch.
@@ -64,6 +67,7 @@ const S = sentinels(readLines(LAYOUT_FILE), 1000, "layout_parity");
  */
 const CHALLENGE_ONLY = sentinels(
     [
+        "digest",
         "recipient",
         "chainId",
         "payer",
@@ -86,11 +90,10 @@ const SENTINEL_INPUT = {
     nullifier: S.scalars("nullifier", N_IN),
     out_cm: S.scalars("outCm", N_OUT),
     public_asset_id: S.at("publicAssetId"),
-    public_in: S.at("publicIn"),
     public_out: S.at("publicOut"),
-    in_cv: S.points("inCv", N_IN),
-    out_cv: S.points("outCv", N_OUT),
-    out_cv_dep: S.points("outCvDep", N_OUT),
+    // Hashed, never evaluated: a sentinel from the other map. This suite pins
+    // where the digest word sits, not its value.
+    digest: CHALLENGE_ONLY.at("digest"),
     // Hashed, never evaluated — hence sentinels from the other map.
     recipient_address: CHALLENGE_ONLY.at("recipient"),
     chain_id: CHALLENGE_ONLY.at("chainId"),
@@ -115,9 +118,10 @@ describe("formal model / public-input layout parity", () => {
     });
 
     it("the challenge preimage is a strict superset of the coefficients", () => {
-        // The unconstrained fields must be hashed and not evaluated. Omitting them
-        // from the preimage lets a relayer rewrite the recipient; including them
-        // in the coefficients makes them free variables and `y` forgeable.
+        // The fields the circuit has no signal for must be hashed and not
+        // evaluated. Omitting them from the preimage lets a relayer rewrite the
+        // recipient; including them in the coefficients puts words after the
+        // digest that nothing in the circuit computes.
         const c = refCoeffs(SENTINEL_INPUT);
         const pre = flatten(SENTINEL_INPUT);
         expect(c.length).to.equal(COEFF_COUNT);
@@ -136,6 +140,21 @@ describe("formal model / public-input layout parity", () => {
         for (const v of c) {
             expect(pre, "every coefficient must also be hashed into the challenge").to.include(v);
         }
+    });
+
+    it("the digest word is hashed right after the coefficients and is not one of them", () => {
+        // Hashed, so the commitment is fixed before `z`; not evaluated, because
+        // the verifier compares it as a public signal of its own. Directly
+        // after the coefficients, because that is where `PubInputs.Transact`
+        // carries it and the contract hashes the struct in order.
+        const layout = leanLayout();
+        expect(layout, "the Lean coefficient layout must not name the digest").to.not.include("digest");
+
+        const c = refCoeffs(SENTINEL_INPUT);
+        const pre = flatten(SENTINEL_INPUT);
+        expect(c).to.not.include(CHALLENGE_ONLY.at("digest"));
+        expect(pre[COEFF_COUNT]).to.equal(CHALLENGE_ONLY.at("digest"));
+        expect(pre.slice(0, COEFF_COUNT)).to.deep.equal(c);
     });
 
     it("every Lean slot name has a sentinel (the test covers the whole layout)", () => {
@@ -175,12 +194,12 @@ describe("formal model / public-input layout parity", () => {
             );
             expect(vector.circuit.coeffCount).to.equal(layout.length);
             expect(vector.circuit.coeffCount).to.equal(
-                4 + 3 * vector.circuit.shape.nIn + 5 * vector.circuit.shape.nOut,
-                "coefficient count must equal 4 + 3·N_IN + 5·N_OUT",
+                3 + vector.circuit.shape.nIn + vector.circuit.shape.nOut,
+                "coefficient count must equal 3 + N_IN + N_OUT",
             );
             expect(vector.circuit.challengeWords).to.equal(
-                10 + 3 * vector.circuit.shape.nIn + 8 * vector.circuit.shape.nOut,
-                "challenge preimage must equal 10 + 3·N_IN + 8·N_OUT",
+                10 + vector.circuit.shape.nIn + 4 * vector.circuit.shape.nOut,
+                "challenge preimage must equal 10 + N_IN + 4·N_OUT",
             );
 
             // Computed with the generator's own function: this pins the layout

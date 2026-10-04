@@ -11,13 +11,14 @@ import {
     Poseidon,
     abiEncodeCoeffs,
     batchCoeffs,
+    batchDigest,
     batchLayoutNames,
-    buildLeaf,
+    buildInner,
+    commitWithInner,
     fiatShamirZ,
     flattenBatch,
     hornerEval,
     type Field,
-    type Point,
 } from "../../test/ref/index.js";
 import { loadCircuit, readOutput, srcPath } from "../../test/lib/circuit.js";
 import { padToSlots, treeUpdateBatchInputJson } from "../../test/lib/inputs.js";
@@ -26,7 +27,6 @@ import {
     SCHEMA,
     hex,
     layoutDigest,
-    pt,
     s,
     sharedConstants,
     type Compression,
@@ -49,7 +49,7 @@ interface BatchCase {
 const BATCH_CASES: BatchCase[] = [
     {
         name: "single-deposit-empty-tree",
-        description: "One deposit leaf into an empty tree; per-leaf binding active.",
+        description: "One deposit leaf into an empty tree; the circuit builds the leaf from the public amount.",
         prefilled: 0,
         leaves: [{ asset: 7n, value: 1000n, isDeposit: 1 }],
     },
@@ -74,38 +74,44 @@ const BATCH_CASES: BatchCase[] = [
     },
 ];
 
-/** One built leaf: the commitment, its deposit anchor, and the leaf hash of both. */
+/** The owner half of every vector note; `rho` varies per slot. */
+const VECTOR_PK = 0xabcn;
+const VECTOR_RCM = 3n;
+
+/** One built leaf, with the note behind it. */
 interface BuiltLeaf {
-    cm: Field;
-    cvDep: Point;
+    /** What `cms[k]` carries: the note commitment on a spend leaf, `inner` on a deposit leaf. */
+    word: Field;
+    /** `Poseidon(TAG_INNER, pk, rho, rcm)` of the note. */
+    inner: Field;
+    /** The note commitment, which is the tree leaf on both kinds of slot. */
     leaf: Field;
     leafAsset: Field;
     leafPublicIn: Field;
     isDeposit: 0 | 1;
-    rcv: Field;
+    rho: Field;
 }
 
 /**
  * Build a leaf from its spec.
  *
- * The commitment is hashed directly rather than via `buildNoteCommitment`: the
- * batch circuit constrains no note structure, so any distinct well-formed field
- * element suffices. Only deposit leaves declare an asset and a public_in; a
- * spend leaf zeroes both and skips the binding check.
+ * Either way the leaf is the commitment of the note `(asset, value, pk, rho,
+ * rcm)`. A deposit slot publishes `inner` beside the public amount and the
+ * circuit hashes the three; a spend slot publishes the commitment itself and
+ * zeroes the two amount fields.
  */
-function buildLeafFor(P: Poseidon, J: Jubjub, l: BatchLeafSpec, k: number): BuiltLeaf {
+function buildLeafFor(P: Poseidon, l: BatchLeafSpec, k: number): BuiltLeaf {
     const rho = BigInt(k + 1);
-    const rcvDep = BigInt(5 * (k + 1));
-    const cm = P.hash([l.asset * (1n << 64n) + l.value, 0xabcn, rho, 3n]);
-    const cvDep = J.valueCommit(l.value, J.hashToAssetGen(l.asset), rcvDep);
+    const inner = buildInner(P, { pk: VECTOR_PK, rho, rcm: VECTOR_RCM });
+    const leaf = commitWithInner(P, l.asset, l.value, inner);
     return {
-        cm,
-        cvDep,
-        leaf: buildLeaf(P, cm, cvDep),
+        word: l.isDeposit === 1 ? inner : leaf,
+        inner,
+        leaf,
         leafAsset: l.isDeposit === 1 ? l.asset : 0n,
         leafPublicIn: l.isDeposit === 1 ? l.value : 0n,
         isDeposit: l.isDeposit,
-        rcv: rcvDep,
+        rho,
     };
 }
 
@@ -122,7 +128,7 @@ export async function buildBatchVectors() {
         const oldRoot = tree.root();
         const frontier = tree.frontier();
 
-        const built = c.leaves.map((l, k) => buildLeafFor(P, J, l, k));
+        const built = c.leaves.map((l, k) => buildLeafFor(P, l, k));
         for (const b of built) tree.insert(b.leaf);
         const newRoot = tree.root();
 
@@ -131,47 +137,54 @@ export async function buildBatchVectors() {
             newRoot,
             startIndex: c.prefilled,
             actualCount: built.length,
-            cms: padToSlots(built.map((b) => b.cm), MAX_L, 0n),
-            cvDep: padToSlots(built.map((b) => b.cvDep), MAX_L, [0n, 0n] as Point),
+            cms: padToSlots(built.map((b) => b.word), MAX_L, 0n),
             leafAsset: padToSlots(built.map((b) => b.leafAsset), MAX_L, 0n),
             leafPublicIn: padToSlots(built.map((b) => b.leafPublicIn), MAX_L, 0n),
             isDeposit: padToSlots(built.map((b) => b.isDeposit as number), MAX_L, 0),
-            rcv: padToSlots(built.map((b) => b.rcv), MAX_L, 0n),
             frontier,
+            digest: 0n,
             z: 0n,
         };
 
-        const publicSlots = {
+        const coeffSlots = {
             old_root: witnessArgs.oldRoot,
             new_root: witnessArgs.newRoot,
             start_index: witnessArgs.startIndex,
             actual_count: witnessArgs.actualCount,
             cms: witnessArgs.cms,
-            cv_dep: witnessArgs.cvDep,
             leaf_asset: witnessArgs.leafAsset,
             leaf_public_in: witnessArgs.leafPublicIn,
             is_deposit: witnessArgs.isDeposit,
         };
-        // z over the preimage, y over the coefficients — the same 52 words.
-        const challenge = flattenBatch(publicSlots);
+        // The digest commits the 36 coefficients; z is hashed over those and the
+        // digest word; y is evaluated over the coefficients alone.
+        const digest = batchDigest(coeffSlots);
+        const challenge = flattenBatch({ ...coeffSlots, digest });
         const z = fiatShamirZ(challenge);
-        const y = hornerEval(batchCoeffs(publicSlots), z);
-        const witnessInput = treeUpdateBatchInputJson({ ...witnessArgs, z });
+        const y = hornerEval(batchCoeffs(coeffSlots), z);
+        const witnessInput = treeUpdateBatchInputJson({ ...witnessArgs, digest, z });
 
         const w = await circuit.calculateWitness(witnessInput, true);
         await circuit.checkConstraints(w);
-        const circuitY = readOutput(w);
+        const circuitY = readOutput(w, 0);
+        const circuitDigest = readOutput(w, 1);
         if (circuitY !== y) {
             throw new Error(
                 `${c.name}: circuit y (${circuitY}) != reference PolyEval y (${y}). ` +
                     `The layout in test/ref/compress.ts disagrees with BatchCompress.`,
             );
         }
+        if (circuitDigest !== digest) {
+            throw new Error(
+                `${c.name}: circuit digest (${circuitDigest}) != reference CoeffDigest (${digest}).`,
+            );
+        }
 
         const compression: Compression = {
-            // Every preimage word, evaluated into y. `ref/compress.ts ::
+            // Every input signal, evaluated into y. `ref/compress.ts ::
             // batchCoeffs` documents why each word is a coefficient.
-            coeffs: batchCoeffs(publicSlots).map(s),
+            coeffs: batchCoeffs(coeffSlots).map(s),
+            digest: s(digest),
             challenge: challenge.map(s),
             abiEncodedChallenge: hex(abiEncodeCoeffs(challenge)),
             zDerivation: "fiat-shamir",
@@ -189,24 +202,32 @@ export async function buildBatchVectors() {
                 oldRoot: s(oldRoot),
                 newRoot: s(newRoot),
                 frontierIn: frontier.map((lvl) => lvl.map(s)),
+                // Per slot: the calldata word, and the leaf the tree holds. On a
+                // deposit slot they differ, so a consumer that rebuilds the tree
+                // from `cms` alone inserts the wrong value:
+                //   leaf = isDeposit ? Poseidon(TAG_CM, leafAsset·2^64 + leafPublicIn, cms) : cms
                 leaves: built.map((b, k) => ({
                     slot: k,
-                    cm: s(b.cm),
-                    cvDep: pt(b.cvDep),
-                    leafHash: s(b.leaf),
+                    cms: s(b.word),
+                    leaf: s(b.leaf),
                     leafAsset: s(b.leafAsset),
                     leafPublicIn: s(b.leafPublicIn),
                     isDeposit: b.isDeposit,
-                    rcv: s(b.rcv),
-                })),
-                assetGens: [...new Set(c.leaves.map((l) => l.asset))].map((a) => ({
-                    assetId: s(a),
-                    gen: pt(J.hashToAssetGen(a)),
+                    // The note the leaf commits to, so a consumer can check its
+                    // own `inner` and commitment against `leaf`.
+                    note: {
+                        asset: s(c.leaves[k].asset),
+                        value: s(c.leaves[k].value),
+                        pk: s(VECTOR_PK),
+                        rho: s(b.rho),
+                        rcm: s(VECTOR_RCM),
+                        inner: s(b.inner),
+                    },
                 })),
             },
             witness: witnessInput,
             compression,
-            circuitOutput: { y: s(circuitY) },
+            circuitOutput: { y: s(circuitY), digest: s(circuitDigest) },
         });
     }
 
@@ -217,21 +238,22 @@ export async function buildBatchVectors() {
             template: `TreeUpdateBatch(${DEPTH}, ${MAX_L})`,
             source: "src/tree_update_batch.circom",
             shape: { depth: DEPTH, maxL: MAX_L },
-            coeffCount: 4 + 6 * MAX_L,
-            challengeWords: 4 + 6 * MAX_L,
+            coeffCount: 4 + 4 * MAX_L,
+            // The coefficients, then the digest word.
+            challengeWords: 5 + 4 * MAX_L,
+            // The verifier's `_pubSignals`, in order.
+            publicSignals: ["y", "digest", "z"],
             layout,
             layoutDigest: layoutDigest(layout),
-            // Empty: every word of the batch preimage is pinned by its own
-            // constraint and is evaluated into `y`. The field is published rather
-            // than omitted so `test/reference.test.ts` covers it; any entry added
-            // here must be named, and that test then requires a divergent-witness
-            // test for it.
+            // Empty: every input signal of the batch is evaluated into `y`, and
+            // the one other preimage word, the digest, is a public signal. The
+            // field is published rather than omitted so `test/reference.test.ts`
+            // covers it; any entry added here must be named, and that test then
+            // requires a divergent-witness test for it.
             //
-            // The deposit-binding fields must not be challenge-only: they are
-            // signals of this circuit, and hashing a signal into `z` binds
-            // nothing because the prover learns `z` before choosing the witness.
-            // Step 6a of `tree_update_batch.circom` pins them where the deposit
-            // binding degenerates.
+            // The deposit fields must not be challenge-only: they are signals of
+            // this circuit, and hashing a signal into `z` binds nothing because
+            // the prover learns `z` before choosing the witness.
             challengeOnly: [] as string[],
         },
         constants: sharedConstants(P, J),

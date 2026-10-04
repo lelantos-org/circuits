@@ -102,7 +102,7 @@ export function generatedFixture(source: string, template: string, args: readonl
 //
 // The output directory is pinned rather than left to circom_tester's tmpdir:
 // the compile emits the `.r1cs` and `.sym` the R1CS-level suites need
-// (`lib/r1cs.ts`), and a tmpdir would require a second ~100k-constraint compile
+// (`lib/r1cs.ts`), and a tmpdir would require a second ~70k-constraint compile
 // to obtain them. It lives under `build/`, which is gitignored.
 //
 // Keyed on the absolute path and holding the promise, so concurrent `before`

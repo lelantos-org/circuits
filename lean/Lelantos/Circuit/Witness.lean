@@ -4,39 +4,44 @@ import Lelantos.Circuit.Output
 /-!
 # The `Transact` signal set
 
-The signals of `Transact(DEPTH, N_IN, N_OUT)`: the two slot arrays, the public bucket, the
-compression pair and the dummy-count accumulator. Nothing here says what the circuit
-constrains — that is `Lelantos.Circuit.Transact` — and nothing here says how the public
-inputs are ordered, which is `Lelantos.Circuit.Layout`.
+The signals of `Transact(DEPTH, N_IN, N_OUT)`: the two slot arrays, the transparent bucket,
+the three public signals `(y, digest, z)` and the dummy-count accumulator. Nothing here
+says what the circuit constrains — that is `Lelantos.Circuit.Transact` — and nothing here
+says how the public inputs are ordered, which is `Lelantos.Circuit.Layout`.
 
 Each field names a signal of the compiled circuit; `lean/expected/signal-map.json` records
 which, and `test/formal/signal_parity.test.ts` checks the name against `build/*.sym`.
+
+There is no public input: a transact proof never moves tokens in. Shielding goes through
+the deposit escrow and `tree_update_batch.circom`.
 -/
 
 namespace Lelantos
 
 /-- Every signal of `Transact(depth, nIn, nOut)`. -/
 structure TxWitness (depth nIn nOut : ℕ) where
-  /-- The only verifier-visible pair. -/
+  /-- The public signals, `(y, digest, z)` in the verifier's order
+  (`src/lib/transact.circom:42-44`). `z` is the challenge, an input; `y` and `digest` are
+  outputs. -/
   z : F
   y : F
-  /-- Logical public inputs. -/
+  /-- The coefficient digest: `CoeffDigest` of the coefficient vector, a public output. It is
+  not a coefficient and is not evaluated into `y`. The prover writes the same value into
+  calldata, and the contract hashes that word into `z` and passes it to the verifier. -/
+  digest : F
+  /-- Logical public inputs: private signals of the circuit, bound through `y` and
+  `digest`. -/
   merkleRoot : F
   publicAssetId : F
-  publicIn : F
   publicOut : F
   /-- Per-slot sub-circuits. -/
   spent : ℕ → SpentSlot depth
   out : ℕ → OutputSlot
-  /-- Deposit value commitments, forwarded to `tree_update_batch`. -/
-  outCvDep : ℕ → Pt
-  /-- Public-bucket signals. -/
-  pubGen : Pt
+  /-- Transparent-bucket signals: the two range checks and `IsZero(public_out)`. -/
   pubAssetBits : ℕ → F
-  pubInBits : ℕ → F
   pubOutBits : ℕ → F
-  pubInPt : Pt
-  pubOutPt : Pt
+  pubOutInv : F
+  pubOutIsZero : F
   /-- `PerAssetValueBalance` intermediates. -/
   vbPubInv : ℕ → F
   vbPubEq : ℕ → F
@@ -48,8 +53,12 @@ structure TxWitness (depth nIn nOut : ℕ) where
   vbOutTerm : ℕ → ℕ → F
   vbLhs : ℕ → ℕ → F
   vbRhs : ℕ → ℕ → F
-  /-- `PolyEval` accumulator. -/
+  /-- `CoeffDigest` block outputs. -/
+  dgBlock : ℕ → F
+  /-- `PolyEval`: the accumulator and the `IsZero` signals of the `z != 0` check. -/
   peAcc : ℕ → F
+  zInv : F
+  zIsZero : F
   /-- Running count of dummy input slots, and the `IsEqual` comparing it to `nIn`.
   `src/lib/transact.circom` rejects the all-dummy witness with it; see
   `TransactSat.not_all_dummy`. -/

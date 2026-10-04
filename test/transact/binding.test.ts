@@ -8,20 +8,21 @@
 //                `PubInputs.compress` hashes into `z`, which moves `y` because
 //                the circuit evaluates the polynomial at the supplied `z`.
 //
-// Both bind, under different requirements: a coefficient binds only if another
-// constraint pins it, while a challenge word needs no constraint.
-//
-// `PolyEval` is affine in each coefficient, and `z` is an input the prover reads
-// before choosing a witness, derived by the contract from prover-authored
-// calldata. An unpinned coefficient is therefore one linear equation in one
-// unknown: solving it lets any calldata verify against a proof of an unrelated
-// transaction. Schwartz-Zippel does not apply, because it requires the vector
-// to be fixed before the challenge.
+// Both bind, under different requirements. `PolyEval` is affine in each
+// coefficient, and `z` is an input the prover reads before choosing a witness,
+// derived by the contract from prover-authored calldata. The coefficients bind
+// because the circuit also outputs a Poseidon commitment to them
+// (`CoeffDigest`), which the contract takes from calldata, hashes into `z` and
+// passes to the verifier: the witness's coefficients are fixed before the
+// challenge, which is the order Schwartz-Zippel requires. A challenge word needs
+// no constraint.
 //
 // `recipient_address`, `chain_id`, `payer_address`, `relayer_address`,
 // `intent_hash`, the FMD clue triples and `out_aux_digest` carry no in-circuit
 // constraint, so each is a challenge word. This file checks that none of them
-// is a signal or a coefficient, and that each one moves `z`.
+// is a signal or a coefficient, and that each one moves `z`. It also checks what
+// the digest argument places on the layout: the digest word is in the challenge
+// preimage, is not evaluated, and equals the circuit's second public output.
 
 import { expect } from "chai";
 
@@ -30,10 +31,11 @@ import {
     fiatShamirZ,
     flatten,
     hornerEval,
+    transactDigest,
     type TransactWitnessBundle,
 } from "../helpers";
 import { N_IN, N_OUT, TIMEOUT_CIRCUIT } from "../lib/constants";
-import { expectWitnessY } from "../lib/expect";
+import { expectWitnessPublic, expectWitnessY, readOutput } from "../lib/expect";
 import { loadCircuit } from "../lib/circuit";
 import { circuitSignals } from "../ref/witness";
 import { rebindFiatShamir } from "../lib/transact";
@@ -52,11 +54,11 @@ const CHALLENGE_SCALARS = [
     "intent_hash",
 ] as const;
 
-/** `4 + 3·N_IN + 5·N_OUT` = 46: what the polynomial evaluates. */
-const COEFF_COUNT = 4 + 3 * N_IN + 5 * N_OUT;
+/** `3 + N_IN + N_OUT` = 13: what the polynomial evaluates. */
+const COEFF_COUNT = 3 + N_IN + N_OUT;
 
-/** `10 + 3·N_IN + 8·N_OUT` = 70: what the challenge hashes. */
-const CHALLENGE_WORDS = 10 + 3 * N_IN + 8 * N_OUT;
+/** `10 + N_IN + 4·N_OUT` = 38: what the challenge hashes. */
+const CHALLENGE_WORDS = 10 + N_IN + 4 * N_OUT;
 
 describe("transact_4x6 / where each public input is bound", function () {
     this.timeout(TIMEOUT_CIRCUIT);
@@ -80,9 +82,9 @@ describe("transact_4x6 / where each public input is bound", function () {
         rebindFiatShamir(base);
     });
 
-    // ===== the coefficient vector holds only pinned slots =====
+    // ===== the coefficient vector holds exactly the circuit's public signals =====
 
-    it("evaluates 46 coefficients and hashes 70 challenge words", () => {
+    it("evaluates 13 coefficients and hashes 38 challenge words", () => {
         expect(coeffs(base).length, "coefficient vector").to.equal(COEFF_COUNT);
         expect(flatten(base).length, "challenge preimage").to.equal(CHALLENGE_WORDS);
     });
@@ -102,16 +104,96 @@ describe("transact_4x6 / where each public input is bound", function () {
     it("the coefficients are the challenge preimage's leading words", () => {
         // A prefix, not merely a subsequence: `PubInputs.compress` evaluates a
         // single span of the copied calldata (`_finalizeRaw(head, n, nCoeffs)`),
-        // which is correct only while every unpinned word follows every pinned
-        // one. The member order of `PubInputs.Transact` provides this; an
-        // unpinned word placed among the coefficients would make the contract
-        // evaluate the wrong 46 words.
+        // which is correct only while every challenge-only word follows every
+        // coefficient. The member order of `PubInputs.Transact` provides this; a
+        // challenge-only word placed among the coefficients would make the
+        // contract evaluate the wrong 13 words.
         const c = coeffs(base);
         const pre = flatten(base);
         expect(pre.slice(0, c.length)).to.deep.equal(
             c,
             "coefficients must be the preimage's leading words, in order",
         );
+    });
+
+    // ===== the digest: hashed, output by the circuit, never evaluated =====
+
+    it("the digest word follows the coefficients in the challenge preimage and is not one of them", () => {
+        // Hashed, so it is fixed before `z` exists: that is what makes it a
+        // commitment the witness cannot be chosen around. Not evaluated: it
+        // reaches the verifier as a public signal of its own.
+        const c = coeffs(base);
+        const pre = flatten(base);
+        const digest = transactDigest(base);
+        expect(BigInt(base.digest), "the bundle carries the digest of its own coefficients").to.equal(digest);
+        expect(pre[COEFF_COUNT], "preimage word right after the coefficients").to.equal(digest);
+        expect(c.length).to.equal(COEFF_COUNT);
+        expect(c, "the digest is not a coefficient").to.not.include(digest);
+
+        const moved = { ...base, digest: (digest + 1n).toString() };
+        expect(fiatShamirZ(flatten(moved)), "a different digest word must move z")
+            .to.not.equal(fiatShamirZ(pre));
+        expect(coeffs(moved), "and must not move a coefficient").to.deep.equal(c);
+    });
+
+    it("the circuit outputs the digest of its coefficients as its second public signal", async () => {
+        // The word the contract passes to the verifier is compared against this
+        // output, so it must be the reference digest, at output index 1.
+        const w = await expectWitnessPublic(ctx.circuit, base, {
+            y: hornerEval(coeffs(base), BigInt(base.z)),
+            digest: transactDigest(base),
+        });
+        expect(readOutput(w, 1)).to.equal(BigInt(base.digest));
+    });
+
+    it("the digest covers every coefficient", () => {
+        // Moving any one of the 13 signals moves the digest. A word left out
+        // would be a coefficient the prover can change without changing the
+        // commitment the contract checks.
+        const digest = transactDigest(base);
+        const bumped = (v: string) => (BigInt(v) + 1n).toString();
+        const variants: [string, TransactWitnessBundle][] = [
+            ["merkle_root", { ...base, merkle_root: bumped(base.merkle_root) }],
+            ["public_asset_id", { ...base, public_asset_id: bumped(base.public_asset_id) }],
+            ["public_out", { ...base, public_out: bumped(base.public_out) }],
+        ];
+        for (let i = 0; i < N_IN; i++) {
+            const nullifier = [...base.nullifier];
+            nullifier[i] = bumped(nullifier[i]);
+            variants.push([`nullifier[${i}]`, { ...base, nullifier }]);
+        }
+        for (let j = 0; j < N_OUT; j++) {
+            const out_cm = [...base.out_cm];
+            out_cm[j] = bumped(out_cm[j]);
+            variants.push([`out_cm[${j}]`, { ...base, out_cm }]);
+        }
+        expect(variants.length, "one variant per coefficient").to.equal(COEFF_COUNT);
+        for (const [label, v] of variants) {
+            expect(transactDigest(v), `${label} must move the digest`).to.not.equal(digest);
+        }
+    });
+
+    it("the digest does not depend on the challenge or on any challenge-only word", () => {
+        // It commits the coefficients before `z` is derived, so it cannot be a
+        // function of `z`, and the challenge-only words have no witness copy.
+        const digest = transactDigest(base);
+        const otherChallenge: TransactWitnessBundle = { ...base, z: "12345" };
+        const otherBinding: TransactWitnessBundle = { ...base, recipient_address: "999", intent_hash: "7" };
+        expect(transactDigest(otherChallenge)).to.equal(digest);
+        expect(transactDigest(otherBinding)).to.equal(digest);
+    });
+
+    it("the digest is not an input signal: the circuit computes its own", async () => {
+        const circuit = await loadCircuit(CIRCUIT);
+        const withExtra = { ...circuitSignals(base), digest: base.digest };
+        let err: unknown;
+        try {
+            await circuit.calculateWitness(withExtra as never, true);
+        } catch (e) {
+            err = e;
+        }
+        expect(err, "digest must not be an input of 4x6.circom").to.not.equal(undefined);
+        expect(String(err)).to.match(/Too many values for input signal/);
     });
 
     // ===== the unconstrained fields are not signals =====
@@ -201,7 +283,7 @@ describe("transact_4x6 / where each public input is bound", function () {
         });
     }
 
-    // ===== the pinned slots still bind through the coefficient vector =====
+    // ===== the signals still bind through the coefficient vector =====
 
     it("y is sensitive to coefficient ORDER, not just membership", () => {
         // At z = 1 Horner reduces to a plain sum and every permutation yields the

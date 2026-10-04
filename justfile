@@ -8,7 +8,7 @@ PTAU_DIR := ROOT / "ptau"
 # GitHub release assets in `lelantos-org/ptau`.
 PTAU_URL_BASE := "https://github.com/lelantos-org/ptau/releases/download/hermez"
 # Transact(11,4,6) uses the 2^17 ceremony (100,304 constraints; exceeds 2^16).
-# TreeUpdateBatch(11,8) uses the 2^16 ceremony (55,190). snarkjs sizes the domain
+# TreeUpdateBatch(11,8) uses the 2^16 ceremony (47,158). snarkjs sizes the domain
 # from `nConstraints + nPubInputs + nOutputs`, capping a 2^16 ceremony at 65,533
 # constraints and a 2^17 one at 131,069. See `budget` below.
 #
@@ -105,12 +105,13 @@ _ensure-build-circuit:
             --root "{{TOOLS}}/build-circuit"; \
     fi
 
-# tree_update_batch at MAX_L=8, depth 11 is 55,190 constraints against a 65,533
+# tree_update_batch at MAX_L=8, depth 11 is 41,521 constraints against a 65,532
 # ceiling on the 2^16 domain (snarkjs sizes the domain from nConstraints +
-# nPubInputs + nOutputs and requires the sum below 2^16). A leaf slot costs 3,626
-# and a depth level 2,534, so 2^16 suffices through depth 15 at MAX_L=8, and
-# MAX_L=16 requires 2^17. `just budget` pins the domain so growth past it fails
-# CI; `groth16 setup` also fails when the constraint count exceeds the ptau.
+# nPubInputs + nOutputs and requires the sum below 2^16). A leaf slot costs about
+# 1,800 and a depth level 2,534, so 2^16 suffices through depth 20 at MAX_L=8,
+# and through MAX_L=16 at depth 11. `just budget` pins the domain so growth past
+# it fails CI; `groth16 setup` also fails when the constraint count exceeds the
+# ptau.
 
 # Phase-2 trusted setup for tree_update_batch (single-contributor; INSECURE).
 setup-batch: (_setup "tree_update_batch" PTAU16)
@@ -225,24 +226,6 @@ budget:
 budget-update:
     NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/check-budget.mjs" --update
 
-# === asset id separation ===
-#
-# A deposit leaf is bound only by cv_dep = leaf_public_in · V^leaf_asset + rcv·H,
-# and every V^a is a known multiple m(a)·BASE0 (src/README.md § 5). Two ids whose
-# multipliers share a large factor admit v·V^a == v'·V^a' within the circuit's
-# 64-bit value range, letting a depositor pay in the lower-value asset and spend
-# the leaf as the higher-value one. Run this over the id set before registering
-# it: `AssetRegistry.addAsset` accepts an arbitrary uint64 without this check.
-
-# Check a set of asset ids for deposit-binding collisions.
-asset-ids +ids:
-    @echo "==> Asset id separation"
-    NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/check-asset-ids.ts" {{ids}}
-
-# Check the asset id checker against a known colliding pair.
-asset-ids-self-test:
-    NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/check-asset-ids.ts" --self-test
-
 # === golden vectors ===
 
 # Every `y` is read from a witness produced by the compiled circuit and compared
@@ -311,6 +294,22 @@ vectors-consumers-check:
     fi
     echo "==> consumer vector copies up to date"
 
+# === contracts proof fixture ===
+#
+# The vectors above name no recipient, payer, relayer or chain id, so the pool
+# refuses them before checking a proof. scripts/gen-masp-fixture.ts proves a
+# deposit flush and two spends of the deposited note for requests the pool
+# accepts, and writes them to ../contracts/test/fixtures/masp_flow_proof.json.
+#
+# `keys` is the directory holding the zkeys and verification keys the
+# contracts' verifiers were generated from; the generator refuses any other.
+# The wasm is taken from beside the keys (a release) or from build/<shape>_js/.
+# Proving is randomized, so every run rewrites the proofs.
+
+# Regenerate the MASP-level proof fixture in ../contracts from `keys`.
+masp-fixture keys=(BUILD / "prototype-0.17.0"):
+    NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/gen-masp-fixture.ts" --keys "{{keys}}"
+
 # Static analysis via Trail of Bits circomspect. Install: cargo install circomspect
 #
 # Scope is `src/lib/` plus the top-level `src/*.circom` entry points. The tree
@@ -326,9 +325,8 @@ vectors-consumers-check:
 #   CS0010 non-strict-binary-conversion
 #       Each Num2Bits site uses n < 254 bits, so 2^n < p and the field-element
 #       decomposition is unique (no aliasing).
-#       Sites: balance.circom / asset_gen.circom (64 bits),
-#              value_commit.circom (RCV_BITS = 252), common.circom (2 bits),
-#              tree_update_batch.circom (COUNT_BITS = 2; 2*DEPTH bits,
+#       Sites: balance.circom (RangeCheck64, 64 bits), common.circom (2 bits),
+#              batch_append.circom (COUNT_BITS; 2*DEPTH bits,
 #              DEPTH <= 32 ⇒ n <= 64).
 #
 #   CS0014 unconstrained-less-than
@@ -338,9 +336,7 @@ vectors-consumers-check:
 #
 #   CS0018 unused-output-signal
 #       Components are instantiated for their internal constraints and not every
-#       output is propagated. Sites:
-#         - SpentNote/OutputNote: only the cv branch's `vc_dep.rH` is threaded
-#           out; the deposit-branch rH is bound internally by ValueCommit.
+#       output is propagated. Site:
 #         - MerkleLevel4: the `PathIndexSelectors`
 #           selectors output is consumed; `bits` is the redundant view.
 
@@ -505,8 +501,9 @@ package: build-artifacts-4x6
 #
 # Separate from `package`, whose trusted-setup ceremony produces a new zkey from
 # fresh entropy and invalidates every proof built against the previous one,
-# including the committed fixtures in ../contracts (proof_transfer.json,
-# proof_deposit_batch_n1.json).
+# including the committed fixtures in ../contracts/test/fixtures
+# (transact_4x6_proof.json, tree_update_batch_proof.json,
+# masp_flow_proof.json).
 #
 # check-artifacts.ts reports each missing artifact and how to rebuild it.
 

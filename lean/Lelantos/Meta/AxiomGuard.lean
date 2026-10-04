@@ -23,24 +23,15 @@ namespace Lelantos.Meta.AxiomGuard
 private def leanAxioms : List Name :=
   [``propext, ``Classical.choice, ``Quot.sound]
 
-/-- Arithmetic facts that Mathlib cannot decide at these bit widths, discharged externally
+/-- The one arithmetic fact Mathlib cannot decide at this bit width, discharged externally
 by `lean/scripts/check-prime.py`. -/
 private def arithmeticAxioms : List Name :=
-  [``Lelantos.p_prime, ``Lelantos.ell_prime]
-
-/-- Curve and gadget semantics: the Baby Jubjub group law, the scalar-multiplication
-gadgets, the two Pedersen bases, and the known discrete log of the asset generators.
-
-`coords_injective` is permitted but reaches no headline theorem: its only consumer lifts the
-point equation into the group, which has no consumers. See `Lelantos.Model.Jubjub`. -/
-private def curveAxioms : List Name :=
-  [``Lelantos.coords_injective, ``Lelantos.babyAdd, ``Lelantos.babyAdd_spec,
-   ``Lelantos.escalarMul, ``Lelantos.escalarMul_spec, ``Lelantos.H, ``Lelantos.BASE0,
-   ``Lelantos.assetMul, ``Lelantos.assetMul_arith]
+  [``Lelantos.p_prime]
 
 /-- The complete trusted base. It contains no hash axiom; `Lelantos.poseidon_not_injective`
-shows that an injectivity axiom would be inconsistent. -/
-def allowed : List Name := leanAxioms ++ arithmeticAxioms ++ curveAxioms
+shows that an injectivity axiom would be inconsistent. It contains no curve or gadget
+axiom either: neither circuit has any curve arithmetic left to axiomatise. -/
+def allowed : List Name := leanAxioms ++ arithmeticAxioms
 
 /-- Every declaration this development introduces, excluding compiler-generated ones. -/
 private def ownDeclarations (env : Environment) : Array Name :=

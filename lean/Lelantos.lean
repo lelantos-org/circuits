@@ -1,9 +1,8 @@
--- The ambient objects the circuit is written over: the field, bit decompositions, the hash,
--- and the curve group. None of these mirrors a circom template.
+-- The ambient objects the circuit is written over: the field, bit decompositions and the
+-- hash. None of these mirrors a circom template.
 import Lelantos.Model.Field
 import Lelantos.Model.Bits
 import Lelantos.Model.Poseidon
-import Lelantos.Model.Jubjub
 
 -- One module per circomlib or `src/lib` template, each carrying its constraint system and
 -- the theorem stating what those constraints buy.
@@ -16,11 +15,10 @@ import Lelantos.Gadgets.Note
 import Lelantos.Spec.QuatTree
 
 import Lelantos.Gadgets.PolyEval
+import Lelantos.Gadgets.CoeffDigest
 import Lelantos.Gadgets.Balance
 import Lelantos.Gadgets.Merkle
 import Lelantos.Gadgets.BatchAppend
-import Lelantos.Gadgets.ValueCommit
-import Lelantos.Gadgets.PointBalance
 
 -- The transact circuit, one module per job: the two slot templates, the signal set, the
 -- public-input layout, and the constraint system with `transact_sound`.
@@ -45,7 +43,7 @@ import Lelantos.Proofs.BatchCompleteness
 import Lelantos.Proofs.Rejection
 
 /-!
-# `Lelantos` — a machine-checked soundness proof for the transact circuit
+# `Lelantos` — machine-checked soundness proofs for the two circuits
 
 Importing this module brings in the whole development. The layers are strictly ordered:
 `Model` depends on nothing else here, `Gadgets` on `Model`, `Spec` on the hash definitions in

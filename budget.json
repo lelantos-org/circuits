@@ -6,27 +6,31 @@
     "`domain` is the Groth16 FFT domain the circuit must fit; exceeding it means",
     "a larger ptau and roughly double the proving time.",
     "snarkjs sizes that domain from nConstraints + nPubInputs + nOutputs and",
-    "requires the sum to be at most domain - 1, so with one public input and one",
-    "public output the ceiling on `constraints` is domain - 3 (131069 at 2^17,",
-    "65533 at 2^16). check-budget.mjs computes that bound rather than comparing against",
-    "`domain` directly.",
+    "requires the sum to be at most domain - 1, so with one public input and two",
+    "public outputs (y, digest) the ceiling on `constraints` is domain - 4",
+    "(131068 at 2^17, 65532 at 2^16). check-budget.mjs computes that bound rather",
+    "than comparing against `domain` directly.",
     "The two are ceremony-paired but not domain-paired: a spend's output leaves",
     "are inserted by the batch circuit, so they share DEPTH = 11, while each sits",
-    "in its own domain. 4x6 is in 2^17 with ~30.7k of headroom.",
-    "tree_update_batch is in 2^16 (ceiling 65533) with ~10.3k. It inserts its",
-    "leaves in one batched build (lib/batch_append.circom): about 22 Poseidon(5)",
-    "for the tree at MAX_L = 8, growing with depth rather than leaf count.",
-    "Measured: a depth level adds 2,534 and a leaf slot 3,626, nearly all of it",
-    "the slot's deposit binding. So 2^16 holds through DEPTH = 15 at MAX_L = 8;",
-    "MAX_L = 16 is 84,199 and would need 2^17 again."
+    "in its own domain. 4x6 is in 2^17 with ~61.8k of headroom; it is ~3.8k over",
+    "the 2^16 ceiling.",
+    "tree_update_batch is in 2^16 with ~24.0k. It inserts its leaves in one",
+    "batched build (lib/batch_append.circom): about 22 Poseidon(5) for the tree",
+    "at MAX_L = 8, growing with depth rather than leaf count, plus the",
+    "coefficient digest, 9 Poseidon(5) over its 36 words (7,515).",
+    "Measured: a depth level adds 2,534 and a leaf slot about 1,800 (one",
+    "Poseidon(3), two 64-bit range checks, its share of the append window, and",
+    "one digest block per slot). So 2^16 holds through DEPTH = 20 at MAX_L = 8,",
+    "and at DEPTH = 11 through MAX_L = 16 (56,026); MAX_L = 32 is 85,891 and",
+    "needs 2^17."
   ],
   "circuits": {
     "4x6": {
-      "constraints": 100304,
+      "constraints": 69291,
       "domain": 131072
     },
     "tree_update_batch": {
-      "constraints": 55190,
+      "constraints": 41521,
       "domain": 65536
     }
   }

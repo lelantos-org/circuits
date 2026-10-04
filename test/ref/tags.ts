@@ -3,17 +3,19 @@
 //
 // | Tag         | Value | Use                                                |
 // |-------------|-------|----------------------------------------------------|
-// | TAG_CM      | 1     | reserved; NoteCommitment separates via packed_av    |
+// | TAG_CM      | 1     | cm   = Poseidon(TAG_CM, packed_av, inner)           |
 // | TAG_NF      | 2     | nf   = Poseidon(TAG_NF, nk, rho, cm)                |
 // | TAG_PK      | 3     | pk   = Poseidon(TAG_PK, ivk)                        |
 // | TAG_IVK     | 4     | ivk  = Poseidon(TAG_IVK, nsk)                       |
 // | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)                 |
 // | TAG_DK      | 6     | dk   = Poseidon(TAG_DK, ivk)         (off-circuit)  |
-// | TAG_ASSET   | 7     | V^t  = Pedersen(TAG_ASSET || asset_id_bits)         |
+// | (retired)   | 7     | was TAG_ASSET; never reuse                          |
 // | TAG_FMD_BIT | 8     | FMD bit derivation, Poseidon(6)      (off-circuit)  |
 // | TAG_NK      | 9     | nk   = Poseidon(TAG_NK, nsk)                        |
-// | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)   |
+// | (retired)   | 10    | was TAG_LEAF; never reuse                           |
 // | TAG_RHO     | 11    | rho  = Poseidon(TAG_RHO, nullifier[0], out_index)   |
+// | TAG_INNER   | 14    | inner = Poseidon(TAG_INNER, pk, rho, rcm)           |
+// | TAG_DIGEST  | 15    | first block of the coefficient digest, Poseidon(5)  |
 //
 // 12 (TAG_SUB_TOKEN) and 13 (TAG_FMD_EXPAND) are off-circuit and absent from
 // `TAGS`, which mirrors the in-circuit `TAG_*()` functions one-for-one.
@@ -25,12 +27,12 @@ export const TAG_PK = 3n;
 export const TAG_IVK = 4n;
 export const TAG_MERKLE = 5n;
 export const TAG_DK = 6n;
-export const TAG_ASSET = 7n;
 export const TAG_FMD_BIT = 8n;
 export const TAG_NK = 9n;
-export const TAG_LEAF = 10n;
 export const TAG_RHO = 11n;
 export const TAG_FMD_EXPAND = 13n;
+export const TAG_INNER = 14n;
+export const TAG_DIGEST = 15n;
 
 /** Tags keyed by circom function name. */
 export const TAGS: Record<string, bigint> = {
@@ -40,9 +42,9 @@ export const TAGS: Record<string, bigint> = {
     TAG_IVK,
     TAG_MERKLE,
     TAG_DK,
-    TAG_ASSET,
     TAG_FMD_BIT,
     TAG_NK,
-    TAG_LEAF,
     TAG_RHO,
+    TAG_INNER,
+    TAG_DIGEST,
 };

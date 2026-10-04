@@ -5,11 +5,17 @@
 // and calldata are the same batch by construction, so a signal the circuit never
 // pins still appears bound.
 //
-// In deployment they are separate: `MASP` hashes its calldata into `z` and
-// compares its `y`, and the prover picks any witness satisfying the R1CS at that
-// `z`. `z` is a circuit input read before the witness is chosen, so
-// Schwartz-Zippel does not apply and hashing a word into the challenge binds it
-// only if a constraint already pins it (src/README.md § 2a).
+// In deployment they are separate: `MASP` hashes its calldata into `z`, compares
+// its `y`, and passes the calldata digest word to the verifier; the prover picks
+// any witness satisfying the R1CS at that `z`. `z` is a circuit input read
+// before the witness is chosen, so hashing a signal into the challenge binds
+// nothing on its own. What binds is the digest public signal: it commits the
+// witness's coefficients, and it is in the preimage of `z` (src/README.md § 2a).
+//
+// Each one-field case runs twice, because the forger also chooses the calldata
+// digest word: once left at the witness's own digest, where `y` must differ,
+// and once recomputed for the rewritten coefficients, where the digest public
+// signal differs.
 //
 // These tests build the two views separately with `calldataView` +
 // `bindFiatShamir` and assert the circuit cannot attest to a batch the contract
@@ -18,6 +24,7 @@
 import {
     bindFiatShamir,
     calldataView,
+    redigest,
     DIVERGENCE_CASES,
     type BatchWitness,
 } from "../lib/batch";
@@ -41,16 +48,35 @@ describe("tree_update_batch / divergent witness", function () {
         assertViewsDiverge(treeUpdateBatchChallenge(w), treeUpdateBatchChallenge(calldata), field);
     }
 
+    const DIGESTS = [
+        { label: "digest left at the witness's", fix: (_c: TreeUpdateBatchPublicArgs) => {} },
+        { label: "digest recomputed for the calldata", fix: redigest },
+    ];
+
     for (const { field, diverge } of DIVERGENCE_CASES) {
-        it(`divergent witness: ${field} declared differently in calldata cannot be forged`, async () => {
-            const w = honestDeposit();
-            const calldata = calldataView(w);
-            diverge(calldata);
-            assertDiverged(w, calldata, field);
-            bindFiatShamir(w, calldata);
-            await expectBatchNotForgeable(ctx.circuit, w, field);
-        });
+        for (const { label, fix } of DIGESTS) {
+            it(`divergent witness: ${field} declared differently in calldata cannot be forged (${label})`, async () => {
+                const w = honestDeposit();
+                const calldata = calldataView(w);
+                diverge(calldata);
+                fix(calldata);
+                assertDiverged(w, calldata, field);
+                bindFiatShamir(w, calldata);
+                await expectBatchNotForgeable(ctx.circuit, w, field);
+            });
+        }
     }
+
+    it("divergent witness: a digest declared differently in calldata cannot be forged", async () => {
+        // Every coefficient agrees, so `y` agrees. Only the digest public signal
+        // separates the proof from this calldata.
+        const w = honestDeposit();
+        const calldata = calldataView(w);
+        calldata.digest = calldata.digest + 1n;
+        assertDiverged(w, calldata, "digest");
+        bindFiatShamir(w, calldata);
+        await expectBatchNotForgeable(ctx.circuit, w, "digest");
+    });
 
     // The two cases below stage complete mint attempts rather than one-field
     // divergences. Both are reachable by a single party: `MASP.flushBatch` is
@@ -59,30 +85,33 @@ describe("tree_update_batch / divergent witness", function () {
 
     it("divergent witness: is_deposit cleared in the witness cannot mint an unbound leaf", async () => {
         // The contract sees a 1-unit deposit of asset 7 and escrows accordingly.
-        // The witness declares the same leaf a spend, so `active_dep` is 0, the
-        // only constraint tying `cv_dep` to an asset and amount is gated off, and
-        // the committed leaf holds 2^63 units instead of 1.
+        // The witness declares the same slot a spend, so the word is inserted as
+        // it stands, and the word is a commitment to 2^63 units instead of an
+        // `inner`.
         //
-        // `is_deposit` gates that constraint and is a private witness signal;
-        // the circuit header lists it as a contract obligation (item 4).
+        // `is_deposit` selects how the word becomes a leaf and is a witness
+        // signal; the circuit header lists it as a contract obligation (item 4).
         const w = honestDeposit(1n << 63n, 0);
         const calldata = calldataView(w);
         calldata.isDeposit[0] = 1;
         calldata.leafAsset[0] = 7n;
         calldata.leafPublicIn[0] = 1n;
+        // What calldata describing that deposit would carry.
+        redigest(calldata);
         assertDiverged(w, calldata, "is_deposit");
         bindFiatShamir(w, calldata);
         await expectBatchNotForgeable(ctx.circuit, w, "is_deposit");
     });
 
     it("divergent witness: leaf_public_in inflated in the witness cannot mint value", async () => {
-        // The gate is honestly 1 and the deposit binding holds against the
-        // witness operands: `cv_dep` opens to 2^63 units of asset 7, while the
-        // calldata the contract escrowed against declares 1. Pinning
-        // `is_deposit` alone does not prevent this.
+        // The flag is honestly 1 and the leaf is the commitment over the
+        // witness's operands, 2^63 units of asset 7, while the calldata the
+        // contract escrowed against declares 1. Pinning `is_deposit` alone does
+        // not prevent this.
         const w = honestDeposit(1n << 63n);
         const calldata = calldataView(w);
         calldata.leafPublicIn[0] = 1n;
+        redigest(calldata);
         assertDiverged(w, calldata, "leaf_public_in");
         bindFiatShamir(w, calldata);
         await expectBatchNotForgeable(ctx.circuit, w, "leaf_public_in");

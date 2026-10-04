@@ -26,9 +26,9 @@ FULL = re.compile(
     r"(?<![\w/])(?P<path>(?:src|lean|scripts|contracts)/[\w./-]+\.\w+)"
     r":(?P<lo>\d+)(?:-(?P<hi>\d+))?"
 )
-# A bare citation, possibly a comma-separated list of spans: `` `:71-78, 119-120` ``.
+# A bare citation, possibly a comma-separated list of spans: `` `:72, 93-94` ``.
 # The list form covers a model field mirroring disjoint blocks, such as a gadget
-# instantiated in one place and bound to an output in another. Every span in the list
+# instantiated in one place and wired in another. Every span in the list
 # is parsed; the closing backtick is required and terminates the list.
 BARE = re.compile(r"`:(?P<spans>\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*)`")
 SPAN = re.compile(r"(?P<lo>\d+)(?:-(?P<hi>\d+))?")

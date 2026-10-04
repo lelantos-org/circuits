@@ -82,7 +82,7 @@ The offset `2^n` keeps the difference non-negative; the top bit of the `(n+1)`-b
 decomposition is then the borrow flag, and `out` is its complement. `LessThan` is unsound
 without the two range hypotheses: if `in[1]` may exceed `2^n` the subtraction wraps and the
 comparator reports the wrong order. For this reason
-`src/tree_update_batch.circom` sizes the gadget as `LessThan(COUNT_BITS + 1)` rather than
+`src/lib/batch_append.circom:135` sizes the gadget as `LessThan(COUNT_BITS + 1)` rather than
 `LessThan(COUNT_BITS)`.
 -/
 

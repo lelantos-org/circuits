@@ -4,7 +4,7 @@
 // signal names circom reads. The key set is part of the contract with the
 // circuit.
 
-import { batchCoeffs, flattenBatch, pointJson, pointsJson, type Field, type Point } from "../helpers";
+import { batchCoeffs, batchDigest, flattenBatch, type Field } from "../helpers";
 
 /** Pad a real-slot array out to the circuit's fixed width. */
 export function padToSlots<T>(real: T[], total: number, zero: T): T[] {
@@ -18,11 +18,6 @@ export function polyEvalInput(coeffs: Field[], z: Field) {
     return { coeffs: coeffs.map(c => c.toString()), z: z.toString() };
 }
 
-/** Little-endian bits of `scalar`, `width` of them: the `FixedBaseMulBits` input. */
-export function scalarBits(scalar: Field, width: number | bigint): string[] {
-    return Array.from({ length: Number(width) }, (_, i) => ((scalar >> BigInt(i)) & 1n).toString());
-}
-
 export function merkleInputJson(leaf: Field, pathElements: Field[][], pathIndices: number[]) {
     return {
         leaf: leaf.toString(),
@@ -32,25 +27,29 @@ export function merkleInputJson(leaf: Field, pathElements: Field[][], pathIndice
 }
 
 /**
- * The PolyEval-bound fields of a TreeUpdateBatch witness: the logical public
- * inputs. Separate from the rest because `z` is derived from the coefficients
- * over them, so they must be shapeable before `z` exists.
+ * The logical public inputs of a TreeUpdateBatch: its coefficients and the
+ * calldata digest word. Separate from the rest because `z` is derived from
+ * them, so they must be shapeable before `z` exists.
  */
 export interface TreeUpdateBatchPublicArgs {
     oldRoot: Field;
     newRoot: Field;
     startIndex: number | bigint;
     actualCount: number | bigint;
+    /** Per slot: the note commitment on a spend leaf, `inner` on a deposit leaf. */
     cms: Field[];
-    cvDep: Point[];
     leafAsset: Field[];
     leafPublicIn: Field[];
     isDeposit: (number | bigint)[];
+    /**
+     * The coefficient digest as calldata carries it: hashed into `z` and passed
+     * to the verifier. Not a circuit input; the circuit outputs its own.
+     */
+    digest: Field;
 }
 
 /** A full batch witness: the public fields above plus the private ones. */
 export interface TreeUpdateBatchArgs extends TreeUpdateBatchPublicArgs {
-    rcv: Field[];
     frontier: Field[][];
     z: Field;
 }
@@ -58,15 +57,15 @@ export interface TreeUpdateBatchArgs extends TreeUpdateBatchPublicArgs {
 // Consumed three times: `treeUpdateBatchInputJson` spreads the result into the
 // object handed to the circuit, `treeUpdateBatchChallenge` flattens it into the
 // preimage and `treeUpdateBatchCoeffs` into the coefficient vector. All three
-// therefore always describe the same witness.
-function publicJson(a: TreeUpdateBatchPublicArgs) {
+// therefore always describe the same witness. The digest word is absent: it is
+// not an input signal.
+function publicJson(a: Omit<TreeUpdateBatchPublicArgs, "digest">) {
     return {
         old_root: a.oldRoot.toString(),
         new_root: a.newRoot.toString(),
         start_index: a.startIndex.toString(),
         actual_count: a.actualCount.toString(),
         cms: a.cms.map(c => c.toString()),
-        cv_dep: pointsJson(a.cvDep),
         leaf_asset: a.leafAsset.map(v => v.toString()),
         leaf_public_in: a.leafPublicIn.map(v => v.toString()),
         is_deposit: a.isDeposit.map(d => d.toString()),
@@ -85,24 +84,29 @@ export function treeUpdateBatchInputJson(a: TreeUpdateBatchArgs) {
         z: a.z.toString(),
         ...publicJson(a),
         frontier_in: a.frontier.map(lvl => lvl.map(s => s.toString())),
-        rcv: a.rcv.map(r => r.toString()),
     };
 }
 
 /**
- * Challenge preimage for a batch witness: 4 + 6·MAX_L words, hashed into `z`.
+ * Challenge preimage for a batch witness: the 4 + 4·MAX_L coefficients, then
+ * the digest word, hashed into `z`.
  *
  * The layout is defined in `ref/compress.ts :: flattenBatch`, which is also
  * what `scripts/gen-vectors.ts` publishes vectors from.
  */
 export function treeUpdateBatchChallenge(a: TreeUpdateBatchPublicArgs): Field[] {
-    return flattenBatch(publicJson(a));
+    return flattenBatch({ ...publicJson(a), digest: a.digest });
+}
+
+/** The digest of a batch witness's own coefficients: what an honest prover submits. */
+export function treeUpdateBatchDigest(a: Omit<TreeUpdateBatchPublicArgs, "digest">): Field {
+    return batchDigest(publicJson(a));
 }
 
 /**
- * PolyEval coefficients for a batch witness: 4 + 6·MAX_L words, the same as the
- * preimage, since every word is pinned. `ref/compress.ts :: batchCoeffs`
- * explains why every word is evaluated and which constraints pin them.
+ * PolyEval coefficients for a batch witness: 4 + 4·MAX_L words, the preimage
+ * without its digest word. `ref/compress.ts :: batchCoeffs` explains why every
+ * word is evaluated.
  */
 export function treeUpdateBatchCoeffs(a: TreeUpdateBatchPublicArgs): Field[] {
     return batchCoeffs(publicJson(a));
@@ -111,8 +115,7 @@ export function treeUpdateBatchCoeffs(a: TreeUpdateBatchPublicArgs): Field[] {
 /**
  * Input for the `PerAssetValueBalance(N_IN, N_OUT)` fixture.
  *
- * The gadget takes plain field elements: no note, no tree, no point
- * arithmetic. Shaped here rather than in the spec file because
+ * The gadget takes plain field elements: no note and no tree. Shaped here rather than in the spec file because
  * `fuzz/balance.fuzz.test.ts` draws the same object.
  */
 export interface PerAssetBalanceArgs {
@@ -121,7 +124,6 @@ export interface PerAssetBalanceArgs {
     outAsset: Field[];
     outValue: Field[];
     publicAssetId: Field;
-    publicIn: Field;
     publicOut: Field;
 }
 
@@ -132,28 +134,6 @@ export function perAssetValueBalanceInput(a: PerAssetBalanceArgs) {
         out_asset: a.outAsset.map(String),
         out_value: a.outValue.map(String),
         public_asset_id: a.publicAssetId.toString(),
-        public_in: a.publicIn.toString(),
         public_out: a.publicOut.toString(),
-    };
-}
-
-/** Input for the `PerAssetPointBalance(N_IN, N_OUT)` fixture. */
-export interface PerAssetPointArgs {
-    inCv: Point[];
-    outCv: Point[];
-    inRH: Point[];
-    outRH: Point[];
-    pubInPt: Point;
-    pubOutPt: Point;
-}
-
-export function perAssetPointBalanceInput(a: PerAssetPointArgs) {
-    return {
-        in_cv: pointsJson(a.inCv),
-        out_cv: pointsJson(a.outCv),
-        in_rH: pointsJson(a.inRH),
-        out_rH: pointsJson(a.outRH),
-        pub_in_pt: pointJson(a.pubInPt),
-        pub_out_pt: pointJson(a.pubOutPt),
     };
 }
