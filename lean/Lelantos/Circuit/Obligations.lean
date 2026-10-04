@@ -56,13 +56,13 @@ structure ContractObligations (d : F) (w : TxWitness depth nIn nOut) : Prop wher
   one note filling two of them: the duplicate satisfies every constraint, and
   `PerAssetValueBalance` counts its value once per slot, so the spender draws twice what
   the note holds. `src/4x6.circom:47-49` names the check as the consumer's;
-  `contracts/src/MASP.sol:1082-1086` is it: a pairwise scan, `DuplicateNullifier` on a hit.
+  `contracts/src/MASP.sol:1076-1080` is it: a pairwise scan, `DuplicateNullifier` on a hit.
 
   The contract compares the calldata copies. The nullifier slots are coefficients
   (`PISlot.nullifier`), so the binding argument in the module note covers them.
 
   The range is every slot, dummies included. `is_dummy` is private, so the contract cannot
-  tell the slots apart, and `MASP._consumeNullifier` at `contracts/src/MASP.sol:1059-1061`
+  tell the slots apart, and `MASP._consumeNullifier` at `contracts/src/MASP.sol:1053-1055`
   runs over all of them. A dummy slot's nullifier is over a note the prover chose freely,
   so distinctness is a constraint on the prover. -/
   nullifiers_distinct : ∀ a b, a < nIn → b < nIn → a ≠ b →
@@ -117,7 +117,7 @@ the challenge preimage is the 36 coefficients and the digest word, 37 words at
 structure BatchContractObligations {depth maxL : ℕ} (d : F)
     (w : BatchSignals depth maxL) : Prop where
   /-- Condition 1: the calldata digest word is the `digest` public signal, the transact
-  obligation of the same name. The verification at `contracts/src/MASP.sol:736-738` is
+  obligation of the same name. The verification at `contracts/src/MASP.sol:733-735` is
   against values the contract takes from its own calldata. With `batch_digest_public` this
   field gives `d = coeffDigest (batchCoeffs w) (batchPiCount maxL)`.
 
@@ -132,17 +132,17 @@ structure BatchContractObligations {depth maxL : ℕ} (d : F)
   `MAX_L = 8`. A stub. -/
   coefficients_in_challenge : True
   /-- `old_root` is the tree's live root, not some root it once had —
-  `MASP._requireTreePosition` at `contracts/src/MASP.sol:759-760`, and on the spend path
-  `currentRoot()` fed into the proof image at `contracts/src/MASP.sol:1057-1058` instead.
+  `MASP._requireTreePosition` at `contracts/src/MASP.sol:754-755`, and on the spend path
+  `currentRoot()` fed into the proof image at `contracts/src/MASP.sol:1051-1052` instead.
   Without it `batch_advances_by_count` advances a tree nobody is keeping. -/
   old_root_is_live : True
   /-- `start_index` is the number of leaves already committed, so the batch appends at the
-  frontier rather than overwriting (`contracts/src/MASP.sol:762`, reverting with
+  frontier rather than overwriting (`contracts/src/MASP.sol:757`, reverting with
   `BatchMisaligned`). `batch_capacity` bounds `start_index + actual_count` by the tree's
   size; it says nothing about where the tree currently ends. -/
   start_index_is_committed_count : True
   /-- `actual_count` is the number of leaves the payload actually carries — two per deposit
-  on the flush path (`contracts/src/MASP.sol:748-752`, `MASP._validateBatchHeader`), the
+  on the flush path (`contracts/src/MASP.sol:743-747`, `MASP._validateBatchHeader`), the
   fixed output count on the spend path. `batch_active_spec` makes the active run a prefix of
   that length, so an unchecked `actual_count` would commit padding as leaves or silently
   drop a deposit. -/
@@ -163,8 +163,8 @@ structure BatchContractObligations {depth maxL : ℕ} (d : F)
   /-- Each active deposit leaf is the one its escrow record describes: `cms` (the
   depositor's `inner`), `leaf_asset` and `leaf_public_in` are checked against the digest
   stored at submit, and the record is deleted, so one escrow funds one leaf —
-  `DepositNotPending` … `BadDepositMode` at `contracts/src/MASP.sol:784-795`, then the
-  `escrowed` entry dropped at `contracts/src/MASP.sol:856`. On the spend path `cms` is
+  `DepositNotPending` … `BadDepositMode` at `contracts/src/MASP.sol:779-790`, then the
+  `escrowed` entry dropped at `contracts/src/MASP.sol:850`. On the spend path `cms` is
   forwarded from the paired transact proof's `out_cm`. -/
   leaves_match_escrow : True
 end Lelantos
