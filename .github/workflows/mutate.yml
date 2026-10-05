@@ -1,0 +1,118 @@
+name: mutate
+
+# Mutation fuzzing (`just mutate`): plants defects in src/ and fails when no
+# gate rejects one. Not run on pull_request: a sample is drawn from the whole of
+# src/, so a survivor would fail a change that did not cause it.
+#
+# Each run restores build/.mutation/history.json from the previous one. With it
+# a sample takes mutants not yet run against the current tree, so successive
+# nights cover src/ instead of redrawing it, and the test that rejected a mutant
+# before runs first. Without it a run is correct but starts cold.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      fuzz_mode:
+        description: 'Sample size (light/medium/heavy = 8/40/160 mutants)'
+        required: false
+        default: 'heavy'
+      fuzz_seed:
+        description: 'FUZZ_SEED (blank = use the run id)'
+        required: false
+        default: ''
+      args:
+        description: 'Extra arguments, e.g. "--all --resume" or "--only <id> --matrix"'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+# A run still in progress when the next one starts is left to finish: it holds
+# the history the next one would restore.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  mutate:
+    runs-on: [ubuntu-latest]
+    # Sized for FUZZ=heavy from a cold history. `--all` does not fit; dispatch
+    # it with `--resume` and re-dispatch until the history covers src/.
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      FUZZ: ${{ inputs.fuzz_mode || 'heavy' }}
+      FUZZ_SEED: ${{ inputs.fuzz_seed || github.run_id }}
+      HISTORY: build/.mutation/history.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup
+
+      # The lint gate. Without it the run refuses to start under CI.
+      - name: Setup circomspect
+        uses: ./.github/actions/setup-circomspect
+
+      # A cache entry is immutable, so every run saves under its own key and
+      # restores the newest one by prefix.
+      - name: Restore mutation history
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.HISTORY }}
+          key: mutation-history-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-history-
+
+      # `--baseline`: the history records that the unmutated tree passed, but on
+      # another runner image. If a gate is broken here every mutant would look
+      # killed.
+      - name: Run mutation fuzzer (FUZZ=${{ env.FUZZ }})
+        # Named so the step runs under `pipefail`: without it `tee` would hide
+        # a failing run.
+        shell: bash
+        env:
+          EXTRA_ARGS: ${{ inputs.args }}
+        run: |
+          # The summary goes to stdout and progress to stderr; keep the summary.
+          # shellcheck disable=SC2086
+          just mutate --baseline --jobs "$(nproc)" $EXTRA_ARGS | tee mutate-summary.txt
+
+      # `always()`: a run that found a survivor, or was cut off by the timeout,
+      # has learned as much as one that passed.
+      - name: Save mutation history
+        if: always() && hashFiles('build/.mutation/history.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.HISTORY }}
+          key: mutation-history-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Record the result
+        if: always()
+        run: |
+          {
+            echo "### Mutation run"
+            echo
+            echo "\`\`\`"
+            if [ -s mutate-summary.txt ]; then cat mutate-summary.txt; else echo "(no summary: the run stopped before reporting)"; fi
+            echo "\`\`\`"
+            echo
+            echo "A sample depends on the restored history, so replay by id:"
+            echo
+            echo "\`\`\`"
+            echo "just mutate --only <id>"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: |
+            build/.mutation/report.json
+            build/.mutation/history.json
+          if-no-files-found: ignore

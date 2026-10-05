@@ -1,0 +1,12 @@
+{
+  "survivors": [
+    {
+      "file": "lib/balance.circom",
+      "op": "cross-wire",
+      "variant": 0,
+      "source": "pub_eq[c].in[0] <== public_asset_id;",
+      "nth": 0,
+      "reason": "Equivalent: IsEqual constrains in[1] - in[0] to be zero or not, which is symmetric in its two inputs."
+    }
+  ]
+}

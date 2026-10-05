@@ -93,6 +93,7 @@ just build-artifacts-4x6   # compile and run phase-2 setup for the transact circ
 just test                  # TypeScript suite over the compiled circuits
 just test-fuzz             # property-based suite
 just underconstrained      # second-witness search over the R1CS
+just mutate                # mutation fuzzer: plant a defect in src/, expect a gate to reject it
 just budget                # constraint budget gate (budget.json)
 just lint                  # circomspect
 just lean-check            # Lean build, axiom guard, layout and citation checks
@@ -137,3 +138,79 @@ The search is local to a gadget and linear in direction. Freedom spanning
 unrelated components is covered by `just picus`.
 `test/tooling/underconstrained_selftest.test.ts` runs each check against a
 fixture circuit containing the defect that check targets.
+
+### Mutation fuzzing
+
+`just mutate` measures the gates above instead of the circuits. It rewrites one
+statement of `src/` into a defect, in a private copy under `build/.mutation/`,
+and runs every gate against the result:
+
+| Operator | Defect |
+|---|---|
+| `drop-assert` | a `===` deleted |
+| `unconstrain` | `<==` turned into `<--`: same witness, no constraint |
+| `const-rhs` | a wire tied to 0 or 1 |
+| `swap-index` | an array index moved to another slot |
+| `loop-bound` | a loop that skips its first or last iteration |
+| `flip-gate` | `(1 - s)` turned into `(s)` |
+| `arith-flip` | `+` and `-` exchanged |
+| `const-tweak` | a template argument or tag off by one |
+| `cross-wire` | two adjacent wires transposed |
+
+A mutant that does not compile is discarded. So is one that compiles to the
+original constraint system, byte for byte or with its intermediate signals
+renamed: it proves the same statement. The renaming is found by colour
+refinement and confirmed by comparing the renamed constraints exactly
+(`test/mutation/isomorphic.ts`). Each remaining mutant ends in one of three
+states:
+
+- **killed**: a suite that runs the circuit fails (`unit`, `fuzz`, or `sweep`,
+  the second-witness search).
+- **static**: only `lint` or the `lean` citation checks reject it. CI would
+  stop the change, but no test runs into the defect.
+- **survived**: nothing rejects it. The run fails unless
+  `test/mutation/survivors.json` accepts the mutant with a reason.
+
+A mutant stops at its first kill, and a gate that cannot reject it is not run:
+`unconstrain` leaves the witness calculator unchanged, so only the
+second-witness search and lint can see it, and once lint has rejected it the
+search is skipped. `--matrix` runs every gate on every mutant, which shows
+which gates overlap and what the second-witness search finds on its own.
+
+For a static or surviving mutant the run then looks for the test that is
+missing: it tampers one field of several honest witnesses at a time, keeps the
+inputs the shipped circuit rejects, and reports any the mutant accepts. A
+mutant with no such input is either equivalent to the original in a way the
+renaming check does not cover, or differs only in the constraint system, which
+the witness calculator does not exercise.
+
+Runs learn from each other through `build/.mutation/history.json`:
+
+- The spec that rejected a mutant last time runs first, then the specs that
+  reject other mutants of the same file, then the cheapest.
+- A sample is drawn from mutants that no test rejected before a change to the
+  tree, then from mutants never run, then from repeats. Within those it leans
+  towards the file and operator pairs that have let the most mutants through.
+- `--resume` reuses the outcomes recorded for the current tree, so an
+  interrupted `--all` continues where it stopped.
+
+None of this changes a verdict: every gate able to reject a mutant still runs
+before it is called a survivor. An outcome is reused only when no file a gate
+reads has changed.
+
+`FUZZ` sets the sample size (`light`, `medium`, `heavy` = 8, 40, 160 mutants);
+`--all` runs every mutant. Each run prints the ids it tested, and `just mutate
+--only <id>` replays one. After adding a test for a survivor, re-run it by id;
+to accept one instead, `just mutate --update --only <id>` and fill in the
+`reason`.
+
+CI runs a `heavy` sample nightly (`.github/workflows/mutate.yml`) and carries
+the history from run to run in the Actions cache, so successive nights take
+mutants not yet run against the current tree. It can be dispatched by hand
+with extra arguments, for instance `--all --resume` repeated until the history
+covers `src/`.
+
+`test/tooling/mutation_selftest.test.ts` checks that every operator finds
+statements to mutate, that every gate has specs to run, that the history only
+reorders, and the renaming check against circuits that are and are not
+equivalent.

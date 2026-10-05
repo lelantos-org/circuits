@@ -16,47 +16,51 @@ describe("tree_update_batch / padding, counts and spend-leaf zeroing", function 
 
     // ===== padding coverage =====
     //
-    // With actual_count = 1, slot 1 is inactive.
+    // With actual_count = 1, slots 1..MAX_L-1 are inactive. Every row runs on
+    // each of them: the zeroing is a loop over slots, and a slot it skips is
+    // satisfied by every witness that poisons another.
 
     interface PaddingCase {
         /** Names the per-leaf field, as it reads in the circom. */
         field: string;
-        /** Write the non-zero value into the inactive slot. */
-        poison: (w: BatchWitness) => void;
+        /** Write the non-zero value into inactive slot `k`. */
+        poison: (w: BatchWitness, k: number) => void;
     }
 
     const PADDING_CASES: PaddingCase[] = [
-        { field: "cms",            poison: w => { w.cms[1] = 0xbadcafen; } },
+        { field: "cms",            poison: (w, k) => { w.cms[k] = 0xbadcafen; } },
         // The next two leave is_deposit at 0, so the spend-slot zeroing of step 1
         // rejects them as well; the `as a deposit` rows set is_deposit, leaving
         // the padding constraint as the only one that can reject.
-        { field: "leaf_asset",     poison: w => { w.leafAsset[1] = 42n; } },
-        { field: "leaf_public_in", poison: w => { w.leafPublicIn[1] = 99n; } },
-        { field: "is_deposit",     poison: w => { w.isDeposit[1] = 1; } },
+        { field: "leaf_asset",     poison: (w, k) => { w.leafAsset[k] = 42n; } },
+        { field: "leaf_public_in", poison: (w, k) => { w.leafPublicIn[k] = 99n; } },
+        { field: "is_deposit",     poison: (w, k) => { w.isDeposit[k] = 1; } },
         {
             field: "leaf_asset, as a deposit",
-            poison: w => { w.isDeposit[1] = 1; w.leafAsset[1] = 42n; },
+            poison: (w, k) => { w.isDeposit[k] = 1; w.leafAsset[k] = 42n; },
         },
         {
             field: "leaf_asset and leaf_public_in, as a deposit",
-            poison: w => { w.isDeposit[1] = 1; w.leafAsset[1] = 42n; w.leafPublicIn[1] = 99n; },
+            poison: (w, k) => { w.isDeposit[k] = 1; w.leafAsset[k] = 42n; w.leafPublicIn[k] = 99n; },
         },
     ];
 
     for (const { field, poison } of PADDING_CASES) {
-        it(`padding: non-zero ${field} in inactive slot is rejected`, async () => {
-            const { batch, circuit } = ctx;
-            const w = batch.single({ val: 9n, isDeposit: 1 });
-            poison(w);
-            // Every row is a PolyEval coefficient, so Fiat-Shamir is re-derived:
-            // a stale `z` would reject before the padding constraint is reached.
-            rebindFiatShamir(w);
-            await expectBatchRejects(
-                circuit,
-                w,
-                `(1 - active[1]) * ${field} === 0 did not reject a non-zero inactive slot`,
-            );
-        });
+        for (let k = 1; k < MAX_L; k++) {
+            it(`padding: non-zero ${field} in inactive slot ${k} is rejected`, async () => {
+                const { batch, circuit } = ctx;
+                const w = batch.single({ val: 9n, isDeposit: 1 });
+                poison(w, k);
+                // Every row is a PolyEval coefficient, so Fiat-Shamir is re-derived:
+                // a stale `z` would reject before the padding constraint is reached.
+                rebindFiatShamir(w);
+                await expectBatchRejects(
+                    circuit,
+                    w,
+                    `(1 - active[${k}]) * ${field} === 0 did not reject a non-zero inactive slot`,
+                );
+            });
+        }
     }
 
     // ===== count bounds and booleanity =====

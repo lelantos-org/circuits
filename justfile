@@ -174,6 +174,30 @@ underconstrained:
         test/tooling/underconstrained_selftest.test.ts test/fuzz/underconstrained.fuzz.test.ts \
         test/fuzz/underconstrained_batch.fuzz.test.ts
 
+# === mutation fuzzing ===
+#
+# Plants one defect at a time in a private copy of src/ (a dropped constraint,
+# `<==` turned into `<--`, a transposed wire, a shifted index) and runs the
+# suites, the second-witness search, lint and the lean citation checks against
+# it. A mutant nothing rejects is a constraint nothing tests; accepted ones are
+# pinned with a reason in test/mutation/survivors.json.
+#
+#   just mutate                          # a sample: FUZZ=light|medium|heavy = 8 / 40 / 160
+#   just mutate --all --resume           # every mutant, continuing an interrupted run
+#   just mutate --file balance --all     # every mutant of one file
+#   just mutate --only <id>              # one mutant, by the id a run prints
+#   just mutate --only <id> --matrix     # every gate, not only the first to reject
+#   just mutate --list --op drop-assert  # print mutants without running them
+#
+# Earlier runs are remembered in build/.mutation/history.json: the test that
+# rejected a mutant before runs first, and a sample prefers mutants that were
+# weak or never run. A killed mutant then costs seconds; a surviving one runs
+# every gate, about three minutes.
+
+# Mutate src/ and check that a gate rejects each mutant. See scripts/mutate.ts for options.
+mutate *ARGS:
+    NODE_OPTIONS="--import tsx/esm" node "{{ROOT}}/scripts/mutate.ts" {{ARGS}}
+
 # === constraint budget ===
 
 # Every shape must fit its FFT domain and match its count in budget.json. Reads

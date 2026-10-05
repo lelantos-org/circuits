@@ -1,0 +1,53 @@
+name: Setup circomspect
+description: >-
+  Install a pinned circomspect on PATH, with the binary and cargo artifacts
+  cached. Shared by every job that runs `just lint`, so they apply the same
+  analysis passes.
+
+inputs:
+  version:
+    description: >-
+      circomspect crate version. Pinned so the reviewed suppression baseline in
+      the justfile `lint` recipe stays valid; a newer release can add passes
+      that recipe has not waived or fixed.
+    required: false
+    default: "0.9.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Cache cargo registry + git
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-circomspect-${{ inputs.version }}
+
+    - name: Cache cargo bin
+      id: cache-cargo
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/circomspect
+        key: circomspect-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install build toolchain (cc/linker for cargo)
+      if: steps.cache-cargo.outputs.cache-hit != 'true'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y build-essential
+
+    - name: Install Rust toolchain
+      if: steps.cache-cargo.outputs.cache-hit != 'true'
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+
+    - name: Install circomspect
+      if: steps.cache-cargo.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        CIRCOMSPECT_VERSION: ${{ inputs.version }}
+      run: cargo install circomspect --locked --version "${CIRCOMSPECT_VERSION}"
+
+    # circomspect has no `--version`; the cache key carries the pin.
+    - name: Verify circomspect
+      shell: bash
+      run: command -v circomspect

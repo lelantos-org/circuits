@@ -30,7 +30,7 @@ interface TamperCase {
     base?: TamperBase;
 }
 
-type TamperBase = "balanced" | "oneRealRestDummy" | "fullShape" | "withdraw";
+type TamperBase = "balanced" | "oneRealRestDummy" | "fullShape" | "withdraw" | "zeroValue";
 
 // ===== per-slot expansion =====
 //
@@ -115,6 +115,11 @@ const TAMPER_CASES: TamperCase[] = [
     ...perInput("in_is_dummy[%]", "in_is_dummy must be 0 or 1", { value: () => 2n }),
     { path: "in_is_dummy[1]", reason: "in_is_dummy must be 0 or 1, in a dummy slot too",
       value: () => 2n, base: "oneRealRestDummy" },
+    // The rows above are also rejected elsewhere: a real slot's non-zero value by
+    // DummyZeroValue, a dummy slot's path by the Merkle check that is_dummy = 2
+    // re-enables. On a real slot of value 0 both hold, so only booleanity rejects.
+    ...perInput("in_is_dummy[%]", "in_is_dummy must be 0 or 1, on a real note of value 0",
+        { value: () => 2n, base: "zeroValue" }),
 
     // -- Merkle path --
     // Both halves of an authentication path, per input: a bad digit and a
@@ -140,6 +145,7 @@ describe("transact_4x6 / single-field tamper", function () {
         bases.balanced = ctx.tx.balanced();
         bases.oneRealRestDummy = oneRealRestDummy();
         bases.withdraw = withdraw();
+        bases.zeroValue = zeroValue();
     });
 
     function honest(base: TamperCase["base"]): CircomTransactInput {
@@ -174,6 +180,19 @@ describe("transact_4x6 / single-field tamper", function () {
         );
     }
 
+    /**
+     * Every input slot a real note of value 0, spent into zero-value outputs.
+     * The base for rows where a rule that only binds a non-zero value must not
+     * be what rejects.
+     */
+    function zeroValue(): CircomTransactInput {
+        const { tx } = ctx;
+        return tx.spend(
+            tx.nRealInputs(Array<bigint>(N_IN).fill(0n), ALICE_NSK),
+            [tx.note(0n, ALICE_NSK, 9n)],
+        );
+    }
+
     // Vacuity guard for the per-slot base.
     it("accepts the fully-occupied shape: every input and output slot real", async () => {
         await expectAccepts(ctx.circuit, ctx.tx.fullShape());
@@ -187,6 +206,11 @@ describe("transact_4x6 / single-field tamper", function () {
     // Vacuity guard for the transparent-bucket base.
     it("accepts a withdrawal in the spent note's asset", async () => {
         await expectAccepts(ctx.circuit, withdraw());
+    });
+
+    // Vacuity guard for the zero-value base.
+    it("accepts real inputs of value 0 in every slot", async () => {
+        await expectAccepts(ctx.circuit, zeroValue());
     });
 
     for (const { path, reason, value, base } of TAMPER_CASES) {
