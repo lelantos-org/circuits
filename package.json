@@ -1,6 +1,6 @@
 {
   "name": "@lelantos-org/circuits",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Lelantos MASP Groth16 prover artifacts.",
   "license": "MIT",
   "type": "module",

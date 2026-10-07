@@ -1,6 +1,6 @@
 {
   "schema": "lelantos.circuits.vectors/2",
-  "generator": "@lelantos-org/circuits@0.19.0",
+  "generator": "@lelantos-org/circuits@0.20.0",
   "files": {
     "transact-4x6.json": {
       "sha256": "395ce2ddbe4589d03f52388c8c80bf01a9df9ece7ab6915a38808019de9dbbd4",
