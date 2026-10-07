@@ -33,8 +33,8 @@ interface ArtifactCheck {
 /// size follows the FFT domain and wire count, so the bands must be re-measured
 /// when circuit size changes.
 const FILES: ArtifactCheck[] = [
-    /// 4x6 = `Transact(11, 4, 6)` on ptau-17. Measured: the wasm is about
-    /// 3.9 MB and the zkey about 33 MB.
+    /// 4x6 = `Transact(11, 4, 6)` on ptau-16. Measured: the wasm is about
+    /// 3.7 MB and the zkey about 33 MB.
     {
         name: "4x6.wasm",
         path: resolve(BUILD, "4x6.wasm"),

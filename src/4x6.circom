@@ -39,7 +39,7 @@ include "lib/transact.circom";
 // PubInputs.compress re-masks the uint64 and address words at offsets hardcoded
 // in assembly; derive them from this table.
 //
-// Budget: 2^17 FFT domain, so setup uses ptau_17.
+// Budget: 2^15 FFT domain at `--O2`; setup uses ptau_16.
 //
 // The phase-2 setup for this shape has a single contributor and is not
 // production-safe.

@@ -10,7 +10,9 @@ import { loadSymbols, type SymbolTable } from "../lib/r1cs";
 // `lean/` proves properties of `TransactSat`, a structure over `TxWitness`, each
 // field of which corresponds to a signal of `4x6.circom`.
 // `lean/expected/signal-map.json` records the correspondence. This file checks
-// the circom half: each named signal exists in the compiled `.sym`.
+// the circom half: each named signal exists in the `--O1` `.sym`, which keeps
+// every signal a constraint does not pin. The shipped `--O2` system also
+// substitutes linearly defined signals away.
 // `lean/scripts/check-names.py` checks the Lean half: each key resolves as a
 // declaration.
 //
@@ -94,14 +96,13 @@ for (const [circuit, map] of circuits) {
 
         before(async function () {
             if (!existsSync(symPath)) {
-                // circom_tester writes its artifacts outside `build/`, so local
-                // runs and the `test` workflow have no `build/*.sym` and skip.
-                // `REQUIRE_ARTIFACTS=1`, set by the `build` workflow, turns the
-                // skip into a failure.
+                // Only `just signal-parity` compiles `build/o1/*.sym`, so local
+                // runs and the `test` workflow skip. `REQUIRE_ARTIFACTS=1`, set
+                // by that recipe, turns the skip into a failure.
                 if (process.env.REQUIRE_ARTIFACTS === "1") {
                     throw new Error(
                         `${map.sym} is missing and REQUIRE_ARTIFACTS=1. ` +
-                            `Run \`just compile-4x6 compile-batch\` first.`,
+                            `Run \`just signal-parity\`.`,
                     );
                 }
                 this.skip();

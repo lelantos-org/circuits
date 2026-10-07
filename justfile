@@ -6,17 +6,21 @@ BUILD := ROOT / "build"
 PTAU_DIR := ROOT / "ptau"
 # Byte-identical copies of the Hermez ptau files, as unauthenticated release assets.
 PTAU_URL_BASE := "https://github.com/lelantos-org/ptau/releases/download/hermez"
-# Transact(11,4,6) uses the 2^17 ceremony (69,635 constraints; exceeds 2^16).
-# TreeUpdateBatch(11,8) uses the 2^16 ceremony (41,521). snarkjs sizes the domain
-# from `nConstraints + nPubInputs + nOutputs`, capping a 2^16 ceremony at 65,532
-# constraints and a 2^17 one at 131,068.
+# Transact(11,4,6) is 28,775 constraints and TreeUpdateBatch(11,8) is 16,802.
+# Both need a 2^15 domain and are set up from the 2^16 ceremony file, which
+# serves any domain up to its own. snarkjs sizes the domain from
+# `nConstraints + nPubInputs + nOutputs`, capping 2^15 at 32,764 constraints and
+# 2^16 at 65,532.
 PTAU16 := "powersOfTau28_hez_final_16.ptau"
-PTAU17 := "powersOfTau28_hez_final_17.ptau"
 
 # Verified on every fetch, including cache hits. snarkjs reports a truncated or
 # substituted ptau only as `Invalid File format` late in setup.
 PTAU16_SHA := "1c401abb57c9ce531370f3015c3e75c0892e0f32b8b1e94ace0f6682d9695922"
-PTAU17_SHA := "6b662a324867139fb1a20a324d90b6ff61856dfb23f59326909f14b0e2483ae0"
+
+# Optimization level of the shipped constraint systems. `--O2` substitutes every
+# linear constraint away; circom's default, `--O1`, keeps them. `_compile`,
+# `build-graph` and test/lib/constants.ts must agree.
+CIRCOM_OPT := "--O2"
 
 # Pinned iden3/circom-witnesscalc revision; `build-circuit` is not on crates.io.
 # The relayer's `circom-witnesscalc` dependency must use the same revision: a
@@ -42,7 +46,7 @@ default:
 compile-4x6: (_compile "4x6")
 
 # Phase-2 trusted setup for 4x6 (single-contributor; insecure, not for production).
-setup-4x6: (_setup "4x6" PTAU17)
+setup-4x6: (_setup "4x6" PTAU16)
 
 # Compile + trusted setup for 4x6.
 build-artifacts-4x6: compile-4x6 setup-4x6
@@ -52,16 +56,15 @@ build-artifacts-4x6: compile-4x6 setup-4x6
 # Compile tree_update_batch.circom -> r1cs + wasm + sym, print constraint count.
 compile-batch: (_compile "tree_update_batch")
 
-# `--O1` matches `_compile`'s circom default; build-circuit defaults to --O2,
-# whose signal indices do not match the zkey. `cmp` checks the graph's R1CS
-# against `_compile`'s: a graph that disagrees with the zkey produces witnesses
-# that fail verification.
+# build-circuit runs at `_compile`'s optimization level, so the two number
+# signals identically. `cmp` checks the graph's R1CS against `_compile`'s: a
+# graph that disagrees with the zkey produces witnesses that fail verification.
 
 # Build the native witness-calculation graph the relayer proves against.
 build-graph: compile-batch _ensure-build-circuit
     echo "==> Building witness graph (build-circuit @ {{CWC_REV}})"
     "{{BUILD_CIRCUIT}}" "{{ROOT}}/src/tree_update_batch.circom" "{{BUILD}}/tree_update_batch.wcd" \
-        -l "{{ROOT}}/node_modules" --O1 --r1cs "{{BUILD}}/tree_update_batch.graph.r1cs"
+        -l "{{ROOT}}/node_modules" {{CIRCOM_OPT}} --r1cs "{{BUILD}}/tree_update_batch.graph.r1cs"
     echo "==> Checking the graph's constraint system matches the compiled one"
     cmp "{{BUILD}}/tree_update_batch.graph.r1cs" "{{BUILD}}/tree_update_batch.r1cs"
     # The r1cs is emitted only for the comparison; build-circuit also writes two
@@ -322,11 +325,17 @@ clean:
 lean-build:
     cd "{{ROOT}}/lean" && lake build
 
-# Run `just compile-4x6 compile-batch` first; a missing artifact fails the check.
+# The Lean model mirrors the source signal by signal, so the map is checked
+# against `--O1` symbol tables: `--O1` drops only a signal that a constraint pins
+# to a constant or to another signal, while `--O2` also substitutes away every
+# linearly defined one.
 
-# Check model-to-circuit signal parity (needs build/*.sym).
+# Check model-to-circuit signal parity (compiles build/o1/*.sym).
 signal-parity:
     @echo "==> Model signal parity"
+    mkdir -p "{{BUILD}}/o1"
+    circom "{{ROOT}}/src/4x6.circom" --sym --O1 -o "{{BUILD}}/o1" -l "{{ROOT}}/node_modules"
+    circom "{{ROOT}}/src/tree_update_batch.circom" --sym --O1 -o "{{BUILD}}/o1" -l "{{ROOT}}/node_modules"
     cd "{{ROOT}}" && REQUIRE_ARTIFACTS=1 NODE_OPTIONS="--import tsx/esm" \
         ./node_modules/.bin/mocha --reporter spec --timeout 120000 --exit \
         test/formal/signal_parity.test.ts
@@ -462,7 +471,7 @@ package-check:
 _compile circuit:
     mkdir -p "{{BUILD}}"
     echo "==> Compiling {{ROOT}}/src/{{circuit}}.circom"
-    circom "{{ROOT}}/src/{{circuit}}.circom" --r1cs --wasm --sym -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
+    circom "{{ROOT}}/src/{{circuit}}.circom" --r1cs --wasm --sym {{CIRCOM_OPT}} -o "{{BUILD}}" -l "{{ROOT}}/node_modules"
     echo "==> Constraint info"
     npx snarkjs r1cs info "{{BUILD}}/{{circuit}}.r1cs"
 
@@ -471,7 +480,6 @@ _fetch-ptau file:
     set -euo pipefail
     case "{{file}}" in
         "{{PTAU16}}") want="{{PTAU16_SHA}}" ;;
-        "{{PTAU17}}") want="{{PTAU17_SHA}}" ;;
         *) echo "no pinned digest for {{file}}" >&2; exit 1 ;;
     esac
     mkdir -p "{{PTAU_DIR}}"

@@ -6,20 +6,20 @@
     "fit.",
     "snarkjs requires nConstraints + nPubInputs + nOutputs <= domain - 1, so with",
     "one public input and two public outputs (y, digest) the ceiling on",
-    "`constraints` is domain - 4 (131068 at 2^17, 65532 at 2^16).",
+    "`constraints` is domain - 4 (32764 at 2^15, 65532 at 2^16).",
     "Both circuits share DEPTH = 11; each has its own domain.",
-    "tree_update_batch scaling: a depth level adds 2,534 constraints and a leaf",
-    "slot about 1,800. 2^16 holds through DEPTH = 20 at MAX_L = 8 and through",
-    "MAX_L = 16 at DEPTH = 11; MAX_L = 32 needs 2^17."
+    "tree_update_batch scaling: a depth level adds 965 constraints and a leaf",
+    "slot about 820. 2^15 holds through DEPTH = 27 at MAX_L = 8 and through",
+    "MAX_L = 16 at DEPTH = 11; MAX_L = 32 needs 2^16."
   ],
   "circuits": {
     "4x6": {
-      "constraints": 69635,
-      "domain": 131072
+      "constraints": 28775,
+      "domain": 32768
     },
     "tree_update_batch": {
-      "constraints": 41521,
-      "domain": 65536
+      "constraints": 16802,
+      "domain": 32768
     }
   }
 }

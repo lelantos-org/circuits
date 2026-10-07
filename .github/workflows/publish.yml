@@ -57,15 +57,9 @@ jobs:
       - name: Setup circom
         uses: ./.github/actions/setup-circom
 
-      # Each ceremony has its own ptau: Transact(11,4,6) at 69,635 constraints
-      # needs 2^17; TreeUpdateBatch(11,8) at 41,521 fits 2^16. `just` verifies
-      # the digest on every run, and each cache key includes it.
-      - name: Cache ptau-17
-        uses: actions/cache@v4
-        with:
-          path: ptau/powersOfTau28_hez_final_17.ptau
-          key: ptau-17-6b662a324867139fb1a20a324d90b6ff61856dfb23f59326909f14b0e2483ae0
-
+      # Both ceremonies read the 2^16 ptau: Transact(11,4,6) at 28,775
+      # constraints and TreeUpdateBatch(11,8) at 16,802 each need a 2^15 domain.
+      # `just` verifies the digest on every run, and the cache key includes it.
       - name: Cache ptau-16
         uses: actions/cache@v4
         with:
@@ -168,8 +162,8 @@ jobs:
             its ceremony-paired batch verifier at `TreeUpdateBatch(11, 8)`; the
             two share a tree depth and must be installed together.
 
-            `4x6` is built on the 2^17 ptau and `tree_update_batch` on the 2^16
-            ptau. Note `4x6` has no `PubInputs.sol`
+            Both circuits are compiled at `--O2` and built on the 2^16 ptau.
+            Note `4x6` has no `PubInputs.sol`
             compress overload yet — it needs one at 69 slots, with a 50-word
             calldata prefix — so nothing verifies it on-chain today.
 

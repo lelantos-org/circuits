@@ -357,7 +357,7 @@ scope:
   `just picus-all` nightly.
 - Weak safety constrains the outputs, not every intermediate signal. Strong
   safety (`just picus STRONG=1`) has not been run on these circuits, and the
-  `--O1` builds have not been run separately.
+  `--O2` builds have not been run separately.
 - Picus exits with `8` for a guarantee, `9` for a counterexample and `0` for
   unknown.
 

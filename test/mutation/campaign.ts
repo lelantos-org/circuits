@@ -11,6 +11,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 
+import { CIRCOM_OPT } from "../lib/constants";
 import { ROOT } from "../lib/files";
 import { apply, type Mutant, type Root } from "./mutants";
 import type { Tamper } from "./probe";
@@ -179,7 +180,7 @@ async function r1csDigest(worker: Worker, root: Root): Promise<{ digest?: string
     fs.mkdirSync(out, { recursive: true });
     const exit = await run(
         "circom",
-        [path.join(worker.root, "src", `${root}.circom`), "--r1cs", "-o", out, "-l", path.join(ROOT, "node_modules")],
+        [path.join(worker.root, "src", `${root}.circom`), "--r1cs", CIRCOM_OPT, "-o", out, "-l", path.join(ROOT, "node_modules")],
         worker.root,
         process.env,
         COMPILE_TIMEOUT,

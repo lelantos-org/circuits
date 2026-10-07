@@ -11,12 +11,15 @@ import { exec as execCb } from "child_process";
 import { wasm as wasmTester } from "circom_tester";
 
 import type { Field, Point } from "../helpers";
+import { CIRCOM_OPT } from "./constants";
 import { ROOT } from "./files";
 
 const SRC_DIR = path.join(ROOT, "src");
 const NODE_MODULES = path.join(ROOT, "node_modules");
 
 export const FIXTURES = path.join(ROOT, "test", "fixtures");
+
+const exec = promisify(execCb);
 
 /**
  * A circom input object: signal name -> value, nested to the signal's arity.
@@ -86,7 +89,7 @@ export function generatedFixture(source: string, template: string, args: readonl
     return file;
 }
 
-// `wasmTester` compiles on every call; the cache holds one compile per circuit.
+// A compile runs on every call; the cache holds one per circuit.
 // Mocha runs without --parallel, so all spec files share one process and one
 // cache. It is keyed on the absolute path and holds the promise, so concurrent
 // `before` hooks for one circuit await a single compile.
@@ -104,7 +107,7 @@ const cache = new Map<string, Promise<CircuitArtifacts>>();
  */
 export interface CircuitArtifacts {
     tester: CircuitTester;
-    /** `<name>.r1cs` — what a Groth16 proof binds. */
+    /** `<name>.r1cs` — at `CIRCOM_OPT`, what a Groth16 proof binds. */
     r1csPath: string;
     /** `<name>.sym` — witness index -> signal name. */
     symPath: string;
@@ -117,16 +120,32 @@ function outputDirFor(absPath: string): string {
     return path.join(TESTER_OUT, `${path.basename(absPath, ".circom")}-${tag}`);
 }
 
-/** Compile a circuit (once per process) and return its artifacts. */
-export async function loadCircuitArtifacts(absPath: string): Promise<CircuitArtifacts> {
-    let pending = cache.get(absPath);
+/**
+ * Compile a circuit (once per process and level) and return its artifacts.
+ * A level other than the shipped one compiles into its own subdirectory.
+ */
+export async function loadCircuitArtifacts(
+    absPath: string,
+    opt: string = CIRCOM_OPT,
+): Promise<CircuitArtifacts> {
+    const key = `${opt} ${absPath}`;
+    let pending = cache.get(key);
     if (pending === undefined) {
         pending = (async () => {
-            const output = outputDirFor(absPath);
+            const output =
+                opt === CIRCOM_OPT
+                    ? outputDirFor(absPath)
+                    : path.join(outputDirFor(absPath), opt.replace(/^-+/, ""));
             await fs.promises.mkdir(output, { recursive: true });
+            // circom_tester can only pass `--O0` or `--O1`, so the compile runs
+            // here and the tester loads its output.
+            await exec(
+                `circom ${JSON.stringify(absPath)} --wasm --r1cs --sym ${opt} ` +
+                    `-o ${JSON.stringify(output)} -l ${JSON.stringify(NODE_MODULES)}`,
+            );
             const tester = (await wasmTester(absPath, {
-                include: [NODE_MODULES],
                 output,
+                recompile: false,
             })) as CircuitTester;
             const base = path.basename(absPath, ".circom");
             return {
@@ -135,7 +154,7 @@ export async function loadCircuitArtifacts(absPath: string): Promise<CircuitArti
                 symPath: path.join(output, `${base}.sym`),
             };
         })();
-        cache.set(absPath, pending);
+        cache.set(key, pending);
     }
     return pending;
 }
@@ -146,12 +165,10 @@ export async function loadCircuit(absPath: string): Promise<CircuitTester> {
 
 // ===== unoptimized constraint systems =====
 
-const exec = promisify(execCb);
-
 /**
  * Compile a circuit to `.r1cs` and `.sym` only, with circom's optimizer off.
  *
- * `--O2` (circom's default, and the system a proof binds) substitutes linear
+ * `--O2` (the shipped level, and the system a proof binds) substitutes linear
  * constraints away, including bit decompositions `sum 2^i b_i === in`, so a
  * structural search for decompositions needs the `--O0` system. The
  * substitutions preserve the solution set, so a decomposition wide enough to

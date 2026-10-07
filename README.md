@@ -36,8 +36,8 @@ check their own implementation against them.
 
 | Circuit | Instantiation | Purpose | Constraints | Domain |
 |---|---|---|---:|---:|
-| `src/4x6.circom` | `Transact(11, 4, 6)` | Spend through 4 input slots, create 6 notes | 69,635 | 2^17 |
-| `src/tree_update_batch.circom` | `TreeUpdateBatch(11, 8)` | Advance the commitment tree by 1 to 8 leaves | 41,521 | 2^16 |
+| `src/4x6.circom` | `Transact(11, 4, 6)` | Spend through 4 input slots, create 6 notes | 28,775 | 2^15 |
+| `src/tree_update_batch.circom` | `TreeUpdateBatch(11, 8)` | Advance the commitment tree by 1 to 8 leaves | 16,802 | 2^15 |
 
 The two circuits are paired. A spend emits 6 leaves that the batch circuit
 inserts, both use tree depth 11, and both must come from the same release.

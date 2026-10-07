@@ -577,45 +577,46 @@ packing multiplier in `NoteCommitment` and the bound `RangeCheck64` enforces.
 
 ## 12. Constraint budget
 
-R1CS totals from `snarkjs r1cs info`. Each circuit has one public input and two
-public outputs.
+R1CS totals from `snarkjs r1cs info`, compiled at `--O2`: every constraint is
+multiplicative, the linear ones being substituted away. Each circuit has one
+public input and two public outputs.
 
 | Circuit | Constraints | Wires | Private inputs | Domain | Ceiling |
 |---|---:|---:|---:|---:|---:|
-| `Transact(11, 4, 6)` | 69,635 | 69,774 | 247 | 2^17 | 131,068 |
-| `TreeUpdateBatch(11, 8)` | 41,521 | 41,466 | 69 | 2^16 | 65,532 |
+| `Transact(11, 4, 6)` | 28,775 | 28,914 | 247 | 2^15 | 32,764 |
+| `TreeUpdateBatch(11, 8)` | 16,802 | 16,747 | 69 | 2^15 | 32,764 |
 
 snarkjs requires `nConstraints + nPubInputs + nOutputs ≤ domain − 1`, so the
-ceiling on the constraint count is `domain − 4`. The setups use
-`powersOfTau28_hez_final_17` and `powersOfTau28_hez_final_16`. `just budget`
+ceiling on the constraint count is `domain − 4`. Both setups use
+`powersOfTau28_hez_final_16`. `just budget`
 checks both circuits against the exact counts and domains in
 [`budget.json`](../budget.json).
 
-For `TreeUpdateBatch`, a depth level costs 2,534 constraints and a leaf slot
-about 1,800. The 2^16 domain holds through depth 20 at `MAX_L = 8` and through
-`MAX_L = 16` (56,026) at depth 11.
+For `TreeUpdateBatch`, a depth level costs 965 constraints and a leaf slot
+about 820. The 2^15 domain holds through depth 27 at `MAX_L = 8` and through
+`MAX_L = 16` (23,325) at depth 11.
 
 Verification gas is a fixed pairing check over three public signals and does
 not depend on circuit size.
 
 ### Gadget costs
 
-Each gadget compiled on its own at circom's default `--O1`.
+Each gadget compiled on its own at `--O2`.
 
 | Gadget | Constraints |
 |---|---:|
-| `Poseidon(2)` / `Poseidon(3)` / `Poseidon(4)` / `Poseidon(5)` | 517 / 605 / 736 / 835 |
-| `RangeCheck64` | 65 |
-| `NoteInner` + `NoteCommitment` | 736 + 606 |
-| `MerkleProofOrDummy(11)` | 9,419 |
-| `SpentNote(11)` | 13,269 |
-| `OutputNote` (plus its `DeriveRho`, 605) | 1,473 |
-| `PerAssetValueBalance(4, 6)` | 594 |
-| `CoeffDigest(13)`, four `Poseidon(5)` | 3,340 |
-| `CoeffDigest(36)`, nine `Poseidon(5)` | 7,515 |
+| `Poseidon(2)` / `Poseidon(3)` / `Poseidon(4)` / `Poseidon(5)` | 240 / 261 / 297 / 321 |
+| `RangeCheck64` | 64 |
+| `NoteInner` + `NoteCommitment` | 294 + 258 |
+| `MerkleProofOrDummy(11)` | 3,643 |
+| `SpentNote(11)` | 5,352 |
+| `OutputNote` (plus its `DeriveRho`, 258) | 681 |
+| `PerAssetValueBalance(4, 6)` | 330 |
+| `CoeffDigest(13)`, four `Poseidon(5)` | 1,272 |
+| `CoeffDigest(36)`, nine `Poseidon(5)` | 2,886 |
 
-`Transact(11, 4, 6)` is four `SpentNote` (53,076), six output slots (12,468),
-the balance, the digest, and about 160 constraints for the transparent bucket,
+`Transact(11, 4, 6)` is four `SpentNote` (21,408), six output slots (5,634),
+the balance, the digest, and about 130 constraints for the transparent bucket,
 the dummy checks and the Horner chain.
 
 `TreeUpdateBatch(11, 8)` is `BatchAppend`, one `NoteCommitment` and two range

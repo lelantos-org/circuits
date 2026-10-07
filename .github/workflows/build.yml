@@ -43,6 +43,6 @@ jobs:
         run: just budget
 
       # Checks that every field of the Lean witness structures is a signal of the
-      # compiled circuit. Runs here because only this job produces `build/*.sym`.
+      # circuit, against `--O1` symbol tables the recipe compiles.
       - name: Model signal parity
         run: just signal-parity

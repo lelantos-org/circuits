@@ -5,7 +5,7 @@
     "Every key names a field of a Lean model structure; every value names the circom",
     "signal that field mirrors. `lean/scripts/check-names.py` checks the keys resolve",
     "as Lean declarations; `test/formal/signal_parity.test.ts` checks the values exist",
-    "in the compiled `.sym`. Neither side can drift without one of them failing.",
+    "in the `--O1` `.sym`. Neither side can drift without one of them failing.",
     "",
     "`{i<N_IN}` expands over the shape: the signal must exist at every index below the",
     "bound, and must NOT exist at the bound itself. That pins the arity as well as the",
@@ -25,7 +25,7 @@
     "whose output is the public `digest` signal."
   ],
   "4x6": {
-    "sym": "build/4x6.sym",
+    "sym": "build/o1/4x6.sym",
     "shape": { "N_IN": 4, "N_OUT": 6, "DEPTH": 11, "N_CAND": 11, "BITS64": 64, "ARITY": 4,
                 "RHS_LEN": 6, "DG_KEPT": 3 },
     "present": {
@@ -132,7 +132,7 @@
     }
   },
   "tree_update_batch": {
-    "sym": "build/tree_update_batch.sym",
+    "sym": "build/o1/tree_update_batch.sym",
     "shape": { "MAX_L": 8, "DEPTH": 11, "COUNT_BITS": 3, "IDX_BITS": 22, "BITS64": 64,
                 "BATCH_NODES": 29, "DG_KEPT": 8 },
     "present": {

@@ -23,11 +23,11 @@ import {
 } from "../lib/underconstrained";
 import { explain } from "../lib/explain";
 import { aliasableGroups, findBitGroups, groupsWithFreeBits } from "../lib/bit_groups";
-import { TIMEOUT_CIRCUIT } from "../lib/constants";
+import { SEARCH_OPT, TIMEOUT_CIRCUIT } from "../lib/constants";
 
-/** A fixture's `--O2` system, its symbols, and the honest witness for `input`. */
+/** A fixture's system at the search level, its symbols, and the honest witness for `input`. */
 async function sweepable(fixture: string, input: CircuitInput) {
-    const { tester, r1csPath, symPath } = await loadCircuitArtifacts(fixturePath(fixture));
+    const { tester, r1csPath, symPath } = await loadCircuitArtifacts(fixturePath(fixture), SEARCH_OPT);
     const [view, symbols] = await Promise.all([loadR1cs(r1csPath), loadSymbols(symPath)]);
     const w = await tester.calculateWitness(input, true);
     expect(view.firstViolation(w)).to.equal(-1, "the honest witness must satisfy");

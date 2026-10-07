@@ -10,6 +10,7 @@ import {
     loadCircuitArtifacts,
     type CircuitInput,
 } from "./circuit";
+import { SEARCH_OPT } from "./constants";
 import { loadR1cs, loadSymbols, type R1csView, type SymbolTable } from "./r1cs";
 import { allGroups, confirm, formatReport, searchWitness, type Finding, type Group } from "./underconstrained";
 import { partitionExplained } from "./explain";
@@ -35,6 +36,9 @@ export interface SearchContext {
 /**
  * Compile a circuit both ways and build the search inputs.
  *
+ * The witness-level searches read the `--O1` system, with the witness from the
+ * same compile; see `SEARCH_OPT`.
+ *
  * Bit decompositions are searched in the unoptimized system: `--O2` substitutes
  * the weighted sum away and leaves no structure to match. See
  * `compileConstraintsOnly` for why a result there carries over to the optimized
@@ -44,7 +48,7 @@ export interface SearchContext {
  */
 export async function loadSearchContext(circuitPath: string): Promise<SearchContext> {
     const [artifacts, o0] = await Promise.all([
-        loadCircuitArtifacts(circuitPath),
+        loadCircuitArtifacts(circuitPath, SEARCH_OPT),
         compileConstraintsOnly(circuitPath),
     ]);
 

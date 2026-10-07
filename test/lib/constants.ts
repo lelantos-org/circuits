@@ -3,6 +3,16 @@
 
 import type { Field } from "../helpers";
 
+/** The optimization level the circuits ship at — `CIRCOM_OPT` in the justfile. */
+export const CIRCOM_OPT = "--O2";
+
+/**
+ * The level the second-witness search reads. `--O2` only substitutes signals a
+ * linear constraint determines, so the two systems have the same solutions,
+ * and the `--O1` rows are sparse: a sweep costs about 15x less.
+ */
+export const SEARCH_OPT = "--O1";
+
 // ===== circuit dimensions =====
 
 /**
