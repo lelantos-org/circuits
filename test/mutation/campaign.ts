@@ -164,29 +164,37 @@ export function plant(worker: Worker, mutant: Mutant): () => void {
 
 const COMPILE_TIMEOUT = 120_000;
 
-function r1csPath(worker: Worker, root: Root): string {
-    return path.join(worker.root, "build", ".precheck", root, `${root}.r1cs`);
+/**
+ * `--O2` substitutes every linear constraint away, and which signal of a sum it
+ * eliminates follows declaration order. Two wires of a sum exchanged are then
+ * an affine change of variables, not a renaming. `--O1` keeps the sum, so the
+ * renaming is also searched for there; the two levels prove the same statement.
+ */
+const RENAME_OPTS = [CIRCOM_OPT, "--O1"];
+
+function r1csPath(worker: Worker, root: Root, opt: string = CIRCOM_OPT): string {
+    return path.join(worker.root, "build", ".precheck", opt === CIRCOM_OPT ? root : `${root}${opt}`, `${root}.r1cs`);
 }
 
 /** The unmutated R1CS of `root`, kept for `provenEquivalent`. */
-function pristineR1cs(root: Root): string {
-    return path.join(WORK, `pristine-${root}.r1cs`);
+function pristineR1cs(root: Root, opt: string = CIRCOM_OPT): string {
+    return path.join(WORK, opt === CIRCOM_OPT ? `pristine-${root}.r1cs` : `pristine-${root}${opt}.r1cs`);
 }
 
-/** Compile one shipped circuit from `worker` and return the digest of its R1CS. */
-async function r1csDigest(worker: Worker, root: Root): Promise<{ digest?: string; error?: string }> {
-    const out = path.dirname(r1csPath(worker, root));
+/** Compile one shipped circuit from `worker` at `opt` and return the digest of its R1CS. */
+async function r1csDigest(worker: Worker, root: Root, opt: string = CIRCOM_OPT): Promise<{ digest?: string; error?: string }> {
+    const out = path.dirname(r1csPath(worker, root, opt));
     fs.rmSync(out, { recursive: true, force: true });
     fs.mkdirSync(out, { recursive: true });
     const exit = await run(
         "circom",
-        [path.join(worker.root, "src", `${root}.circom`), "--r1cs", CIRCOM_OPT, "-o", out, "-l", path.join(ROOT, "node_modules")],
+        [path.join(worker.root, "src", `${root}.circom`), "--r1cs", opt, "-o", out, "-l", path.join(ROOT, "node_modules")],
         worker.root,
         process.env,
         COMPILE_TIMEOUT,
     );
     if (exit.code !== 0) return { error: exit.timedOut ? "compile timed out" : tail(exit.output, 2) };
-    const bytes = fs.readFileSync(r1csPath(worker, root));
+    const bytes = fs.readFileSync(r1csPath(worker, root, opt));
     return { digest: crypto.createHash("sha256").update(bytes).digest("hex") };
 }
 
@@ -194,10 +202,12 @@ async function r1csDigest(worker: Worker, root: Root): Promise<{ digest?: string
 export async function pristineDigests(worker: Worker, roots: readonly Root[]): Promise<Map<Root, string>> {
     const digests = new Map<Root, string>();
     for (const root of roots) {
-        const { digest, error } = await r1csDigest(worker, root);
-        if (digest === undefined) throw new Error(`the unmutated ${root}.circom does not compile: ${error}`);
-        digests.set(root, digest);
-        fs.copyFileSync(r1csPath(worker, root), pristineR1cs(root));
+        for (const opt of RENAME_OPTS) {
+            const { digest, error } = await r1csDigest(worker, root, opt);
+            if (digest === undefined) throw new Error(`the unmutated ${root}.circom does not compile: ${error}`);
+            if (opt === CIRCOM_OPT) digests.set(root, digest);
+            fs.copyFileSync(r1csPath(worker, root, opt), pristineR1cs(root, opt));
+        }
     }
     return digests;
 }
@@ -239,17 +249,25 @@ export async function provenEquivalent(
         const { digest } = await r1csDigest(worker, root);
         if (digest === undefined) return null;
         if (digest === pristine.get(root)) continue;
-        const exit = await run(
-            process.execPath,
-            [path.join(ROOT, "test", "mutation", "isomorphic.ts"), pristineR1cs(root), r1csPath(worker, root)],
-            ROOT,
-            { ...process.env, NODE_OPTIONS: "--import tsx/esm" },
-            COMPILE_TIMEOUT * 5,
-        );
-        if (exit.code !== 0) return null;
-        const verdict = JSON.parse(exit.output.trim().split("\n").pop()!) as { isomorphic: boolean; reason: string };
-        if (!verdict.isomorphic) return null;
-        reasons.push(`${root}: ${verdict.reason}`);
+        let proof: string | undefined;
+        for (const opt of RENAME_OPTS) {
+            if (opt !== CIRCOM_OPT && (await r1csDigest(worker, root, opt)).digest === undefined) return null;
+            const exit = await run(
+                process.execPath,
+                [path.join(ROOT, "test", "mutation", "isomorphic.ts"), pristineR1cs(root, opt), r1csPath(worker, root, opt)],
+                ROOT,
+                { ...process.env, NODE_OPTIONS: "--import tsx/esm" },
+                COMPILE_TIMEOUT * 5,
+            );
+            if (exit.code !== 0) return null;
+            const verdict = JSON.parse(exit.output.trim().split("\n").pop()!) as { isomorphic: boolean; reason: string };
+            if (verdict.isomorphic) {
+                proof = `${verdict.reason} at ${opt}`;
+                break;
+            }
+        }
+        if (proof === undefined) return null;
+        reasons.push(`${root}: ${proof}`);
     }
     return reasons.join("; ");
 }
