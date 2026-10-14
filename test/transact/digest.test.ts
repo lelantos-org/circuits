@@ -126,4 +126,21 @@ describe("transact_4x6 / coefficient digest", function () {
         });
         expect(readOutput(w, 0)).to.not.equal(y.base);
     });
+
+    it("a withdrawal's public scalars reach y and the digest in layout order", async () => {
+        // A transfer forces public_asset_id = public_out = 0, so those two
+        // coefficients agree, and exchanging or zeroing either leaves both
+        // outputs unchanged. A withdrawal separates them; with every
+        // coefficient distinct, any transposition moves y and the digest.
+        const { tx, circuit } = ctx;
+        const w = tx.spend(
+            tx.oneRealOneDummy(1000n, ALICE_NSK),
+            [tx.note(600n, ALICE_NSK, 9n), tx.note(0n, ALICE_NSK, 11n)],
+            { publicOut: 400n, z: Z },
+        );
+        const c = coeffs(w);
+        expect(c.length).to.equal(COEFF_COUNT);
+        expect(new Set(c.map(String)).size, "every coefficient must be distinct").to.equal(COEFF_COUNT);
+        await expectWitnessPublic(circuit, w, { y: hornerEval(c, Z), digest: transactDigest(w) });
+    });
 });

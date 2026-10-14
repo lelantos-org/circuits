@@ -7,6 +7,62 @@
       "source": "pub_eq[c].in[0] <== public_asset_id;",
       "nth": 0,
       "reason": "Equivalent: IsEqual constrains in[1] - in[0] to be zero or not, which is symmetric in its two inputs."
+    },
+    {
+      "file": "lib/batch_append.circom",
+      "op": "const-tweak",
+      "variant": 0,
+      "source": "lt[k] = LessThan(COUNT_BITS + 1);",
+      "nth": 0,
+      "reason": "Equivalent: LessThan(n) is exact when both inputs are below 2^n. Here k < MAX_L and actual_count <= MAX_L, the latter enforced by Num2Bits(COUNT_BITS) on actual_count - 1, so n = COUNT_BITS + 1 and COUNT_BITS + 2 both compute k < actual_count."
+    },
+    {
+      "file": "lib/balance.circom",
+      "op": "cross-wire",
+      "variant": 0,
+      "source": "out_eq[c][j].in[0] <== out_asset[j];",
+      "nth": 0,
+      "reason": "Equivalent: IsEqual constrains in[1] - in[0] to be zero or not, which is symmetric in its two inputs."
+    },
+    {
+      "file": "lib/balance.circom",
+      "op": "cross-wire",
+      "variant": 0,
+      "source": "in_eq[c][i].in[0] <== in_asset[i];",
+      "nth": 0,
+      "reason": "Equivalent: IsEqual constrains in[1] - in[0] to be zero or not, which is symmetric in its two inputs."
+    },
+    {
+      "file": "lib/transact.circom",
+      "op": "cross-wire",
+      "variant": 0,
+      "source": "all_dummy.in[0] <== dummy_acc[N_IN];",
+      "nth": 0,
+      "reason": "Equivalent: IsEqual constrains in[1] - in[0] to be zero or not, which is symmetric in its two inputs."
+    },
+    {
+      "file": "tree_update_batch.circom",
+      "op": "loop-bound",
+      "variant": 1,
+      "source": "for (var k = 0; k < MAX_L; k++) {",
+      "nth": 3,
+      "reason": "Equivalent: the dropped iteration is slot 0, and active[0] = 1 for every actual_count in [1, MAX_L], so each (1 - active[0]) * x === 0 it removes is 0 === 0."
+    },
+    {
+      "file": "tree_update_batch.circom",
+      "op": "swap-index",
+      "variant": 0,
+      "source": "(1 - append.active[k]) * leaf_asset[k]     === 0;",
+      "nth": 0,
+      "reason": "Equivalent: on an inactive slot, (1 - active[k]) * is_deposit[k] === 0 forces is_deposit[k] = 0, and step 1's (1 - is_deposit[k]) * leaf_asset[k] === 0 then forces leaf_asset[k] = 0. The row is implied, so weakening it changes nothing."
+    },
+    {
+      "file": "tree_update_batch.circom",
+      "op": "swap-index",
+      "variant": 0,
+      "source": "(1 - append.active[k]) * leaf_public_in[k] === 0;",
+      "nth": 0,
+      "reason": "Equivalent: on an inactive slot, (1 - active[k]) * is_deposit[k] === 0 forces is_deposit[k] = 0, and step 1's (1 - is_deposit[k]) * leaf_public_in[k] === 0 then forces leaf_public_in[k] = 0. The row is implied, so weakening it changes nothing."
     }
   ]
 }

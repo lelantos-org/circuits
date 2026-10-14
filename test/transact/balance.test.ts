@@ -3,11 +3,11 @@
 
 import { expect } from "chai";
 
-import { commit, derivePk, dummyOutput, nullifier, type Note } from "../helpers";
+import { commit, derivePk, dummyInputAt, dummyOutput, nullifier, type Note } from "../helpers";
 import { expectAccepts, expectWitnessFails } from "../lib/expect";
-import { ALICE_NSK, BOB_NSK, MALLORY_NSK, TIMEOUT_CIRCUIT } from "../lib/constants";
+import { ALICE_NSK, BOB_NSK, MALLORY_NSK, N_IN, TIMEOUT_CIRCUIT } from "../lib/constants";
 import { DEFAULT_ASSET as ASSET, diversifierOf } from "../lib/transact";
-import { useTransactCircuit } from "./setup";
+import { ASSET_B, useTransactCircuit } from "./setup";
 
 describe("transact_4x6 / value balance", function () {
     this.timeout(TIMEOUT_CIRCUIT);
@@ -278,4 +278,78 @@ describe("transact_4x6 / value balance", function () {
             [tx.note(75n, ALICE_NSK, 9n, 99n), tx.note(75n, ALICE_NSK, 11n, 99n)],
         ), "per-asset conservation must reject a matched scalar total");
     });
+
+    // ===== every input slot =====
+    //
+    // DummyZeroValue, the all-dummy count and PerAssetValueBalance's candidate
+    // set are loops over input slots, and the factories above fill only slots 0
+    // and 1, real first. Each case runs once per slot, so a loop that stops
+    // early, starts late or reads slot 0 for slot i fails here.
+
+    /** Real ASSET values for the N_IN - 1 slots a case does not single out. */
+    const OTHER_VALUES = [100n, 50n, 25n];
+    const OTHER_TOTAL = OTHER_VALUES.reduce((a, b) => a + b, 0n);
+
+    before(() => {
+        expect(OTHER_VALUES.length, "one value per slot but the singled-out one").to.equal(N_IN - 1);
+    });
+
+    /** Real inputs in every slot but `i`, which holds a dummy carrying `value`. */
+    function dummyAt(i: number, value: bigint) {
+        const { tx } = ctx;
+        const scenario = tx.nRealInputs(OTHER_VALUES, ALICE_NSK);
+        const dummy = dummyInputAt(tx.P, tx.depth, 0x5000n + BigInt(i));
+        if (value !== 0n) {
+            // Re-sealed, so only DummyZeroValue can object to it.
+            dummy.asset = ASSET;
+            dummy.value = value;
+            dummy.cm = commit(tx.P, dummy);
+            dummy.nf = nullifier(tx.P, dummy.nsk, dummy.rho, dummy.cm);
+        }
+        scenario.inputs.splice(i, 0, dummy);
+        return scenario;
+    }
+
+    /** Real inputs in every slot; slot `i` alone holds ASSET_B. */
+    function assetBAt(i: number) {
+        const { tx } = ctx;
+        const notes = OTHER_VALUES.map((v, k) => tx.note(v, ALICE_NSK, BigInt(k + 1) * 1_000n));
+        notes.splice(i, 0, tx.note(40n, ALICE_NSK, 0x6000n, ASSET_B));
+        return tx.plant(notes, ALICE_NSK);
+    }
+
+    for (let i = 0; i < N_IN; i++) {
+        it(`a dummy at input slot ${i}, real inputs elsewhere, is accepted`, async () => {
+            const { tx, circuit } = ctx;
+            await expectAccepts(circuit, tx.spend(dummyAt(i, 0n), [tx.note(OTHER_TOTAL, ALICE_NSK, 9n)]));
+        });
+
+        it(`FAILS when the dummy at input slot ${i} has nonzero value`, async () => {
+            const { tx, circuit } = ctx;
+            await expectWitnessFails(
+                circuit,
+                tx.spend(dummyAt(i, 50n), [tx.note(OTHER_TOTAL + 50n, ALICE_NSK, 9n)]),
+                `DummyZeroValue must pin dummy slot ${i}'s value to 0`,
+            );
+        });
+
+        it(`an asset only input slot ${i} carries is accepted when an output takes it`, async () => {
+            const { tx, circuit } = ctx;
+            await expectAccepts(circuit, tx.spend(assetBAt(i), [
+                tx.note(OTHER_TOTAL, ALICE_NSK, 9n),
+                tx.note(40n, ALICE_NSK, 11n, ASSET_B),
+            ]));
+        });
+
+        it(`FAILS when an asset only input slot ${i} carries goes nowhere`, async () => {
+            // Every other asset balances. in_asset[i] is the only candidate
+            // naming ASSET_B, so only its row of the sweep rejects.
+            const { tx, circuit } = ctx;
+            await expectWitnessFails(
+                circuit,
+                tx.spend(assetBAt(i), [tx.note(OTHER_TOTAL, ALICE_NSK, 9n)]),
+                `in_asset[${i}] must be a conservation candidate`,
+            );
+        });
+    }
 });
